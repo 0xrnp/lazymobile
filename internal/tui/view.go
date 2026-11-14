@@ -24,7 +24,8 @@ Logs
   /   filter by text            L   minimum level
   p   pause or resume           c   clear
   S   save to a file            x   stop the stream
-  r   restart the stream
+  r   restart the stream        w   wrap long lines
+  enter  the selected line in full, y copies it
 
 Builds (inside an Expo project)
   enter load, then details      r   refresh
@@ -34,6 +35,8 @@ Builds (inside an Expo project)
 Everywhere
   tab   next pane               ?   this help
   + -   widen or narrow devices z   zoom the focused pane
+  mouse wheel scrolls the pane under it, a click focuses it,
+  sliding sideways (or Shift with the wheel) scrolls the log sideways
   q     quit
 
 Emulators and simulators keep running after you quit.`
@@ -112,6 +115,7 @@ func (m *Model) resize(step int) {
 func (m *Model) View() tea.View {
 	view := tea.NewView(m.render())
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = "lazymobile"
 	return view
 }
@@ -150,7 +154,7 @@ func (m *Model) panes(l layout) []string {
 		}
 	}
 	if l.logsWidth > 0 {
-		right = box(m.log.title(), m.log.lines(l.logsWidth-2, l.bodyHeight-2), l.logsWidth, l.bodyHeight, m.focus == paneLogs)
+		right = box(m.log.title(), m.log.lines(l.logsWidth-2, l.bodyHeight-2, m.focus == paneLogs), l.logsWidth, l.bodyHeight, m.focus == paneLogs)
 	}
 	body := make([]string, l.bodyHeight)
 	for i := range body {
@@ -169,7 +173,7 @@ func (m *Model) hints() string {
 	case m.modal != nil:
 		return ""
 	case m.focus == paneLogs && m.log.opened:
-		return "/ filter  L level  p pause  c clear  S save  x stop  r restart  G follow  tab devices  ? help  q quit"
+		return "enter line  y copy  / filter  L level  w wrap  p pause  c clear  S save  x stop  r restart  G follow  tab devices  ? help  q quit"
 	case m.focus == paneLogs:
 		return "tab devices  ? help  q quit"
 	case m.focus == paneBuilds && !m.build.asked:
@@ -240,6 +244,42 @@ func (m *Model) deviceLines(width, height int) []string {
 	if len(lines) > height && height > 0 {
 		first := min(max(cursorLine-height/2, 0), len(lines)-height)
 		lines = lines[first : first+height]
+	}
+	// The selected device's details go at the bottom, when there is room for them.
+	if d, ok := m.selected(); ok {
+		details := deviceDetails(d, width)
+		if len(lines)+1+len(details) <= height {
+			for len(lines)+len(details) < height {
+				lines = append(lines, "")
+			}
+			lines = append(lines, details...)
+		}
+	}
+	return lines
+}
+
+// deviceDetails describes a device in a few rows, under a rule.
+func deviceDetails(d device.Device, width int) []string {
+	kind := map[device.Kind]string{device.Simulator: "simulator", device.Emulator: "emulator", device.Physical: "device"}[d.Kind]
+	platform := map[device.Platform]string{device.IOS: "iOS", device.Android: "Android"}[d.Platform]
+	rows := [][2]string{{"Id", d.TargetID() + "  (y copies)"}}
+	if d.TargetID() != d.ID {
+		rows = append(rows, [2]string{"AVD", d.ID})
+	}
+	about := platform + " " + kind
+	if d.OSVersion != "" {
+		about += ", " + d.OSLabel()
+	}
+	rows = append(rows, [2]string{"Kind", about})
+	if d.Model != "" {
+		rows = append(rows, [2]string{"Model", d.Model})
+	}
+	if d.Transport != "" && d.Kind == device.Physical {
+		rows = append(rows, [2]string{"Via", d.Transport})
+	}
+	lines := []string{" " + dim.Render(strings.Repeat("─", max(width-2, 0)))}
+	for _, row := range rows {
+		lines = append(lines, " "+dim.Render(fit(row[0], 6))+" "+fit(row[1], max(width-9, 1)))
 	}
 	return lines
 }

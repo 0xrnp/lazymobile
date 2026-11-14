@@ -44,11 +44,12 @@ Early release. What has been run, and what has not:
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
 | Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
-| Erase, create, delete, and anything on iOS simulators | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
+| iOS simulator boot, shut down, installing an app, and both kinds of logs | A real simulator on Xcode 27.2, with a real React Native app |
+| Erase, create and delete simulators | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
 | Expo builds pane | Listing, details, and downloading and installing an Android build on an emulator, with eas-cli 24.7 and a real Expo project. Installing an iOS simulator build, and starting or cancelling builds, have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone. Its logs have only been tried with fake tools |
 | Android phones (USB, Wi-Fi), `idevicesyslog` | Fake tools only. No real device has been tried |
-| Linux | Cross-compiled, and the suite runs in CI. Not tried by hand |
+| Linux | Cross-compiled, and the suite runs in CI. Installed with Homebrew in a Linux container (arm64). The dashboard has not been tried on Linux by hand |
 
 If something fails for you, please
 [open an issue](https://github.com/0xrnp/lazymobile/issues/new/choose) with the output of
@@ -103,6 +104,7 @@ Logs:
 | `G` | Jump to the end and follow |
 | `g` | First line |
 | `h` `l`, `0` | Scroll sideways, reset |
+| `w` | Wrap long lines, to read them in full |
 | `/` | Filter by text (empty clears) |
 | `L` | Minimum level |
 | `p` | Pause or resume (nothing is lost) |
@@ -124,6 +126,9 @@ Builds (inside an Expo project):
 
 Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
 shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.
+The mouse wheel scrolls the pane under it, and a click focuses a pane. Sliding sideways on a
+trackpad (or Shift with the wheel) scrolls the log sideways. To select text with the
+mouse, hold Option (macOS) or Shift while dragging.
 Simulators and emulators keep running after you quit.
 
 What each device offers for logs:
@@ -200,42 +205,27 @@ repository root, and then in `apps/*/`.
 
 ## In Neovim
 
-lazymobile is a normal terminal program, so it runs in a floating terminal the way lazygit does.
-Without a plugin (Neovim 0.10 or newer):
+This repository is also a Neovim plugin (0.10 or newer). It opens lazymobile in a floating
+terminal, the way lazygit.nvim does. With lazy.nvim:
 
 ```lua
-vim.keymap.set("n", "<leader>m", function()
-  local buf = vim.api.nvim_create_buf(false, true)
-  local width = math.floor(vim.o.columns * 0.9)
-  local height = math.floor(vim.o.lines * 0.9)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    style = "minimal",
-    border = "rounded",
-    width = width,
-    height = height,
-    row = math.floor((vim.o.lines - height) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-  })
-  local function close()
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
-    end
-    if vim.api.nvim_buf_is_valid(buf) then
-      vim.api.nvim_buf_delete(buf, { force = true })
-    end
-  end
-  if vim.fn.has("nvim-0.11") == 1 then
-    vim.fn.jobstart({ "lazymobile" }, { term = true, on_exit = close })
-  else
-    vim.fn.termopen({ "lazymobile" }, { on_exit = close })
-  end
-  vim.cmd.startinsert()
-end, { desc = "lazymobile" })
+{
+  "0xrnp/lazymobile",
+  cmd = "Lazymobile",
+  keys = { { "<leader>m", "<cmd>Lazymobile<cr>", desc = "lazymobile" } },
+  opts = {}, -- optional: { cmd = { "lazymobile", "--keep-simulator-app" }, width = 0.9, height = 0.9, border = "rounded" }
+}
 ```
 
-If you already use a terminal plugin (snacks.nvim, toggleterm.nvim and others), open
-`lazymobile` in its floating terminal instead.
+The plugin only opens the program, so install the `lazymobile` binary as well (see Install).
+
+`:Lazymobile` opens it in Neovim's current folder, so inside an Expo project the builds pane is
+there. `q` quits it and closes the window. To get back to Neovim while it keeps running (a log
+stream keeps going), press `<C-\><C-n>` and run `:Lazymobile` again; the next `:Lazymobile`
+brings it back.
+
+If you map `<Esc>` in terminal mode, lazymobile does not receive it. Its windows also close with
+`ctrl+c`.
 
 ## Troubleshooting
 

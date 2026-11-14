@@ -686,6 +686,186 @@ func (h *harness) emit(lines ...logs.Line) {
 	handlers[len(handlers)-1].Lines(lines)
 }
 
+func TestLongLogLinesCanBeWrapped(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(logs.Line{Text: "start " + strings.Repeat("x", 100) + " end-of-line", Level: logs.Info})
+	h.wantNoScreen("end-of-line")
+	h.wantScreen("long lines cut: slide or h l to scroll")
+
+	h.press("w")
+	h.wantScreen("end-of-line")
+	h.wantNoScreen("long lines cut")
+	for _, line := range strings.Split(h.screen(), "\n") {
+		if w := ansi.StringWidth(line); w != 120 {
+			t.Fatalf("a line is %d columns wide, want 120: %q", w, line)
+		}
+	}
+
+	// While following, the newest line stays in view however many rows the lines above take.
+	for i := range 40 {
+		h.emit(logs.Line{Text: fmt.Sprintf("%d %s", i, strings.Repeat("y", 100)), Level: logs.Info})
+	}
+	h.emit(logs.Line{Text: "newest", Level: logs.Info})
+	h.wantScreen("newest")
+}
+
+func TestASelectedLogLineOpensInFullWithTheLinesThatBelongToIt(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(
+		logs.Line{Text: "E crash: something broke " + strings.Repeat("z", 90) + " tail-of-message", Level: logs.Error},
+		logs.Line{Text: "    at com.example.Main.run(Main.java:12)"},
+		logs.Line{Text: "I after", Level: logs.Info},
+	)
+	// k moves the selection up from the newest line, to the stack trace line.
+	h.press("k")
+	if h.m.log.follow {
+		t.Fatal("the log still follows after k")
+	}
+	h.press("enter")
+	window := h.window()
+	for _, want := range []string{"crash: something broke", "tail-of-message", "Main.java:12"} {
+		if !strings.Contains(window, want) {
+			t.Errorf("the window should show %q:\n%s", want, window)
+		}
+	}
+	if strings.Contains(window, "I after") {
+		t.Errorf("the next entry was included:\n%s", window)
+	}
+	h.press("esc")
+
+	_, cmd := h.m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil {
+		t.Fatal("y gave nothing to copy")
+	}
+	if copied := fmt.Sprint(cmd()); !strings.Contains(copied, "crash: something broke") || !strings.Contains(copied, "Main.java:12") {
+		t.Errorf("copied %q", copied)
+	}
+	h.wantScreen("Copied the selected log line")
+
+	// The selection stays in view when the pane gets shorter, and wrapping is kept for a new stream.
+	h.press("g")
+	for i := range 30 {
+		h.emit(logs.Line{Text: fmt.Sprintf("filler %02d", i), Level: logs.Info})
+	}
+	// Ten lines down from the first: the crash, its trace and "I after" come before filler 00.
+	h.press("j", "j", "j", "j", "j", "j", "j", "j", "j", "j")
+	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 10})
+	h.wantScreen("filler 07")
+	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	h.press("w", "r")
+	if !h.m.log.wrap {
+		t.Error("wrapping was turned off by restarting the stream")
+	}
+	h.press("w")
+
+	// Back at the newest line, following starts again.
+	h.press("j", "j")
+	if !h.m.log.follow {
+		t.Error("the log does not follow after reaching the newest line")
+	}
+}
+
+func TestAnIOSSystemLogStartsAtInfoUntilALevelIsChosen(t *testing.T) {
+	h := start(t, iphone, pixel)
+	h.selectDevice(iphone)
+	h.press("l", "enter")
+	h.typeText("com.example.app")
+	h.press("enter")
+	h.wantCalls("logs SIM-1 mode=system app=com.example.app", 1)
+	if h.m.log.level != logs.Info {
+		t.Fatalf("level = %v, want info", h.m.log.level)
+	}
+	h.emit(logs.Line{Text: "Db framework noise", Level: logs.Debug}, logs.Line{Text: "Df app message", Level: logs.Info})
+	h.wantNoScreen("framework noise")
+	h.wantScreen("app message", "1 hidden")
+
+	// Android starts with everything.
+	h.press("tab")
+	h.openLogs(pixel, "")
+	if h.m.log.level != logs.NoLevel {
+		t.Fatalf("logcat level = %v, want none", h.m.log.level)
+	}
+
+	// A level chosen by hand is kept for the next stream.
+	h.press("L")
+	h.press("tab")
+	h.openLogs(pixel, "")
+	if h.m.log.level != logs.Verbose {
+		t.Fatalf("level after L = %v, want verbose", h.m.log.level)
+	}
+}
+
+func TestTheSelectedDeviceIsDescribedUnderTheList(t *testing.T) {
+	h := start(t, pixel, iphone)
+	h.selectDevice(pixel)
+	h.wantScreen("emulator-5554  (y copies)", "AVD    Pixel_9a", "Android emulator")
+	h.selectDevice(iphone)
+	h.wantScreen("SIM-1  (y copies)", "iOS simulator")
+	h.wantNoScreen("AVD    ")
+}
+
+func TestSlidingSidewaysScrollsTheLogUpToItsWidestLine(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(logs.Line{Text: "begin " + strings.Repeat("x", 100) + " finish", Level: logs.Info})
+	l := h.m.layout()
+	x := l.devicesWidth + 5
+	slide := func(button tea.MouseButton, mod tea.KeyMod, times int) {
+		for range times {
+			h.m.Update(tea.MouseWheelMsg{X: x, Y: 5, Button: button, Mod: mod})
+		}
+	}
+	slide(tea.MouseWheelRight, 0, 100)
+	widest := len("begin ") + 100 + len(" finish")
+	if want := widest - (l.logsWidth - 2); h.m.log.left != want {
+		t.Fatalf("left = %d after sliding to the end, want %d", h.m.log.left, want)
+	}
+	h.wantScreen("finish")
+	h.wantNoScreen("begin")
+
+	// Shift with the normal wheel slides too, for terminals without sideways events.
+	slide(tea.MouseWheelUp, tea.ModShift, 100)
+	if h.m.log.left != 0 {
+		t.Fatalf("left = %d after sliding back", h.m.log.left)
+	}
+	h.wantScreen("begin")
+
+	h.press("w")
+	slide(tea.MouseWheelRight, 0, 3)
+	if h.m.log.left != 0 {
+		t.Errorf("a wrapped log slid sideways to %d", h.m.log.left)
+	}
+}
+
+func TestTheMouseWheelScrollsThePaneUnderIt(t *testing.T) {
+	h := start(t, pixel, iphone)
+	h.openLogs(pixel, "")
+	for i := range 100 {
+		h.emit(logs.Line{Text: fmt.Sprintf("line %d", i), Level: logs.Info})
+	}
+	logsX := h.m.layout().devicesWidth + 5
+	h.m.Update(tea.MouseWheelMsg{X: logsX, Y: 5, Button: tea.MouseWheelUp})
+	if h.m.log.follow {
+		t.Fatal("the log still follows after scrolling up")
+	}
+	h.wantScreen("scrolled")
+
+	// Over the devices it moves the selection, and the focus stays on the logs.
+	cursor := h.m.cursor
+	_, cmd := h.m.Update(tea.MouseWheelMsg{X: 5, Y: 3, Button: tea.MouseWheelUp})
+	h.run(cmd)
+	if h.m.cursor != cursor-1 || h.m.focus != paneLogs {
+		t.Fatalf("cursor %d → %d, focus %v", cursor, h.m.cursor, h.m.focus)
+	}
+
+	h.m.Update(tea.MouseClickMsg{X: 5, Y: 3, Button: tea.MouseLeft})
+	if h.m.focus != paneDevices {
+		t.Fatalf("a click on the devices left the focus on %v", h.m.focus)
+	}
+}
+
 func TestLogsNeedARunningDevice(t *testing.T) {
 	h := start(t, ipad)
 	h.press("l")

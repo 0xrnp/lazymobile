@@ -226,6 +226,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.modalKey(msg)
 		}
 		return m, m.key(msg)
+	case tea.MouseWheelMsg:
+		if m.modal == nil {
+			return m, m.wheel(msg)
+		}
+	case tea.MouseClickMsg:
+		if m.modal == nil && msg.Button == tea.MouseLeft {
+			if p, ok := m.paneAt(msg.X, msg.Y); ok {
+				m.focus = p
+			}
+		}
 	case tea.PasteMsg:
 		if m.modal != nil && m.modal.kind == modalPrompt {
 			m.modal.value += strings.TrimSpace(firstLine(msg.Content))
@@ -429,6 +439,63 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 	return m.deviceKey(key)
 }
 
+// paneAt is the pane drawn at a screen cell.
+func (m *Model) paneAt(x, y int) (pane, bool) {
+	l := m.layout()
+	switch {
+	case y >= l.bodyHeight:
+		return 0, false
+	case x < l.devicesWidth && y >= l.bodyHeight-l.buildsHeight:
+		return paneBuilds, true
+	case x < l.devicesWidth:
+		return paneDevices, true
+	case l.logsWidth > 0:
+		return paneLogs, true
+	}
+	return 0, false
+}
+
+// wheel scrolls the pane under the pointer, without moving the focus.
+func (m *Model) wheel(msg tea.MouseWheelMsg) tea.Cmd {
+	p, ok := m.paneAt(msg.X, msg.Y)
+	if !ok {
+		return nil
+	}
+	button := msg.Button
+	// Terminals without sideways wheel events send Shift with the normal wheel instead.
+	if msg.Mod.Contains(tea.ModShift) {
+		button = map[tea.MouseButton]tea.MouseButton{tea.MouseWheelUp: tea.MouseWheelLeft, tea.MouseWheelDown: tea.MouseWheelRight}[button]
+	}
+	step := 0
+	switch button {
+	case tea.MouseWheelUp:
+		step = -1
+	case tea.MouseWheelDown:
+		step = 1
+	case tea.MouseWheelLeft, tea.MouseWheelRight:
+		// Sliding sideways moves the log view, which is the only pane wider than its window.
+		if p == paneLogs && m.log.opened && !m.log.wrap {
+			delta := map[tea.MouseButton]int{tea.MouseWheelLeft: -4, tea.MouseWheelRight: 4}[button]
+			l := m.layout()
+			m.log.slide(delta, l.logsWidth-2, max(l.logRows, 1))
+		}
+		return nil
+	default:
+		return nil
+	}
+	key := map[int]string{-1: "up", 1: "down"}[step]
+	switch p {
+	case paneLogs:
+		if m.log.opened {
+			m.log.scroll(3*step, max(m.layout().logRows, 1))
+		}
+		return nil
+	case paneBuilds:
+		return m.buildKey(key)
+	}
+	return m.deviceKey(key)
+}
+
 // cycle moves the focus to the next or previous pane.
 func (m *Model) cycle(step int) {
 	panes := []pane{paneDevices, paneLogs}
@@ -553,15 +620,30 @@ func (m *Model) logKey(key string) tea.Cmd {
 	case "pgdown", "ctrl+d", "space":
 		v.scroll(rows/2, rows)
 	case "g", "home":
-		v.follow, v.top = false, 0
+		v.first()
 	case "G", "end":
 		v.follow = true
+	case "enter":
+		entry := v.entry()
+		if len(entry) == 0 {
+			return nil
+		}
+		m.modal = &modal{kind: modalMessage, title: "Log line", body: entryText(entry)}
+	case "y":
+		entry := v.entry()
+		if len(entry) == 0 {
+			return nil
+		}
+		m.setNote("Copied the selected log line", false)
+		return tea.SetClipboard(entryText(entry))
 	case "left", "h":
-		v.left = max(v.left-8, 0)
+		v.slide(-8, m.layout().logsWidth-2, rows)
 	case "right", "l":
-		v.left += 8
+		v.slide(8, m.layout().logsWidth-2, rows)
 	case "0":
 		v.left = 0
+	case "w":
+		v.wrap = !v.wrap
 	case "p":
 		v.paused = !v.paused
 		if !v.paused {
@@ -571,6 +653,7 @@ func (m *Model) logKey(key string) tea.Cmd {
 		v.clear()
 	case "L":
 		v.level = (v.level + 1) % (logs.Fatal + 1)
+		v.levelChosen = true
 		v.rebuild()
 	case "/", "f":
 		m.modal = &modal{
@@ -661,7 +744,11 @@ func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
 		m.log.session.Stop()
 	}
 	id := m.log.id + 1
-	m.log = logView{id: id, opened: true, spec: spec, follow: true, level: m.log.level, filter: m.log.filter}
+	level := m.log.level
+	if !m.log.levelChosen {
+		level = defaultLevel(spec)
+	}
+	m.log = logView{id: id, opened: true, spec: spec, follow: true, level: level, levelChosen: m.log.levelChosen, filter: m.log.filter, wrap: m.log.wrap}
 	send := m.send
 	session := m.backend.StartLogs(m.ctx, spec, logs.Handlers{
 		Lines:  func(lines []logs.Line) { send(logLinesMsg{id, lines}) },
@@ -670,6 +757,23 @@ func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
 	m.log.session = session
 	m.focus = paneLogs
 	return func() tea.Msg { return logEndMsg{id, session.Wait()} }
+}
+
+// defaultLevel is the level a stream starts at until one is chosen with L. An iOS simulator's
+// system log is mostly debug messages from the system frameworks, so it starts at info.
+func defaultLevel(spec logs.Spec) logs.Level {
+	if spec.Device.Platform == device.IOS && spec.Mode == logs.System {
+		return logs.Info
+	}
+	return logs.NoLevel
+}
+
+func entryText(lines []logs.Line) string {
+	texts := make([]string, len(lines))
+	for i, line := range lines {
+		texts[i] = line.Text
+	}
+	return strings.Join(texts, "\n")
 }
 
 func (m *Model) saveLog() tea.Cmd {
