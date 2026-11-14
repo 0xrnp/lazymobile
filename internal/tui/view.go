@@ -33,6 +33,7 @@ Builds (inside an Expo project)
 
 Everywhere
   tab   next pane               ?   this help
+  + -   widen or narrow devices z   zoom the focused pane
   q     quit
 
 Emulators and simulators keep running after you quit.`
@@ -43,6 +44,10 @@ const (
 	minHeight = 10
 	// Below this width only the focused pane is shown.
 	splitWidth = 100
+	// resizeStep is how many columns + and - move the line between the panes.
+	resizeStep = 4
+	// minPaneWidth keeps both panes usable however far the line is moved.
+	minPaneWidth = 30
 )
 
 type layout struct {
@@ -58,9 +63,10 @@ type layout struct {
 
 func (m *Model) layout() layout {
 	l := layout{bodyHeight: max(m.height-2, 0)}
+	split := m.width >= splitWidth && !m.zoomed
 	switch {
-	case m.width >= splitWidth:
-		l.devicesWidth = min(max(m.width*45/100, 48), 64)
+	case split:
+		l.devicesWidth = m.devicesWidth()
 		l.logsWidth = m.width - l.devicesWidth
 	case m.focus == paneLogs:
 		l.logsWidth = m.width
@@ -69,7 +75,7 @@ func (m *Model) layout() layout {
 	}
 	if m.builds != nil && l.devicesWidth > 0 {
 		switch {
-		case m.width >= splitWidth:
+		case split:
 			l.buildsHeight = min(max(l.bodyHeight*2/5, 5), l.bodyHeight-5)
 		case m.focus == paneBuilds:
 			// In one-pane mode the builds take the whole screen.
@@ -79,6 +85,27 @@ func (m *Model) layout() layout {
 	// Two border rows and one status row are not log lines.
 	l.logRows = max(l.bodyHeight-3, 0)
 	return l
+}
+
+// defaultDevicesWidth is the devices pane's width beside the logs before it is resized.
+func (m *Model) defaultDevicesWidth() int {
+	return min(max(m.width*45/100, 48), 64)
+}
+
+// devicesWidth is the devices pane's width beside the logs.
+func (m *Model) devicesWidth() int {
+	return min(max(m.defaultDevicesWidth()+m.widen, minPaneWidth), m.width-minPaneWidth)
+}
+
+// resize moves the line between the devices and the logs by step columns.
+func (m *Model) resize(step int) {
+	if m.width < splitWidth || m.zoomed {
+		m.setNote("Only one pane is shown. Press z to show both, or widen the terminal", false)
+		return
+	}
+	m.widen += step
+	// Kept within what the screen allows, so moving back takes effect at once.
+	m.widen = m.devicesWidth() - m.defaultDevicesWidth()
 }
 
 // View implements tea.Model.
@@ -219,7 +246,8 @@ func (m *Model) deviceLines(width, height int) []string {
 
 func (m *Model) deviceRow(d device.Device, width int, selected bool) string {
 	state := strings.ReplaceAll(string(d.State), "_", " ")
-	doing, busy := m.busy[d.Key()]
+	doing := m.doing(d.Key())
+	busy := doing != ""
 	if busy {
 		state = strings.ToLower(doing)
 	}

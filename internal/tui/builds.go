@@ -218,7 +218,7 @@ func (m *Model) installBuild(b eas.Build) tea.Cmd {
 		kind: modalChoice, title: "Install on which device?", items: names,
 		onChoose: func(m *Model, index int) tea.Cmd {
 			d := targets[index]
-			return m.act(d, "Installing on", "Installed the build on", func(ctx context.Context) error {
+			return m.act(d, "Installing on", "Installed the build on", nil, func(ctx context.Context) error {
 				path, err := m.builds.Download(ctx, b.ID)
 				if err != nil {
 					return err

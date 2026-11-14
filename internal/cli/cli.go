@@ -19,6 +19,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/eas"
+	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 )
@@ -38,7 +39,7 @@ Usage:
   lazymobile                       open the dashboard
   lazymobile list [--json]         list every device
   lazymobile boot <device> [--cold] [--wipe --yes] [--wait] [--no-window]
-  lazymobile shutdown <device>
+  lazymobile shutdown <device> [--keep-simulator-app]
   lazymobile erase <device> --yes  erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes
   lazymobile install <device> <path>   an .apk, or an .app folder for a simulator
@@ -47,6 +48,10 @@ Usage:
   lazymobile builds [--json] [--limit n]   Expo (EAS) builds of the project in this folder
   lazymobile doctor [--json]       what is installed, what is missing, and how to fix it
   lazymobile version
+
+Once no simulator is running, Simulator or DeviceHub is quit, which closes the window it keeps
+open for a simulator that shut down. --keep-simulator-app leaves it open. The dashboard takes
+--no-window and --keep-simulator-app too.
 
 <device> is an id, an adb serial, a name, or a unique part of a name.
 Commands that erase or delete data need --yes.
@@ -122,7 +127,7 @@ func (a *App) run(ctx context.Context, args []string) error {
 	case "boot":
 		return a.boot(ctx, rest)
 	case "shutdown":
-		return a.simple(ctx, rest, "shutdown", "Shut down", a.Manager.Shutdown)
+		return a.shutdown(ctx, rest)
 	case "erase":
 		return a.destructive(ctx, rest, "erase", "Erased", a.Manager.Erase)
 	case "delete":
@@ -142,12 +147,14 @@ func (a *App) run(ctx context.Context, args []string) error {
 		// Flags without a command belong to the dashboard.
 		fs := flag.NewFlagSet("lazymobile", flag.ContinueOnError)
 		noWindow := fs.Bool("no-window", false, "")
+		keepApp := fs.Bool("keep-simulator-app", false, "")
 		if positional, err := parse(fs, args); err != nil {
 			return err
 		} else if len(positional) > 0 {
 			return usageError{"unknown command: " + positional[0]}
 		}
 		a.Manager.OpenWindow = !*noWindow
+		a.Manager.QuitSimulatorApp = !*keepApp
 		return a.Dashboard(ctx, a.Manager)
 	}
 	return usageError{"unknown command: " + command}
@@ -235,15 +242,23 @@ func (a *App) boot(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (a *App) simple(ctx context.Context, args []string, name, done string, act func(context.Context, device.Device) error) error {
-	d, err := a.one(ctx, flag.NewFlagSet(name, flag.ContinueOnError), args, name)
+func (a *App) shutdown(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("shutdown", flag.ContinueOnError)
+	keepApp := fs.Bool("keep-simulator-app", false, "")
+	d, err := a.one(ctx, fs, args, "shutdown")
 	if err != nil {
 		return err
 	}
-	if err := act(ctx, d); err != nil {
+	a.Manager.QuitSimulatorApp = !*keepApp
+	err = a.Manager.Shutdown(ctx, d)
+	var notQuit *ios.AppNotQuitError
+	if err != nil && !errors.As(err, &notQuit) {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "%s %s\n", done, d.Name)
+	fmt.Fprintf(a.Stdout, "Shut down %s\n", d.Name)
+	if notQuit != nil {
+		fmt.Fprintf(a.Stderr, "warning: %s\n", notQuit)
+	}
 	return nil
 }
 

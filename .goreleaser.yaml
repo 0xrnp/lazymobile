@@ -20,5 +20,26 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Publishes a cask to github.com/0xrnp/homebrew-tap, so `brew install 0xrnp/tap/lazymobile` works.
+# The release workflow passes a token that can write to that repository.
+homebrew_casks:
+  - name: lazymobile
+    binaries: [lazymobile]
+    homepage: https://github.com/0xrnp/lazymobile
+    description: Terminal dashboard for iOS simulators, Android emulators, phones and their logs
+    license: MIT
+    repository:
+      owner: 0xrnp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_msg_template: "lazymobile {{ .Tag }}"
+    # The binary is not signed, so macOS would refuse to run it after a download.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/lazymobile"]
+          end
+
 changelog:
   use: github-native

@@ -43,9 +43,9 @@ Early release. What has been run, and what has not:
 | --- | --- |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
-| Android emulator logs (`logcat`) | A real emulator on macOS |
-| Boot, shut down, erase, create, delete, iOS logs | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
-| Expo builds pane | Fake `eas` only, written against the output of eas-cli 24. Not yet run against a real Expo account |
+| Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
+| Erase, create, delete, and anything on iOS simulators | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
+| Expo builds pane | Listing, details, and downloading and installing an Android build on an emulator, with eas-cli 24.7 and a real Expo project. Installing an iOS simulator build, and starting or cancelling builds, have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone. Its logs have only been tried with fake tools |
 | Android phones (USB, Wi-Fi), `idevicesyslog` | Fake tools only. No real device has been tried |
 | Linux | Cross-compiled, and the suite runs in CI. Not tried by hand |
@@ -55,6 +55,12 @@ If something fails for you, please
 `lazymobile doctor`.
 
 ## Install
+
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```sh
+brew install 0xrnp/tap/lazymobile
+```
 
 With Go 1.26.7 or newer:
 
@@ -116,8 +122,9 @@ Builds (inside an Expo project):
 | `x` | Cancel a build that is waiting or running. Asks first |
 | `r` | Refresh |
 
-Everywhere: `tab` moves to the next pane, `?` shows the keys, `q` quits. Simulators and emulators
-keep running after you quit.
+Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
+shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.
+Simulators and emulators keep running after you quit.
 
 What each device offers for logs:
 
@@ -152,6 +159,7 @@ lazymobile boot "Pixel 9a" --cold --wait
 lazymobile boot "Pixel 9a" --wipe --yes
 lazymobile boot "iPhone 17" --no-window
 lazymobile shutdown "Pixel 9a"
+lazymobile shutdown "iPhone 17" --keep-simulator-app
 lazymobile erase "iPhone 17" --yes
 lazymobile delete "iPhone 17" --yes
 lazymobile install "Pixel 9a" ./app.apk
@@ -238,11 +246,19 @@ Run `lazymobile doctor` first.
 - **Linux: "no permissions"**: install udev rules for Android devices (`android-udev-rules`).
 - **Simulators stop when DeviceHub quits (Xcode 27)**: that is DeviceHub's "Stop simulators on
   quit" setting. Turn it off in DeviceHub's settings.
+- **Simulator or DeviceHub quits after a simulator shuts down**: once no simulator is running,
+  lazymobile quits them, which closes the window they keep open for a shut-down simulator. macOS
+  asks once whether your terminal may control them. To keep them open, start lazymobile with
+  `--keep-simulator-app` (the dashboard and `shutdown` both take it).
 - **iPhone shows "disconnected"**: connect it once by cable, trust the computer, and turn on
   Developer Mode in Settings > Privacy & Security.
 - **Creating an Android emulator fails about Java**: install a JDK 17 or newer, or set
   `JAVA_HOME`.
 - **Builds pane says you are not logged in**: run `eas login`.
+- **Builds pane says the app config could not be loaded**: `eas` never reads `.env` files. If
+  your `app.config` requires variables from `.env`, set them in your shell, or put them in the
+  command in `.lazymobile.json`, for example
+  `["env", "EXPO_PUBLIC_API_URL=https://example.com", "npx", "eas"]`.
 - **Copy does nothing**: copying uses the terminal's clipboard support (OSC 52). In tmux, turn on
   `set -g set-clipboard on`.
 

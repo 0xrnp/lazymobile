@@ -469,25 +469,196 @@ func TestNarrowTerminalShowsOnePaneAtATime(t *testing.T) {
 	h.wantNoScreen("iPhone 17")
 }
 
+func TestPlusAndMinusMoveTheLineBetweenThePanes(t *testing.T) {
+	h := start(t, iphone)
+	before := h.m.layout().devicesWidth
+	h.press("+", "+")
+	if got := h.m.layout().devicesWidth; got != before+2*resizeStep {
+		t.Fatalf("devices width after + +: got %d, want %d", got, before+2*resizeStep)
+	}
+	h.press("-", "-", "-")
+	if got := h.m.layout().devicesWidth; got != before-resizeStep {
+		t.Fatalf("devices width after - - -: got %d, want %d", got, before-resizeStep)
+	}
+
+	// Past the limit the logs keep their minimum width, and one - moves the line back at once.
+	for range 40 {
+		h.press("+")
+	}
+	l := h.m.layout()
+	if l.logsWidth != minPaneWidth || l.devicesWidth+l.logsWidth != 120 {
+		t.Fatalf("widest devices pane: %+v", l)
+	}
+	h.press("-")
+	if got := h.m.layout().logsWidth; got != minPaneWidth+resizeStep {
+		t.Fatalf("logs width after one -: got %d, want %d", got, minPaneWidth+resizeStep)
+	}
+	for _, line := range strings.Split(h.screen(), "\n") {
+		if w := ansi.StringWidth(line); w != 120 {
+			t.Fatalf("a line is %d columns wide, want 120: %q", w, line)
+		}
+	}
+}
+
+func TestZoomShowsOnlyTheFocusedPane(t *testing.T) {
+	h := start(t, iphone)
+	h.press("z")
+	h.wantScreen("iPhone 17")
+	h.wantNoScreen("Select a running device")
+	h.press("tab")
+	h.wantScreen("Select a running device")
+	h.wantNoScreen("iPhone 17")
+	h.press("z")
+	h.wantScreen("iPhone 17", "Select a running device")
+
+	h.press("z", "+")
+	h.wantScreen("Press z to show both")
+}
+
+// tick advances the clock and delivers the dashboard's one-second tick.
+func (h *harness) tick(after time.Duration) {
+	h.t.Helper()
+	h.clock = h.clock.Add(after)
+	_, cmd := h.m.Update(tickMsg{})
+	h.run(cmd)
+}
+
+// setDevices changes what the next listing reports.
+func (h *harness) setDevices(devices ...device.Device) {
+	h.backend.mu.Lock()
+	defer h.backend.mu.Unlock()
+	h.backend.devices = devices
+}
+
 func TestRefreshIsQuickOnlyWhileSomethingIsChanging(t *testing.T) {
 	h := start(t, ipad)
-	tick := func(after time.Duration) {
-		h.clock = h.clock.Add(after)
-		_, cmd := h.m.Update(tickMsg{})
-		h.run(cmd)
-	}
-	tick(3 * time.Second)
+	h.tick(2 * time.Second)
 	h.wantCalls("list", 1)
-	tick(8 * time.Second)
+	h.tick(time.Second)
 	h.wantCalls("list", 2)
 
 	booting := ipad
 	booting.State = device.Booting
-	h.backend.devices = []device.Device{booting}
+	h.setDevices(booting)
 	h.press("r")
 	h.wantCalls("list", 3)
-	tick(3 * time.Second)
+	h.tick(time.Second)
 	h.wantCalls("list", 4)
+}
+
+// A device stopped or plugged in outside the dashboard shows up within the idle interval.
+func TestChangesMadeElsewhereShowUpWithinSeconds(t *testing.T) {
+	h := start(t, pixel)
+	stopped := pixel
+	stopped.State, stopped.Serial = device.Shutdown, ""
+	h.setDevices(stopped, wifiPhon)
+	h.tick(refreshIdle)
+	h.wantScreen("Pixel 8")
+	h.wantNoScreen("booted")
+}
+
+// adb emu kill returns while the emulator is still listed. The row must keep saying so, and the
+// list must keep refreshing quickly, until the emulator is gone.
+func TestShutdownIsFollowedUntilTheDeviceStops(t *testing.T) {
+	h := start(t, pixel)
+	h.press("s")
+	h.wantCalls("shutdown Pixel_9a", 1)
+	h.wantScreen("shutting down")
+
+	h.tick(refreshBusy)
+	h.wantCalls("list", 3)
+	h.wantScreen("shutting down")
+
+	stopped := pixel
+	stopped.State, stopped.Serial = device.Shutdown, ""
+	h.setDevices(stopped)
+	h.tick(refreshBusy)
+	h.wantNoScreen("booted")
+	if doing := h.m.doing(pixel.Key()); doing != "" {
+		t.Errorf("the emulator is still marked %q", doing)
+	}
+	if len(h.m.settling) != 0 {
+		t.Errorf("settling = %v after the emulator stopped", h.m.settling)
+	}
+	// Back to the idle interval.
+	h.tick(refreshBusy)
+	h.wantCalls("list", 4)
+}
+
+func TestBootIsFollowedUntilTheDeviceIsReady(t *testing.T) {
+	h := start(t, tablet)
+	h.press("b")
+	h.wantScreen("booting")
+	h.tick(refreshBusy)
+	h.wantScreen("booting")
+
+	running := tablet
+	running.State, running.Serial = device.Booted, "emulator-5556"
+	h.setDevices(running)
+	h.tick(refreshBusy)
+	h.wantScreen("booted")
+	if len(h.m.settling) != 0 {
+		t.Errorf("settling = %v after the emulator booted", h.m.settling)
+	}
+}
+
+func TestDeleteIsFollowedUntilTheDeviceIsGone(t *testing.T) {
+	h := start(t, tablet, ipad)
+	h.selectDevice(tablet)
+	h.press("d", "y")
+	h.wantCalls("delete Tablet", 1)
+	h.wantScreen("deleting")
+	h.setDevices(ipad)
+	h.tick(refreshBusy)
+	if len(h.m.devices) != 1 || len(h.m.settling) != 0 {
+		t.Errorf("settling = %v after the emulator was deleted", h.m.settling)
+	}
+}
+
+// An emulator that crashes while booting never becomes ready. It must not be locked until the
+// time limit: it can be booted again, or shut down, at once.
+func TestASettlingDeviceCanBeActedOnAgain(t *testing.T) {
+	h := start(t, tablet)
+	h.press("b")
+	h.wantCalls("boot Tablet", 1)
+	h.press("b")
+	h.wantCalls("boot Tablet", 2)
+	h.press("s")
+	h.wantCalls("shutdown Tablet", 1)
+}
+
+// A simulator that shut down is a success even when DeviceHub could not be quit after it.
+func TestAShutdownThatLeftTheSimulatorAppOpenIsAWarning(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.fail["shutdown"] = &ios.AppNotQuitError{Err: apperr.New(apperr.CommandFailed, "The simulator shut down, but DeviceHub could not be quit: osascript failed")}
+	h.press("s")
+	if h.m.modal != nil {
+		t.Errorf("a failure window opened: %s", h.window())
+	}
+	h.wantScreen("DeviceHub could not be quit", "shutting down")
+}
+
+// A device that never reaches the state is not watched forever.
+func TestFollowingAnActionGivesUp(t *testing.T) {
+	h := start(t, tablet)
+	h.press("b")
+	h.tick(settleTimeout)
+	if len(h.m.settling) != 0 {
+		t.Errorf("settling = %v after the time limit", h.m.settling)
+	}
+	h.wantNoScreen("booting")
+	h.press("b")
+	h.wantCalls("boot Tablet", 2)
+}
+
+// A failed action has nothing to wait for.
+func TestAFailedActionIsNotFollowed(t *testing.T) {
+	h := start(t, pixel)
+	h.backend.fail["shutdown"] = errors.New("adb: device offline")
+	h.press("s")
+	if len(h.m.settling) != 0 {
+		t.Errorf("settling = %v after a failure", h.m.settling)
+	}
 }
 
 func TestCopyID(t *testing.T) {

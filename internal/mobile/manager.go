@@ -26,11 +26,14 @@ type Manager struct {
 	GOOS string
 	// OpenWindow shows a simulator's window when it boots.
 	OpenWindow bool
+	// QuitSimulatorApp quits Simulator or DeviceHub once the last running simulator shuts down,
+	// which closes the window they keep open for it.
+	QuitSimulatorApp bool
 }
 
 // New returns a manager that runs the real tools.
 func New(r run.Runner, opts android.Options, goos string) *Manager {
-	return &Manager{Runner: r, IOS: ios.New(r), Android: android.New(r, opts), GOOS: goos, OpenWindow: true}
+	return &Manager{Runner: r, IOS: ios.New(r), Android: android.New(r, opts), GOOS: goos, OpenWindow: true, QuitSimulatorApp: true}
 }
 
 // List returns every device, sorted for display, with the errors of the tools that failed. On
@@ -112,7 +115,10 @@ func (m *Manager) Shutdown(ctx context.Context, d device.Device) error {
 	case d.Kind == device.Physical:
 		return apperr.New(apperr.Unsupported, "%s is a physical device, and cannot be shut down from here", d.Name)
 	case d.Platform == device.IOS:
-		return m.IOS.Shutdown(ctx, d)
+		if err := m.IOS.Shutdown(ctx, d); err != nil || !m.QuitSimulatorApp {
+			return err
+		}
+		return m.IOS.QuitSimulatorApps(ctx)
 	}
 	return m.Android.Shutdown(ctx, d)
 }

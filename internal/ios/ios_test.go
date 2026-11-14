@@ -2,6 +2,7 @@ package ios
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -282,5 +283,72 @@ func TestAppExecutable(t *testing.T) {
 	_, err = client(notInstalledApp).AppExecutable(context.Background(), bootedSim, "com.example.app")
 	if err == nil || !strings.Contains(err.Error(), "installed on iPhone 16") {
 		t.Errorf("error should ask whether the app is installed: %v", err)
+	}
+}
+
+// simulatorAppAnswers lists one simulator in this state and has these apps running.
+func simulatorAppAnswers(state string, running ...string) *runtest.Fake {
+	answers := map[string]run.Result{
+		"simctl list devices": runtest.Out(`{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-2": [
+			{"udid": "` + udidShutdown + `", "name": "iPhone 17", "state": "` + state + `", "isAvailable": true}]}}`),
+		"pgrep":     runtest.Fail(1, ""),
+		"osascript": {},
+	}
+	for _, process := range running {
+		answers["pgrep -x "+process] = run.Result{}
+	}
+	return runtest.Table(answers)
+}
+
+func TestQuitSimulatorAppsQuitsOnlyRunningApps(t *testing.T) {
+	fake := simulatorAppAnswers("Shutdown", "DeviceHub")
+	if err := client(fake).QuitSimulatorApps(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called(`osascript -e tell application id "com.apple.dt.Devices" to quit`) {
+		t.Errorf("DeviceHub was not quit: %v", fake.Calls())
+	}
+	if fake.Called("com.apple.iphonesimulator") {
+		t.Errorf("Simulator is not running, so it must not be addressed: %v", fake.Calls())
+	}
+}
+
+// DeviceHub stops every simulator when it quits, so it is left alone while one runs.
+func TestQuitSimulatorAppsLeavesThemWhileASimulatorRuns(t *testing.T) {
+	for _, state := range []string{"Booted", "Booting", "Shutting Down"} {
+		fake := simulatorAppAnswers(state, "DeviceHub", "Simulator")
+		if err := client(fake).QuitSimulatorApps(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if fake.Called("osascript") {
+			t.Errorf("%s: ran %v", state, fake.Calls())
+		}
+	}
+}
+
+func TestQuitSimulatorAppsExplainsADeniedPermission(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"simctl list devices": runtest.Out(`{"devices": {}}`),
+		"pgrep -x DeviceHub":  {},
+		"pgrep":               runtest.Fail(1, ""),
+		"osascript":           runtest.Fail(1, "execution error: Not authorized to send Apple events to DeviceHub. (-1743)"),
+	})
+	err := client(fake).QuitSimulatorApps(context.Background())
+	var notQuit *AppNotQuitError
+	if !errors.As(err, &notQuit) || !strings.Contains(err.Error(), "DeviceHub could not be quit") || !strings.Contains(err.Error(), "Automation") {
+		t.Errorf("error = %v", err)
+	}
+	if apperr.CodeOf(err) != apperr.CommandFailed {
+		t.Errorf("code = %q, want the underlying command_failed", apperr.CodeOf(err))
+	}
+}
+
+func TestQuitSimulatorAppsDoesNothingWhenNoAppRuns(t *testing.T) {
+	fake := simulatorAppAnswers("Shutdown")
+	if err := client(fake).QuitSimulatorApps(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.Called("osascript") || fake.Called("simctl list") {
+		t.Errorf("ran %v", fake.Calls())
 	}
 }

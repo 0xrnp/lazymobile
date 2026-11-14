@@ -322,3 +322,48 @@ func TestBuilds(t *testing.T) {
 		t.Errorf("--limit 0: code %d", code)
 	}
 }
+
+func TestQuitSimulatorAppUnlessKept(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("shutdown", "iPhone 16", "--keep-simulator-app"); code != ExitOK || e.fake.Called("pgrep") || e.fake.Called("osascript") {
+		t.Errorf("kept: code %d, ran %v", code, e.fake.Calls())
+	}
+	// Neither app runs here, so they are looked for and nothing is quit.
+	code := e.run("shutdown", "iPhone 16")
+	calls := e.fake.Calls()
+	if code != ExitOK || !e.fake.Called("pgrep -x DeviceHub") || e.fake.Called("osascript") {
+		t.Errorf("default: code %d, ran %v, stderr %q", code, calls, e.errs.String())
+	}
+	if code := e.run("--keep-simulator-app"); code != ExitOK || e.app.Manager.QuitSimulatorApp {
+		t.Errorf("dashboard: code %d, QuitSimulatorApp %v", code, e.app.Manager.QuitSimulatorApp)
+	}
+}
+
+func TestShutdownWarnsWhenTheSimulatorAppStaysOpen(t *testing.T) {
+	e := newEnv(t)
+	answer := e.fake.Answer
+	shutDown := false
+	e.fake.Answer = func(command string, argv []string, opts run.Options) run.Result {
+		switch {
+		case strings.Contains(command, "simctl shutdown"):
+			shutDown = true
+		case shutDown && strings.Contains(command, "simctl list devices"):
+			// After the shutdown, no simulator runs.
+			return runtest.Out(`{"devices": {}}`)
+		case strings.HasPrefix(command, "pgrep -x DeviceHub"):
+			return run.Result{}
+		case strings.HasPrefix(command, "pgrep"):
+			return runtest.Fail(1, "")
+		case strings.HasPrefix(command, "osascript"):
+			return runtest.Fail(1, "Not authorized to send Apple events to DeviceHub. (-1743)")
+		}
+		return answer(command, argv, opts)
+	}
+	code := e.run("shutdown", "iPhone 16")
+	if code != ExitOK || e.out.String() != "Shut down iPhone 16\n" {
+		t.Errorf("code %d, stdout %q", code, e.out.String())
+	}
+	if !strings.Contains(e.errs.String(), "warning: The simulator shut down, but DeviceHub could not be quit") {
+		t.Errorf("stderr = %q", e.errs.String())
+	}
+}

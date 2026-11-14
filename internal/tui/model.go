@@ -42,10 +42,14 @@ type Backend interface {
 }
 
 const (
-	// How often the device list is refreshed: quickly while something is changing state, slowly
-	// otherwise, because listing runs several tools.
-	refreshBusy = 2 * time.Second
-	refreshIdle = 10 * time.Second
+	// How often the device list is refreshed: every second while something is changing state, and
+	// every few seconds otherwise, so devices started, stopped or plugged in elsewhere show up soon.
+	// Listing runs several tools and takes about a second.
+	refreshBusy = time.Second
+	refreshIdle = 3 * time.Second
+	// settleTimeout is how long the list is watched for an action's effect. The first boot of a
+	// new emulator or simulator can take minutes.
+	settleTimeout = 3 * time.Minute
 )
 
 const refreshingNote = "Refreshing…"
@@ -102,8 +106,14 @@ type Model struct {
 	cursor       int
 	// busy maps a device key to what is being done to it, such as "Booting".
 	busy map[string]string
+	// settling holds actions whose command finished before the device list shows their effect.
+	settling map[string]settling
 
-	focus   pane
+	focus pane
+	// widen is how many columns the devices pane was made wider (negative: narrower) with + and -.
+	widen int
+	// zoomed shows only the focused pane, on the whole screen.
+	zoomed  bool
 	modal   *modal
 	note    string
 	noteErr bool
@@ -115,14 +125,15 @@ type Model struct {
 // New returns a dashboard that has not started yet.
 func New(ctx context.Context, backend Backend, builds Builds) *Model {
 	return &Model{
-		ctx:     ctx,
-		backend: backend,
-		builds:  builds,
-		send:    func(tea.Msg) {},
-		now:     time.Now,
-		busy:    map[string]string{},
-		lastApp: map[device.Platform]string{},
-		log:     logView{follow: true},
+		ctx:      ctx,
+		backend:  backend,
+		builds:   builds,
+		send:     func(tea.Msg) {},
+		now:      time.Now,
+		busy:     map[string]string{},
+		settling: map[string]settling{},
+		lastApp:  map[device.Platform]string{},
+		log:      logView{follow: true},
 	}
 }
 
@@ -259,6 +270,7 @@ func (m *Model) setDevices(msg devicesMsg) tea.Cmd {
 	previous, hadSelection := m.selected()
 	m.devices, m.listErrs = arrange(msg.devices), msg.errs
 	m.loaded, m.refreshing, m.lastRefresh = true, false, m.now()
+	m.settle()
 	if m.note == refreshingNote {
 		m.setNote("", false)
 	}
@@ -277,10 +289,51 @@ func (m *Model) setDevices(msg devicesMsg) tea.Cmd {
 	return nil
 }
 
+// settling is an action that has finished, but whose effect the device list does not show yet.
+// `adb emu kill` returns while the emulator is still listed, and a booted emulator appears in adb
+// only some seconds after it was started.
+type settling struct {
+	doing string
+	until time.Time
+	// done reports whether the device, or its absence, shows the action's effect.
+	done func(d device.Device, found bool) bool
+}
+
+func isReady(d device.Device, found bool) bool { return found && d.Ready() }
+
+func isStopped(d device.Device, found bool) bool { return !found || d.State == device.Shutdown }
+
+func isGone(_ device.Device, found bool) bool { return !found }
+
+// settle forgets the actions whose effect the list now shows, or that waited too long.
+func (m *Model) settle() {
+	for key, s := range m.settling {
+		var current device.Device
+		found := false
+		for _, d := range m.devices {
+			if d.Key() == key {
+				current, found = d, true
+				break
+			}
+		}
+		if s.done(current, found) || !m.now().Before(s.until) {
+			delete(m.settling, key)
+		}
+	}
+}
+
+// doing is what is being done to a device, or "" when nothing is.
+func (m *Model) doing(key string) string {
+	if doing := m.busy[key]; doing != "" {
+		return doing
+	}
+	return m.settling[key].doing
+}
+
 // changing reports whether any device is between states, which is when the list is worth
 // refreshing quickly.
 func (m *Model) changing() bool {
-	if len(m.busy) > 0 {
+	if len(m.busy) > 0 || len(m.settling) > 0 {
 		return true
 	}
 	for _, d := range m.devices {
@@ -291,13 +344,17 @@ func (m *Model) changing() bool {
 	return false
 }
 
-// act runs one action on a device in the background and reports how it went.
-func (m *Model) act(d device.Device, doing, done string, run func(ctx context.Context) error) tea.Cmd {
+// act runs one action on a device in the background and reports how it went. When settled is
+// set, the device stays marked and the list is refreshed quickly until settled sees the effect.
+func (m *Model) act(d device.Device, doing, done string, settled func(device.Device, bool) bool, run func(ctx context.Context) error) tea.Cmd {
 	key := d.Key()
+	// Only a command that is still running blocks another. A device that is still settling can be
+	// acted on again, such as an emulator that crashed while booting.
 	if current := m.busy[key]; current != "" {
 		m.setNote(fmt.Sprintf("%s is busy: %s", d.Name, strings.ToLower(current)), true)
 		return nil
 	}
+	delete(m.settling, key)
 	m.busy[key] = doing
 	m.setNote(fmt.Sprintf("%s %s…", doing, d.Name), false)
 	ctx := m.ctx
@@ -305,10 +362,20 @@ func (m *Model) act(d device.Device, doing, done string, run func(ctx context.Co
 		err := run(ctx)
 		return applyMsg(func(m *Model) tea.Cmd {
 			delete(m.busy, key)
-			if err != nil {
+			var notQuit *ios.AppNotQuitError
+			switch {
+			case errors.As(err, &notQuit):
+				// The action itself succeeded: say what was left behind, and follow it as usual.
+				m.setNote(firstLine(notQuit.Error()), true)
+			case err != nil:
 				m.fail("Could not finish: "+strings.ToLower(doing)+" "+d.Name, err)
-			} else {
+			default:
 				m.setNote(done+" "+d.Name, false)
+			}
+			if err == nil || notQuit != nil {
+				if settled != nil {
+					m.settling[key] = settling{doing: doing, until: m.now().Add(settleTimeout), done: settled}
+				}
 			}
 			return m.refresh()
 		})
@@ -339,6 +406,15 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "shift+tab":
 		m.cycle(-1)
+		return nil
+	case "+", "=":
+		m.resize(resizeStep)
+		return nil
+	case "-":
+		m.resize(-resizeStep)
+		return nil
+	case "z":
+		m.zoomed = !m.zoomed
 		return nil
 	case "esc":
 		m.focus = paneDevices
@@ -399,20 +475,20 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 	switch key {
 	case "b":
 		if virtual {
-			return m.act(d, "Booting", "Started", func(ctx context.Context) error {
+			return m.act(d, "Booting", "Started", isReady, func(ctx context.Context) error {
 				return m.backend.Boot(ctx, d, mobile.BootOptions{})
 			})
 		}
 	case "B":
 		if d.Kind == device.Emulator {
-			return m.act(d, "Cold booting", "Started", func(ctx context.Context) error {
+			return m.act(d, "Cold booting", "Started", isReady, func(ctx context.Context) error {
 				return m.backend.Boot(ctx, d, mobile.BootOptions{Cold: true})
 			})
 		}
 		m.setNote("Cold boot is for Android emulators", true)
 	case "s":
 		if virtual {
-			return m.act(d, "Shutting down", "Shut down", func(ctx context.Context) error {
+			return m.act(d, "Shutting down", "Shut down", isStopped, func(ctx context.Context) error {
 				return m.backend.Shutdown(ctx, d)
 			})
 		}
@@ -423,18 +499,23 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 				body += "\nThe emulator then starts with its data wiped."
 			}
 			m.confirm("Erase "+d.Name+"?", body, func(m *Model) tea.Cmd {
-				return m.act(d, "Erasing", "Erased", func(ctx context.Context) error { return m.backend.Erase(ctx, d) })
+				// A simulator is erased while shut down. An emulator is started with its data wiped.
+				var settled func(device.Device, bool) bool
+				if d.Kind == device.Emulator {
+					settled = isReady
+				}
+				return m.act(d, "Erasing", "Erased", settled, func(ctx context.Context) error { return m.backend.Erase(ctx, d) })
 			})
 		}
 	case "d":
 		if virtual {
 			m.confirm("Delete "+d.Name+"?", "This deletes "+d.Name+" and everything on it for good.", func(m *Model) tea.Cmd {
-				return m.act(d, "Deleting", "Deleted", func(ctx context.Context) error { return m.backend.Delete(ctx, d) })
+				return m.act(d, "Deleting", "Deleted", isGone, func(ctx context.Context) error { return m.backend.Delete(ctx, d) })
 			})
 		}
 	case "x":
 		if d.Platform == device.Android && d.Transport == "wifi" {
-			return m.act(d, "Disconnecting", "Disconnected", func(ctx context.Context) error {
+			return m.act(d, "Disconnecting", "Disconnected", isGone, func(ctx context.Context) error {
 				return m.backend.Disconnect(ctx, d)
 			})
 		}

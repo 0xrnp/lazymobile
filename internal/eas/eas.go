@@ -295,23 +295,45 @@ func (c *Client) eas(ctx context.Context, timeout time.Duration, args ...string)
 	}
 	argv := append(append([]string(nil), c.Project.Command...), args...)
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: timeout, Dir: c.Project.Dir})
-	return res, argv, explain(apperr.FromResult(res, argv, installHint), res)
+	return res, argv, c.explain(apperr.FromResult(res, argv, installHint), res)
 }
 
 // explain adds advice to the failures a developer is most likely to meet.
-func explain(err error, res run.Result) error {
+func (c *Client) explain(err error, res run.Result) error {
 	e, ok := err.(*apperr.Error)
 	if !ok || e.Code != apperr.CommandFailed {
 		return err
 	}
-	text := strings.ToLower(res.Stderr + res.Stdout)
+	output := res.Stderr + "\n" + res.Stdout
+	// eas prints update notices and advice first, so the first line is rarely the reason.
+	if reason := lastError(output); reason != "" {
+		e.Message = "eas failed: " + reason
+	}
+	text := strings.ToLower(output)
 	switch {
 	case strings.Contains(text, "eas login") || strings.Contains(text, "not logged in"):
 		e.Message, e.Hint = "You are not logged in to Expo", "Run: eas login"
 	case strings.Contains(text, "eas init") || strings.Contains(text, "project is not configured"):
 		e.Hint = "This project is not linked to EAS yet. Run: eas init"
+	case strings.Contains(text, "config --json exited with non-zero code"):
+		// eas sets EXPO_NO_DOTENV, so a config that validates variables kept in .env fails under eas
+		// while a plain `npx expo config` works.
+		e.Hint = "The project's app config could not be loaded. Run `EXPO_NO_DOTENV=1 npx expo config` in " + c.Project.Dir +
+			" to see why. Either its dependencies are not installed, or it needs variables from .env, which eas never reads:" +
+			" set them in your shell, or in the command in .lazymobile.json."
 	}
 	return e
+}
+
+// lastError is the text of the last "Error: ..." line eas printed, or "".
+func lastError(output string) string {
+	var last string
+	for _, line := range strings.Split(output, "\n") {
+		if reason, found := strings.CutPrefix(strings.TrimSpace(line), "Error: "); found && reason != "" {
+			last = reason
+		}
+	}
+	return last
 }
 
 // List returns the newest builds of the project.
@@ -370,5 +392,5 @@ func (c *Client) Start(ctx context.Context, profile, platform string) error {
 		return apperr.New(apperr.ToolMissing, "The eas command was not found").WithHint(installHint)
 	}
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: transferTimeout, Dir: c.Project.Dir})
-	return explain(apperr.FromResult(res, argv, installHint), res)
+	return c.explain(apperr.FromResult(res, argv, installHint), res)
 }

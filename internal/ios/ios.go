@@ -264,6 +264,70 @@ func (c *Client) Shutdown(ctx context.Context, d device.Device) error {
 	return c.runAction(ctx, d, shutdownAction, []string{"xcrun", "simctl", "shutdown", d.ID})
 }
 
+// simulatorApps are the apps that show simulators: Simulator in Xcode 26 and earlier, DeviceHub in
+// Xcode 27. Both keep a window open for a simulator after it shuts down.
+var simulatorApps = []struct{ process, bundle string }{
+	{"Simulator", simulatorBundle},
+	{"DeviceHub", deviceHubBundle},
+}
+
+// AppNotQuitError is a simulator that shut down, followed by Simulator or DeviceHub that could not
+// be quit. The shutdown itself succeeded, so callers report it as a warning.
+type AppNotQuitError struct{ Err *apperr.Error }
+
+func (e *AppNotQuitError) Error() string { return e.Err.Error() }
+
+func (e *AppNotQuitError) Unwrap() error { return e.Err }
+
+// QuitSimulatorApps quits Simulator and DeviceHub when no simulator is running, which closes the
+// windows they keep open for simulators that shut down. While any simulator runs they are left
+// alone: DeviceHub stops every simulator when it quits, by default. Failures are
+// *AppNotQuitError.
+func (c *Client) QuitSimulatorApps(ctx context.Context) error {
+	for _, app := range simulatorApps {
+		// Only an app that is running is addressed. AppleScript would start one that is not, or
+		// ask where one that is not installed is.
+		if res := c.Runner.Run(ctx, []string{"pgrep", "-x", app.process}, run.Options{Timeout: 10 * time.Second}); res.Code != 0 || res.Err != nil || res.Missing {
+			continue
+		}
+		// Asked again right before each quit, so a simulator booted meanwhile is not stopped.
+		idle, err := c.noSimulatorRuns(ctx)
+		if err != nil {
+			e, _ := err.(*apperr.Error)
+			return notQuit(app.process, e)
+		}
+		if !idle {
+			return nil
+		}
+		argv := []string{"osascript", "-e", fmt.Sprintf(`tell application id "%s" to quit`, app.bundle)}
+		if err := apperr.FromResult(c.Runner.Run(ctx, argv, run.Options{Timeout: 30 * time.Second}), argv, ""); err != nil {
+			e, _ := err.(*apperr.Error)
+			e = notQuit(app.process, e).Err
+			e.Hint = "Allow your terminal to control " + app.process + " in System Settings > Privacy & Security > Automation, or start lazymobile with --keep-simulator-app."
+			return &AppNotQuitError{e}
+		}
+	}
+	return nil
+}
+
+func (c *Client) noSimulatorRuns(ctx context.Context) (bool, error) {
+	simulators, err := c.ListSimulators(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, d := range simulators {
+		if d.State != device.Shutdown {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func notQuit(process string, e *apperr.Error) *AppNotQuitError {
+	e.Message = "The simulator shut down, but " + process + " could not be quit: " + firstLine(e.Message)
+	return &AppNotQuitError{e}
+}
+
 // Erase erases a simulator's content and settings. It must be shut down.
 func (c *Client) Erase(ctx context.Context, d device.Device) error {
 	return c.runAction(ctx, d, eraseAction, []string{"xcrun", "simctl", "erase", d.ID})

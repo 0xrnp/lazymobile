@@ -208,6 +208,36 @@ func TestListExplainsAMissingLogin(t *testing.T) {
 	}
 }
 
+// eas prints notices before its error, and the real reason must not be lost behind them. The
+// output is from eas-cli 24.7 in a project whose dependencies were not installed.
+func TestListExplainsAConfigThatDoesNotLoad(t *testing.T) {
+	stderr := `★ eas-cli@27.10.0 is now available.
+To upgrade, run:
+npm install -g eas-cli
+Proceeding with outdated version.
+
+Found eas-cli in your project dependencies.
+It's recommended to use the "cli.version" field in eas.json to enforce the eas-cli version for your project.
+Learn more: https://github.com/expo/eas-cli#enforcing-eas-cli-version-for-your-project
+
+/work/node_modules/.pnpm/expo@57.0.23/node_modules/expo/bin/cli config --json exited with non-zero code: 1
+    Error: build:list command failed.`
+	fake := runtest.Table(map[string]run.Result{"build:list": runtest.Fail(1, stderr)})
+	_, err := client(fake).List(context.Background(), 15)
+	if apperr.CodeOf(err) != apperr.CommandFailed {
+		t.Fatalf("error = %v", err)
+	}
+	text := err.Error()
+	for _, want := range []string{"eas failed: build:list command failed.", "app config could not be loaded", "/work/app", "EXPO_NO_DOTENV=1", ".env"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("error should mention %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Found eas-cli") || strings.Contains(text, "now available") {
+		t.Errorf("a notice was reported as the reason:\n%s", text)
+	}
+}
+
 func TestDownload(t *testing.T) {
 	ok := runtest.Table(map[string]run.Result{"build:download": runtest.Out(`{"path": "/cache/eas/Sample.app"}`)})
 	path, err := client(ok).Download(context.Background(), "BUILD-1")
