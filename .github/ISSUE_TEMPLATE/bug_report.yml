@@ -1,0 +1,46 @@
+name: Bug report
+description: Something does not work, or works differently from the docs
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `lazymobile doctor`
+      description: It shows your tools and versions.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "Output of `lazymobile version`, your OS, and your terminal."
+      placeholder: "lazymobile 0.1.0, macOS 15.4, Ghostty"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      multiple: true
+      options:
+        - iOS simulator
+        - iPhone or iPad
+        - Android emulator
+        - Android phone (USB)
+        - Android phone (Wi-Fi)
+        - Logs
+        - Expo builds
+        - Something else
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Error text from the dashboard, or command output. Please remove device names, ids and tokens you do not want to share.

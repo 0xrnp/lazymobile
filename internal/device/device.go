@@ -1,0 +1,172 @@
+// Package device is the one shape every backend (simctl, devicectl, emulator, adb) reports
+// devices in.
+package device
+
+import (
+	"sort"
+	"strings"
+)
+
+// Platform is the operating system family of a device.
+type Platform string
+
+const (
+	IOS     Platform = "ios"
+	Android Platform = "android"
+)
+
+// Kind says whether a device is virtual or a real one.
+type Kind string
+
+const (
+	Simulator Kind = "simulator"
+	Emulator  Kind = "emulator"
+	Physical  Kind = "physical"
+)
+
+// State is what a device is doing. Virtual devices are booted or shutdown. Physical devices are
+// connected or disconnected. Offline and unauthorized are attached but not usable.
+type State string
+
+const (
+	Booted       State = "booted"
+	Booting      State = "booting"
+	Shutdown     State = "shutdown"
+	ShuttingDown State = "shutting_down"
+	Connected    State = "connected"
+	Disconnected State = "disconnected"
+	Offline      State = "offline"
+	Unauthorized State = "unauthorized"
+	Unknown      State = "unknown"
+)
+
+// Device is one simulator, emulator or phone.
+type Device struct {
+	// ID is what the platform tool uses: a UDID, an AVD name, or an adb serial.
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Platform  Platform `json:"platform"`
+	Kind      Kind     `json:"kind"`
+	State     State    `json:"state"`
+	OSVersion string   `json:"os_version,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	// Transport is how the device is reached: "usb", "wifi" or "local".
+	Transport string `json:"transport,omitempty"`
+	// Serial is the adb serial of a running emulator, which links an AVD to its instance.
+	Serial string `json:"serial,omitempty"`
+	// Source is the tool that reported it: "simctl", "devicectl", "emulator" or "adb".
+	Source string `json:"source"`
+	// Detail is something the user should know, such as "Developer Mode is off".
+	Detail string `json:"detail,omitempty"`
+}
+
+// Key is unique across platforms and kinds.
+func (d Device) Key() string {
+	return string(d.Platform) + ":" + string(d.Kind) + ":" + d.ID
+}
+
+// Ready reports whether the device can run an app right now.
+func (d Device) Ready() bool {
+	return d.State == Booted || d.State == Connected
+}
+
+// TargetID is the id other tools want for this device (adb -s, flutter -d, xcrun): the adb
+// serial of a running emulator, otherwise the device id.
+func (d Device) TargetID() string {
+	if d.Platform == Android && d.Serial != "" {
+		return d.Serial
+	}
+	return d.ID
+}
+
+// OSLabel is "iOS 18.2" or "Android 16", or "" when the version is unknown.
+func (d Device) OSLabel() string {
+	if d.OSVersion == "" {
+		return ""
+	}
+	if d.Platform == IOS {
+		return "iOS " + d.OSVersion
+	}
+	if strings.HasPrefix(d.OSVersion, "API ") {
+		return d.OSVersion
+	}
+	return "Android " + d.OSVersion
+}
+
+// Sort orders ready devices first, then physical before virtual, then iOS before Android, then
+// by name. It returns a new slice.
+func Sort(list []Device) []Device {
+	sorted := append([]Device(nil), list...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		if a.Ready() != b.Ready() {
+			return a.Ready()
+		}
+		if (a.Kind == Physical) != (b.Kind == Physical) {
+			return a.Kind == Physical
+		}
+		if a.Platform != b.Platform {
+			return a.Platform == IOS
+		}
+		if an, bn := strings.ToLower(a.Name), strings.ToLower(b.Name); an != bn {
+			return an < bn
+		}
+		return a.ID < b.ID
+	})
+	return sorted
+}
+
+// Dedupe drops devices reported twice. The first report wins, and fields it lacks are filled in
+// from later ones.
+func Dedupe(list []Device) []Device {
+	index := make(map[string]int, len(list))
+	result := make([]Device, 0, len(list))
+	for _, d := range list {
+		i, seen := index[d.Key()]
+		if !seen {
+			index[d.Key()] = len(result)
+			result = append(result, d)
+			continue
+		}
+		first := &result[i]
+		fill(&first.OSVersion, d.OSVersion)
+		fill(&first.Model, d.Model)
+		fill(&first.Transport, d.Transport)
+		fill(&first.Serial, d.Serial)
+		fill(&first.Detail, d.Detail)
+	}
+	return result
+}
+
+func fill(target *string, value string) {
+	if *target == "" {
+		*target = value
+	}
+}
+
+// Match finds the devices a user means by query: an exact id or serial, an exact name, or a
+// part of a name. Case does not matter. The most exact kind of match wins.
+func Match(list []Device, query string) []Device {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil
+	}
+	var exactID, exactName, partial []Device
+	for _, d := range list {
+		name := strings.ToLower(d.Name)
+		switch {
+		case strings.ToLower(d.ID) == q || (d.Serial != "" && strings.ToLower(d.Serial) == q):
+			exactID = append(exactID, d)
+		case name == q:
+			exactName = append(exactName, d)
+		case strings.Contains(name, q):
+			partial = append(partial, d)
+		}
+	}
+	for _, group := range [][]Device{exactID, exactName, partial} {
+		if len(group) > 0 {
+			return group
+		}
+	}
+	return nil
+}

@@ -1,0 +1,879 @@
+// Package tui is the dashboard: devices on the left, the log of one of them on the right.
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/0xrnp/lazymobile/internal/android"
+	"github.com/0xrnp/lazymobile/internal/apperr"
+	"github.com/0xrnp/lazymobile/internal/device"
+	"github.com/0xrnp/lazymobile/internal/ios"
+	"github.com/0xrnp/lazymobile/internal/logs"
+	"github.com/0xrnp/lazymobile/internal/mobile"
+)
+
+// Backend is what the dashboard needs from the rest of the program.
+type Backend interface {
+	HasIOS() bool
+	List(ctx context.Context) ([]device.Device, []error)
+	Boot(ctx context.Context, d device.Device, opts mobile.BootOptions) error
+	Shutdown(ctx context.Context, d device.Device) error
+	Erase(ctx context.Context, d device.Device) error
+	Delete(ctx context.Context, d device.Device) error
+	Runtimes(ctx context.Context) ([]ios.Runtime, error)
+	CreateSimulator(ctx context.Context, name, deviceType, runtime string) error
+	SystemImages() []android.SystemImage
+	DeviceProfiles(ctx context.Context) ([]string, error)
+	CreateAVD(ctx context.Context, name, image, profile string) error
+	Pair(ctx context.Context, address, code string) error
+	Connect(ctx context.Context, address string) error
+	Disconnect(ctx context.Context, d device.Device) error
+	Install(ctx context.Context, d device.Device, path string) error
+	OpenURL(ctx context.Context, url string) error
+	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
+}
+
+const (
+	// How often the device list is refreshed: quickly while something is changing state, slowly
+	// otherwise, because listing runs several tools.
+	refreshBusy = 2 * time.Second
+	refreshIdle = 10 * time.Second
+)
+
+const refreshingNote = "Refreshing…"
+
+type pane int
+
+const (
+	paneDevices pane = iota
+	paneBuilds
+	paneLogs
+)
+
+type (
+	devicesMsg struct {
+		devices []device.Device
+		errs    []error
+	}
+	tickMsg struct{}
+	// applyMsg carries the result of background work back to the model.
+	applyMsg    func(m *Model) tea.Cmd
+	logLinesMsg struct {
+		id    int
+		lines []logs.Line
+	}
+	logStatusMsg struct {
+		id   int
+		text string
+	}
+	logEndMsg struct {
+		id  int
+		err error
+	}
+)
+
+// Model is the dashboard's state.
+type Model struct {
+	ctx     context.Context
+	backend Backend
+	// builds is nil when the dashboard was not started inside an Expo project.
+	builds Builds
+	build  buildsView
+	// send delivers a message from outside the update loop. Log streams use it.
+	send func(tea.Msg)
+	now  func() time.Time
+
+	width, height int
+
+	devices      []device.Device
+	listErrs     []error
+	loaded       bool
+	refreshing   bool
+	refreshAgain bool
+	lastRefresh  time.Time
+	cursor       int
+	// busy maps a device key to what is being done to it, such as "Booting".
+	busy map[string]string
+
+	focus   pane
+	modal   *modal
+	note    string
+	noteErr bool
+	// lastApp remembers the app id typed for each platform, to offer it again.
+	lastApp map[device.Platform]string
+	log     logView
+}
+
+// New returns a dashboard that has not started yet.
+func New(ctx context.Context, backend Backend, builds Builds) *Model {
+	return &Model{
+		ctx:     ctx,
+		backend: backend,
+		builds:  builds,
+		send:    func(tea.Msg) {},
+		now:     time.Now,
+		busy:    map[string]string{},
+		lastApp: map[device.Platform]string{},
+		log:     logView{follow: true},
+	}
+}
+
+// Run shows the dashboard until the user quits.
+func Run(ctx context.Context, backend Backend, builds Builds) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m := New(ctx, backend, builds)
+	program := tea.NewProgram(m, tea.WithContext(ctx))
+	m.send = program.Send
+	_, err := program.Run()
+	if errors.Is(err, tea.ErrInterrupted) || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+// Init implements tea.Model.
+func (m *Model) Init() tea.Cmd {
+	return tea.Batch(m.refresh(), tick())
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// refresh lists the devices again, unless a listing is already running.
+func (m *Model) refresh() tea.Cmd {
+	if m.refreshing {
+		m.refreshAgain = true
+		return nil
+	}
+	m.refreshing = true
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		devices, errs := backend.List(ctx)
+		return devicesMsg{devices, errs}
+	}
+}
+
+// arrange puts devices in display order: simulators, emulators, then phones.
+func arrange(list []device.Device) []device.Device {
+	sorted := device.Sort(list)
+	out := make([]device.Device, 0, len(sorted))
+	for _, group := range groups {
+		for _, d := range sorted {
+			if group.has(d) {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+type group struct {
+	title string
+	has   func(device.Device) bool
+}
+
+var groups = []group{
+	{"iOS simulators", func(d device.Device) bool { return d.Kind == device.Simulator }},
+	{"Android emulators", func(d device.Device) bool { return d.Kind == device.Emulator }},
+	{"Phones and tablets", func(d device.Device) bool { return d.Kind == device.Physical }},
+}
+
+func (m *Model) selected() (device.Device, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.devices) {
+		return device.Device{}, false
+	}
+	return m.devices[m.cursor], true
+}
+
+func (m *Model) setNote(text string, isError bool) {
+	m.note, m.noteErr = text, isError
+}
+
+// fail reports a failed action in a window, so the reason and the advice stay readable.
+func (m *Model) fail(title string, err error) {
+	m.setNote(firstLine(err.Error()), true)
+	m.modal = &modal{kind: modalMessage, title: title, body: err.Error()}
+}
+
+// Update implements tea.Model.
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+	case tea.KeyPressMsg:
+		if m.modal != nil {
+			return m, m.modalKey(msg)
+		}
+		return m, m.key(msg)
+	case tea.PasteMsg:
+		if m.modal != nil && m.modal.kind == modalPrompt {
+			m.modal.value += strings.TrimSpace(firstLine(msg.Content))
+			m.modal.problem = ""
+		}
+	case devicesMsg:
+		return m, m.setDevices(msg)
+	case buildsMsg:
+		m.setBuilds(msg)
+	case tickMsg:
+		cmds := []tea.Cmd{tick()}
+		interval := refreshIdle
+		if m.changing() {
+			interval = refreshBusy
+		}
+		if m.now().Sub(m.lastRefresh) >= interval {
+			cmds = append(cmds, m.refresh())
+		}
+		if m.buildsDue() {
+			cmds = append(cmds, m.loadBuilds())
+		}
+		return m, tea.Batch(cmds...)
+	case applyMsg:
+		return m, msg(m)
+	case logLinesMsg:
+		if msg.id == m.log.id {
+			m.log.add(msg.lines)
+		}
+	case logStatusMsg:
+		if msg.id == m.log.id {
+			m.log.status = msg.text
+		}
+	case logEndMsg:
+		if msg.id == m.log.id {
+			m.log.ended, m.log.endErr, m.log.session = true, msg.err, nil
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) setDevices(msg devicesMsg) tea.Cmd {
+	previous, hadSelection := m.selected()
+	m.devices, m.listErrs = arrange(msg.devices), msg.errs
+	m.loaded, m.refreshing, m.lastRefresh = true, false, m.now()
+	if m.note == refreshingNote {
+		m.setNote("", false)
+	}
+	if hadSelection {
+		for i, d := range m.devices {
+			if d.Key() == previous.Key() {
+				m.cursor = i
+			}
+		}
+	}
+	m.cursor = min(max(m.cursor, 0), max(len(m.devices)-1, 0))
+	if m.refreshAgain {
+		m.refreshAgain = false
+		return m.refresh()
+	}
+	return nil
+}
+
+// changing reports whether any device is between states, which is when the list is worth
+// refreshing quickly.
+func (m *Model) changing() bool {
+	if len(m.busy) > 0 {
+		return true
+	}
+	for _, d := range m.devices {
+		if d.State == device.Booting || d.State == device.ShuttingDown {
+			return true
+		}
+	}
+	return false
+}
+
+// act runs one action on a device in the background and reports how it went.
+func (m *Model) act(d device.Device, doing, done string, run func(ctx context.Context) error) tea.Cmd {
+	key := d.Key()
+	if current := m.busy[key]; current != "" {
+		m.setNote(fmt.Sprintf("%s is busy: %s", d.Name, strings.ToLower(current)), true)
+		return nil
+	}
+	m.busy[key] = doing
+	m.setNote(fmt.Sprintf("%s %s…", doing, d.Name), false)
+	ctx := m.ctx
+	return func() tea.Msg {
+		err := run(ctx)
+		return applyMsg(func(m *Model) tea.Cmd {
+			delete(m.busy, key)
+			if err != nil {
+				m.fail("Could not finish: "+strings.ToLower(doing)+" "+d.Name, err)
+			} else {
+				m.setNote(done+" "+d.Name, false)
+			}
+			return m.refresh()
+		})
+	}
+}
+
+// background runs work that is not tied to one device, then applies its result.
+func (m *Model) background(note string, work func(ctx context.Context) applyMsg) tea.Cmd {
+	m.setNote(note, false)
+	ctx := m.ctx
+	return func() tea.Msg { return work(ctx) }
+}
+
+func (m *Model) confirm(title, body string, onYes func(m *Model) tea.Cmd) {
+	m.modal = &modal{kind: modalConfirm, title: title, body: body, onYes: onYes}
+}
+
+func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.String()
+	switch key {
+	case "q", "ctrl+c":
+		return m.quit()
+	case "?":
+		m.modal = &modal{kind: modalMessage, title: "Keys", body: helpText}
+		return nil
+	case "tab":
+		m.cycle(1)
+		return nil
+	case "shift+tab":
+		m.cycle(-1)
+		return nil
+	case "esc":
+		m.focus = paneDevices
+		return nil
+	}
+	switch m.focus {
+	case paneLogs:
+		return m.logKey(key)
+	case paneBuilds:
+		return m.buildKey(key)
+	}
+	return m.deviceKey(key)
+}
+
+// cycle moves the focus to the next or previous pane.
+func (m *Model) cycle(step int) {
+	panes := []pane{paneDevices, paneLogs}
+	if m.builds != nil {
+		panes = []pane{paneDevices, paneBuilds, paneLogs}
+	}
+	for i, p := range panes {
+		if p == m.focus {
+			m.focus = panes[(i+step+len(panes))%len(panes)]
+			return
+		}
+	}
+	m.focus = paneDevices
+}
+
+func (m *Model) deviceKey(key string) tea.Cmd {
+	switch key {
+	case "up", "k":
+		m.cursor = max(m.cursor-1, 0)
+		return nil
+	case "down", "j":
+		m.cursor = min(m.cursor+1, max(len(m.devices)-1, 0))
+		return nil
+	case "g", "home":
+		m.cursor = 0
+		return nil
+	case "G", "end":
+		m.cursor = max(len(m.devices)-1, 0)
+		return nil
+	case "r":
+		m.setNote(refreshingNote, false)
+		return m.refresh()
+	case "n":
+		return m.create()
+	case "w":
+		return m.wireless()
+	}
+
+	d, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	virtual := d.Kind != device.Physical
+	switch key {
+	case "b":
+		if virtual {
+			return m.act(d, "Booting", "Started", func(ctx context.Context) error {
+				return m.backend.Boot(ctx, d, mobile.BootOptions{})
+			})
+		}
+	case "B":
+		if d.Kind == device.Emulator {
+			return m.act(d, "Cold booting", "Started", func(ctx context.Context) error {
+				return m.backend.Boot(ctx, d, mobile.BootOptions{Cold: true})
+			})
+		}
+		m.setNote("Cold boot is for Android emulators", true)
+	case "s":
+		if virtual {
+			return m.act(d, "Shutting down", "Shut down", func(ctx context.Context) error {
+				return m.backend.Shutdown(ctx, d)
+			})
+		}
+	case "e":
+		if virtual {
+			body := "This removes every app and all data on " + d.Name + ". It cannot be undone."
+			if d.Kind == device.Emulator {
+				body += "\nThe emulator then starts with its data wiped."
+			}
+			m.confirm("Erase "+d.Name+"?", body, func(m *Model) tea.Cmd {
+				return m.act(d, "Erasing", "Erased", func(ctx context.Context) error { return m.backend.Erase(ctx, d) })
+			})
+		}
+	case "d":
+		if virtual {
+			m.confirm("Delete "+d.Name+"?", "This deletes "+d.Name+" and everything on it for good.", func(m *Model) tea.Cmd {
+				return m.act(d, "Deleting", "Deleted", func(ctx context.Context) error { return m.backend.Delete(ctx, d) })
+			})
+		}
+	case "x":
+		if d.Platform == device.Android && d.Transport == "wifi" {
+			return m.act(d, "Disconnecting", "Disconnected", func(ctx context.Context) error {
+				return m.backend.Disconnect(ctx, d)
+			})
+		}
+		m.setNote("Only phones connected over Wi-Fi can be disconnected", true)
+	case "y":
+		m.setNote("Copied "+d.TargetID(), false)
+		return tea.SetClipboard(d.TargetID())
+	case "l", "enter":
+		return m.openLogs(d)
+	}
+	if !virtual && strings.Contains("bsed", key) && len(key) == 1 {
+		m.setNote(d.Name+" is a real device: it is not booted, shut down, erased or deleted from here", true)
+	}
+	return nil
+}
+
+func (m *Model) logKey(key string) tea.Cmd {
+	v := &m.log
+	if !v.opened {
+		if key == "l" || key == "enter" {
+			if d, ok := m.selected(); ok {
+				return m.openLogs(d)
+			}
+		}
+		return nil
+	}
+	rows := max(m.layout().logRows, 1)
+	switch key {
+	case "up", "k":
+		v.scroll(-1, rows)
+	case "down", "j":
+		v.scroll(1, rows)
+	case "pgup", "ctrl+u":
+		v.scroll(-rows/2, rows)
+	case "pgdown", "ctrl+d", "space":
+		v.scroll(rows/2, rows)
+	case "g", "home":
+		v.follow, v.top = false, 0
+	case "G", "end":
+		v.follow = true
+	case "left", "h":
+		v.left = max(v.left-8, 0)
+	case "right", "l":
+		v.left += 8
+	case "0":
+		v.left = 0
+	case "p":
+		v.paused = !v.paused
+		if !v.paused {
+			v.rebuild()
+		}
+	case "c":
+		v.clear()
+	case "L":
+		v.level = (v.level + 1) % (logs.Fatal + 1)
+		v.rebuild()
+	case "/", "f":
+		m.modal = &modal{
+			kind: modalPrompt, title: "Filter the log", value: v.filter,
+			body: "Show only lines that contain this text. Leave empty to show everything.",
+			onSubmit: func(m *Model, value string) tea.Cmd {
+				m.log.filter = value
+				m.log.rebuild()
+				return nil
+			},
+		}
+	case "S":
+		return m.saveLog()
+	case "x":
+		if v.session != nil {
+			v.session.Stop()
+		}
+	case "r":
+		return m.startLogs(v.spec)
+	}
+	return nil
+}
+
+func (m *Model) quit() tea.Cmd {
+	session := m.log.session
+	if session == nil {
+		return tea.Quit
+	}
+	// Wait for the log tool to be stopped, or it would be left running after the exit.
+	return func() tea.Msg {
+		session.Stop()
+		_ = session.Wait()
+		return tea.Quit()
+	}
+}
+
+// Logs ---------------------------------------------------------------------------------------
+
+func (m *Model) openLogs(d device.Device) tea.Cmd {
+	modes := logs.Modes(d)
+	switch len(modes) {
+	case 0:
+		m.setNote(d.Name+" is not running. Boot or connect it to see its logs", true)
+		return nil
+	case 1:
+		m.askApp(d, modes[0])
+		return nil
+	}
+	labels := make([]string, len(modes))
+	for i, mode := range modes {
+		labels[i] = mode.Label
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "Which log of " + d.Name + "?", items: labels,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			m.askApp(d, modes[index])
+			return nil
+		},
+	}
+	return nil
+}
+
+func (m *Model) askApp(d device.Device, mode logs.ModeInfo) {
+	body := "Show only one app: type its package name or bundle id. Leave empty for every app."
+	if mode.AppRequired {
+		body = "The bundle id of the app to launch, such as com.example.app."
+	}
+	m.modal = &modal{
+		kind: modalPrompt, title: "App on " + d.Name, body: body, value: m.lastApp[d.Platform],
+		validate: func(value string) string {
+			switch {
+			case value == "" && mode.AppRequired:
+				return "An app id is needed to launch it."
+			case value != "" && !logs.ValidAppID(value):
+				return "That does not look like an app id. Example: com.example.app"
+			}
+			return ""
+		},
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			m.lastApp[d.Platform] = value
+			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: value})
+		},
+	}
+}
+
+func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
+	if m.log.session != nil {
+		m.log.session.Stop()
+	}
+	id := m.log.id + 1
+	m.log = logView{id: id, opened: true, spec: spec, follow: true, level: m.log.level, filter: m.log.filter}
+	send := m.send
+	session := m.backend.StartLogs(m.ctx, spec, logs.Handlers{
+		Lines:  func(lines []logs.Line) { send(logLinesMsg{id, lines}) },
+		Status: func(text string) { send(logStatusMsg{id, text}) },
+	})
+	m.log.session = session
+	m.focus = paneLogs
+	return func() tea.Msg { return logEndMsg{id, session.Wait()} }
+}
+
+func (m *Model) saveLog() tea.Cmd {
+	name := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '/' {
+			return '-'
+		}
+		return r
+	}, m.log.spec.Device.Name)
+	suggested := fmt.Sprintf("lazymobile-%s-%s.log", name, m.now().Format("20060102-150405"))
+	m.modal = &modal{
+		kind: modalPrompt, title: "Save the log", value: suggested,
+		body: "Saves the lines that are shown now. A name without a folder goes in the current folder.",
+		validate: func(value string) string {
+			if value == "" {
+				return "A file name is needed."
+			}
+			return ""
+		},
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(value, "~/") {
+				value = filepath.Join(home, value[2:])
+			}
+			var b strings.Builder
+			for _, line := range m.log.shown {
+				b.WriteString(line.Text)
+				b.WriteByte('\n')
+			}
+			// Logs can hold tokens and personal data, so only the user may read the file.
+			if err := os.WriteFile(value, []byte(b.String()), 0o600); err != nil {
+				m.fail("Could not save the log", err)
+				return nil
+			}
+			m.setNote(fmt.Sprintf("Saved %d lines to %s", len(m.log.shown), value), false)
+			return nil
+		},
+	}
+	return nil
+}
+
+// Creating devices -----------------------------------------------------------------------------
+
+func (m *Model) create() tea.Cmd {
+	if !m.backend.HasIOS() {
+		return m.createAVD()
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "New device", items: []string{"iOS simulator", "Android emulator"},
+		onChoose: func(m *Model, index int) tea.Cmd {
+			if index == 0 {
+				return m.createSimulator()
+			}
+			return m.createAVD()
+		},
+	}
+	return nil
+}
+
+func (m *Model) message(title, body string) {
+	m.modal = &modal{kind: modalMessage, title: title, body: body}
+}
+
+func (m *Model) createSimulator() tea.Cmd {
+	return m.background("Reading the installed iOS versions…", func(ctx context.Context) applyMsg {
+		runtimes, err := m.backend.Runtimes(ctx)
+		return func(m *Model) tea.Cmd {
+			m.setNote("", false)
+			switch {
+			case err != nil:
+				m.fail("Could not read the iOS versions", err)
+				return nil
+			case len(runtimes) == 0:
+				m.message("No iOS version is installed", "Install one in Xcode > Settings > Components, then try again.")
+				return nil
+			}
+			names := make([]string, len(runtimes))
+			for i, r := range runtimes {
+				names[i] = r.Name
+			}
+			m.modal = &modal{
+				kind: modalChoice, title: "iOS version", items: names,
+				onChoose: func(m *Model, index int) tea.Cmd {
+					m.chooseSimulatorType(runtimes[index])
+					return nil
+				},
+			}
+			return nil
+		}
+	})
+}
+
+func (m *Model) chooseSimulatorType(runtime ios.Runtime) {
+	if len(runtime.DeviceTypes) == 0 {
+		m.message("No device types", "Xcode reports no iPhone or iPad for "+runtime.Name+".")
+		return
+	}
+	names := make([]string, len(runtime.DeviceTypes))
+	for i, t := range runtime.DeviceTypes {
+		names[i] = t.Name
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "Device for " + runtime.Name, items: names,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			deviceType := runtime.DeviceTypes[index]
+			m.modal = &modal{
+				kind: modalPrompt, title: "Name of the new simulator", value: deviceType.Name,
+				validate: func(value string) string {
+					if value == "" {
+						return "A name is needed."
+					}
+					return ""
+				},
+				onSubmit: func(m *Model, name string) tea.Cmd {
+					return m.background("Creating "+name+"…", func(ctx context.Context) applyMsg {
+						err := m.backend.CreateSimulator(ctx, name, deviceType.ID, runtime.ID)
+						return created(name, err)
+					})
+				},
+			}
+			return nil
+		},
+	}
+}
+
+func created(name string, err error) applyMsg {
+	return func(m *Model) tea.Cmd {
+		if err != nil {
+			m.fail("Could not create "+name, err)
+			return nil
+		}
+		m.setNote("Created "+name, false)
+		return m.refresh()
+	}
+}
+
+func (m *Model) createAVD() tea.Cmd {
+	images := m.backend.SystemImages()
+	if len(images) == 0 {
+		m.message("No Android system image is installed",
+			"An emulator needs a system image that runs on this machine.\n"+
+				"Install one in Android Studio > SDK Manager > SDK Platforms (tick \"Show Package Details\"), "+
+				"or with sdkmanager, then try again.")
+		return nil
+	}
+	labels := make([]string, len(images))
+	for i, image := range images {
+		labels[i] = image.Label
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "Android version", items: labels,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			image := images[index]
+			return m.background("Reading the device profiles…", func(ctx context.Context) applyMsg {
+				profiles, err := m.backend.DeviceProfiles(ctx)
+				return func(m *Model) tea.Cmd {
+					m.setNote("", false)
+					if err != nil {
+						m.fail("Could not read the device profiles", err)
+						return nil
+					}
+					m.chooseProfile(image, profiles)
+					return nil
+				}
+			})
+		},
+	}
+	return nil
+}
+
+func (m *Model) chooseProfile(image android.SystemImage, profiles []string) {
+	items := append([]string{"Default hardware"}, profiles...)
+	m.modal = &modal{
+		kind: modalChoice, title: "Hardware profile", items: items,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			profile := ""
+			suggested := "Android_" + image.API
+			if index > 0 {
+				profile = profiles[index-1]
+				suggested = profile + "_API_" + image.API
+			}
+			m.modal = &modal{
+				kind: modalPrompt, title: "Name of the new emulator", value: suggested,
+				body: "Letters, digits, dots, dashes and underscores.",
+				validate: func(value string) string {
+					if !android.ValidAVDName(value) {
+						return "Use letters, digits, dots, dashes and underscores, starting with a letter or digit."
+					}
+					return ""
+				},
+				onSubmit: func(m *Model, name string) tea.Cmd {
+					return m.background("Creating "+name+"…", func(ctx context.Context) applyMsg {
+						return created(name, m.backend.CreateAVD(ctx, name, image.ID, profile))
+					})
+				},
+			}
+			return nil
+		},
+	}
+}
+
+// Wireless phones ----------------------------------------------------------------------------
+
+const wirelessHelp = "On the phone: Settings > Developer options > Wireless debugging."
+
+func addressProblem(value string) string {
+	if !android.ValidAddress(value) {
+		return "Type an address and port, such as 192.168.1.5:37123"
+	}
+	return ""
+}
+
+func (m *Model) wireless() tea.Cmd {
+	m.modal = &modal{
+		kind: modalChoice, title: "Android phone over Wi-Fi",
+		items: []string{"Pair a new phone with a pairing code", "Connect to a phone that is already paired"},
+		onChoose: func(m *Model, index int) tea.Cmd {
+			if index == 0 {
+				m.pair()
+			} else {
+				m.connect()
+			}
+			return nil
+		},
+	}
+	return nil
+}
+
+func (m *Model) pair() {
+	m.modal = &modal{
+		kind: modalPrompt, title: "Pairing address", validate: addressProblem,
+		body: wirelessHelp + " Tap \"Pair device with pairing code\" and type the address and port shown under the code.",
+		onSubmit: func(m *Model, address string) tea.Cmd {
+			m.modal = &modal{
+				kind: modalPrompt, title: "Pairing code", body: "The six digits shown on the phone.",
+				validate: func(value string) string {
+					if len(value) != 6 || strings.Trim(value, "0123456789") != "" {
+						return "The code is six digits."
+					}
+					return ""
+				},
+				onSubmit: func(m *Model, code string) tea.Cmd {
+					return m.background("Pairing with "+address+"…", func(ctx context.Context) applyMsg {
+						err := m.backend.Pair(ctx, address, code)
+						return func(m *Model) tea.Cmd {
+							if err != nil {
+								m.fail("Could not pair", err)
+								return nil
+							}
+							m.setNote("Paired. Now connect to the address on the Wireless debugging screen", false)
+							m.connect()
+							return nil
+						}
+					})
+				},
+			}
+			return nil
+		},
+	}
+}
+
+func (m *Model) connect() {
+	m.modal = &modal{
+		kind: modalPrompt, title: "Connect address", validate: addressProblem,
+		body: wirelessHelp + " Type the \"IP address & Port\" shown at the top. It differs from the pairing address.",
+		onSubmit: func(m *Model, address string) tea.Cmd {
+			return m.background("Connecting to "+address+"…", func(ctx context.Context) applyMsg {
+				err := m.backend.Connect(ctx, address)
+				return func(m *Model) tea.Cmd {
+					if err != nil {
+						m.fail("Could not connect", err)
+						return nil
+					}
+					m.setNote("Connected to "+address, false)
+					return m.refresh()
+				}
+			})
+		},
+	}
+}
+
+// errorHint is the advice part of an error, when it has one.
+func errorHint(err error) string {
+	var e *apperr.Error
+	if errors.As(err, &e) {
+		return e.Hint
+	}
+	return ""
+}
