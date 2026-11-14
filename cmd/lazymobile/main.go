@@ -14,6 +14,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/eas"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/run"
+	"github.com/0xrnp/lazymobile/internal/state"
 	"github.com/0xrnp/lazymobile/internal/tui"
 )
 
@@ -48,6 +49,7 @@ func main() {
 	}
 	runner := run.Exec{}
 	options := android.Options{}
+	store := state.Store{Path: state.DefaultPath()}
 	app := &cli.App{
 		Manager: mobile.New(runner, options, runtime.GOOS),
 		Version: version,
@@ -59,7 +61,8 @@ func main() {
 			if client, found := project(runner); found {
 				builds = client
 			}
-			return tui.Run(ctx, m, builds)
+			folder, _ := os.Getwd()
+			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {
@@ -67,6 +70,7 @@ func main() {
 			}
 			return nil
 		},
+		State: store,
 		Doctor: func(ctx context.Context) doctor.Report {
 			return doctor.Check(ctx, runner, options, runtime.GOOS)
 		},

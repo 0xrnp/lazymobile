@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
+	"github.com/0xrnp/lazymobile/internal/state"
 )
 
 // Backend is what the dashboard needs from the rest of the program.
@@ -39,6 +41,14 @@ type Backend interface {
 	Install(ctx context.Context, d device.Device, path string) error
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
+	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
+}
+
+// Memory is what the dashboard remembers between runs, and the folder it was started in, which
+// decides which saved view is its own.
+type Memory struct {
+	Store  state.Store
+	Folder string
 }
 
 const (
@@ -120,6 +130,18 @@ type Model struct {
 	// lastApp remembers the app id typed for each platform, to offer it again.
 	lastApp map[device.Platform]string
 	log     logView
+
+	// deviceRows and buildRows are, for each row drawn in those panes, the index of the device or
+	// build on it, or -1. Drawing fills them in, and a click reads them.
+	deviceRows, buildRows []int
+
+	memory Memory
+	// restored is set once the saved view has been put back, after the first device list.
+	restored bool
+	// saved is the view last written, so an unchanged one is not written again.
+	saved *state.View
+	// appsAsked counts the app lists asked for, so a slow one that is no longer wanted is dropped.
+	appsAsked int
 }
 
 // New returns a dashboard that has not started yet.
@@ -138,10 +160,11 @@ func New(ctx context.Context, backend Backend, builds Builds) *Model {
 }
 
 // Run shows the dashboard until the user quits.
-func Run(ctx context.Context, backend Backend, builds Builds) error {
+func Run(ctx context.Context, backend Backend, builds Builds, memory Memory) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	m := New(ctx, backend, builds)
+	m.memory = memory
 	program := tea.NewProgram(m, tea.WithContext(ctx))
 	m.send = program.Send
 	_, err := program.Run()
@@ -232,9 +255,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseClickMsg:
 		if m.modal == nil && msg.Button == tea.MouseLeft {
-			if p, ok := m.paneAt(msg.X, msg.Y); ok {
-				m.focus = p
-			}
+			m.click(msg.X, msg.Y)
 		}
 	case tea.PasteMsg:
 		if m.modal != nil && m.modal.kind == modalPrompt {
@@ -246,6 +267,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case buildsMsg:
 		m.setBuilds(msg)
 	case tickMsg:
+		m.saveView()
 		cmds := []tea.Cmd{tick()}
 		interval := refreshIdle
 		if m.changing() {
@@ -292,11 +314,103 @@ func (m *Model) setDevices(msg devicesMsg) tea.Cmd {
 		}
 	}
 	m.cursor = min(max(m.cursor, 0), max(len(m.devices)-1, 0))
+	var cmds []tea.Cmd
+	if !m.restored {
+		cmd, done := m.restore()
+		m.restored = done
+		cmds = append(cmds, cmd)
+	}
 	if m.refreshAgain {
 		m.refreshAgain = false
-		return m.refresh()
+		cmds = append(cmds, m.refresh())
 	}
-	return nil
+	return tea.Batch(cmds...)
+}
+
+// restore puts back the view saved when the dashboard was last left in this folder: the
+// selected device, the log settings, and the log itself when its device is still running. A log
+// that launches an app is not started again on its own, since that would relaunch the app.
+//
+// It reports false, to be tried again with the next list, when the saved device is missing from
+// a list that a tool failed to give in full.
+func (m *Model) restore() (tea.Cmd, bool) {
+	if m.memory.Folder == "" {
+		return nil, true
+	}
+	view, ok := m.memory.Store.Load().Views[m.memory.Folder]
+	if !ok {
+		return nil, true
+	}
+	if len(m.listErrs) > 0 {
+		for _, key := range []string{view.Device, logDevice(view)} {
+			if key != "" && !slices.ContainsFunc(m.devices, func(d device.Device) bool { return d.Key() == key }) {
+				return nil, false
+			}
+		}
+	}
+	m.log.filter, m.log.wrap = view.Filter, view.Wrap
+	if view.LevelChosen {
+		m.log.level, m.log.levelChosen = view.Level, true
+	}
+	for i, d := range m.devices {
+		if d.Key() == view.Device {
+			m.cursor = i
+		}
+	}
+	if view.Log == nil || view.Log.Mode == logs.Console {
+		return nil, true
+	}
+	for _, d := range m.devices {
+		if d.Key() == view.Log.Device && d.Ready() {
+			m.setNote("Opened the log you left: "+d.Name, false)
+			return m.startLogs(logs.Spec{Device: d, Mode: view.Log.Mode, App: view.Log.App}), true
+		}
+	}
+	return nil, true
+}
+
+func logDevice(view state.View) string {
+	if view.Log == nil {
+		return ""
+	}
+	return view.Log.Device
+}
+
+// saveView remembers where the dashboard is, for the next start in this folder. It runs every
+// second as well as on quit, because Neovim, or a closed terminal, can end lazymobile without a
+// quit. The file is only written when something changed.
+func (m *Model) saveView() {
+	// Before the saved view is put back, saving would replace it with an empty one.
+	if m.memory.Folder == "" || !m.restored {
+		return
+	}
+	view := state.View{Filter: m.log.filter, Level: m.log.level, LevelChosen: m.log.levelChosen, Wrap: m.log.wrap}
+	if d, ok := m.selected(); ok {
+		view.Device = d.Key()
+	}
+	if m.log.opened && !m.log.ended {
+		view.Log = &state.Log{Device: m.log.spec.Device.Key(), Mode: m.log.spec.Mode, App: m.log.spec.App}
+	}
+	if m.saved != nil && sameView(*m.saved, view) {
+		return
+	}
+	m.saved = &view
+	view.SavedAt = m.now()
+	// Remembering is a convenience, so a file that cannot be written is not reported.
+	_ = m.memory.Store.Update(func(f *state.File) {
+		if f.Views == nil {
+			f.Views = map[string]state.View{}
+		}
+		f.Views[m.memory.Folder] = view
+	})
+}
+
+func sameView(a, b state.View) bool {
+	if (a.Log == nil) != (b.Log == nil) || (a.Log != nil && *a.Log != *b.Log) {
+		return false
+	}
+	a.Log, b.Log = nil, nil
+	return a == b
 }
 
 // settling is an action that has finished, but whose effect the device list does not show yet.
@@ -453,6 +567,49 @@ func (m *Model) paneAt(x, y int) (pane, bool) {
 		return paneLogs, true
 	}
 	return 0, false
+}
+
+// click focuses the pane under the pointer, and selects the device or build clicked.
+func (m *Model) click(x, y int) {
+	p, ok := m.paneAt(x, y)
+	if !ok {
+		return
+	}
+	m.focus = p
+	l := m.layout()
+	// Rows inside a pane start under its top border.
+	switch p {
+	case paneDevices:
+		if i := rowAt(m.deviceRows, y-1); i >= 0 {
+			m.cursor = i
+		}
+	case paneBuilds:
+		if i := rowAt(m.buildRows, y-(l.bodyHeight-l.buildsHeight)-1); i >= 0 {
+			m.build.cursor = i
+		}
+	}
+}
+
+// owners turns the line of each item into the item on each of the rows shown, which start at
+// line first.
+func owners(rowOf []int, first, rows int) []int {
+	out := make([]int, rows)
+	for i := range out {
+		out[i] = -1
+	}
+	for item, line := range rowOf {
+		if row := line - first; row >= 0 && row < rows {
+			out[row] = item
+		}
+	}
+	return out
+}
+
+func rowAt(rows []int, row int) int {
+	if row < 0 || row >= len(rows) {
+		return -1
+	}
+	return rows[row]
 }
 
 // wheel scrolls the pane under the pointer, without moving the focus.
@@ -678,6 +835,7 @@ func (m *Model) logKey(key string) tea.Cmd {
 }
 
 func (m *Model) quit() tea.Cmd {
+	m.saveView()
 	session := m.log.session
 	if session == nil {
 		return tea.Quit
@@ -699,8 +857,7 @@ func (m *Model) openLogs(d device.Device) tea.Cmd {
 		m.setNote(d.Name+" is not running. Boot or connect it to see its logs", true)
 		return nil
 	case 1:
-		m.askApp(d, modes[0])
-		return nil
+		return m.pickApp(d, modes[0])
 	}
 	labels := make([]string, len(modes))
 	for i, mode := range modes {
@@ -709,11 +866,80 @@ func (m *Model) openLogs(d device.Device) tea.Cmd {
 	m.modal = &modal{
 		kind: modalChoice, title: "Which log of " + d.Name + "?", items: labels,
 		onChoose: func(m *Model, index int) tea.Cmd {
-			m.askApp(d, modes[index])
-			return nil
+			return m.pickApp(d, modes[index])
 		},
 	}
 	return nil
+}
+
+// pickApp offers the app ids used before and the apps installed on the device, then opens the
+// log. With nothing to offer, it asks for an app id straight away.
+func (m *Model) pickApp(d device.Device, mode logs.ModeInfo) tea.Cmd {
+	recent := m.memory.Store.Load().Apps[d.Platform]
+	if d.Platform == device.IOS && d.Kind == device.Physical {
+		m.offerApps(d, mode, state.Choices(recent, nil))
+		return nil
+	}
+	m.setNote("Looking for the apps on "+d.Name+"…", false)
+	m.appsAsked++
+	asked := m.appsAsked
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		// Without the installed apps, the ones used before are still offered.
+		installed, _ := backend.InstalledApps(ctx, d)
+		return applyMsg(func(m *Model) tea.Cmd {
+			if m.note == "Looking for the apps on "+d.Name+"…" {
+				m.setNote("", false)
+			}
+			// The answer is only wanted for the latest question, while its device is still the
+			// selected one and nothing else has been opened.
+			current, ok := m.selected()
+			if asked == m.appsAsked && m.modal == nil && ok && current.Key() == d.Key() {
+				m.offerApps(d, mode, state.Choices(recent, installed))
+			}
+			return nil
+		})
+	}
+}
+
+func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.AppChoice) {
+	if len(choices) == 0 {
+		m.askApp(d, mode)
+		return
+	}
+	items := make([]string, 0, len(choices)+2)
+	for _, c := range choices {
+		var about []string
+		if c.Name != "" {
+			about = append(about, c.Name)
+		}
+		if c.Recent {
+			about = append(about, "used before")
+		}
+		items = append(items, c.ID+"   "+strings.Join(about, " · "))
+	}
+	every := -1
+	if !mode.AppRequired {
+		every = len(items)
+		items = append(items, "Every app")
+	}
+	typed := len(items)
+	items = append(items, "Type an app id…")
+	m.modal = &modal{
+		kind: modalChoice, title: "Which app on " + d.Name + "?", items: items,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			switch index {
+			case typed:
+				m.askApp(d, mode)
+				return nil
+			case every:
+				return m.startLogs(logs.Spec{Device: d, Mode: mode.ID})
+			}
+			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: choices[index].ID})
+		},
+	}
 }
 
 func (m *Model) askApp(d device.Device, mode logs.ModeInfo) {
@@ -721,8 +947,12 @@ func (m *Model) askApp(d device.Device, mode logs.ModeInfo) {
 	if mode.AppRequired {
 		body = "The bundle id of the app to launch, such as com.example.app."
 	}
+	value := m.lastApp[d.Platform]
+	if recent := m.memory.Store.Load().Apps[d.Platform]; value == "" && len(recent) > 0 {
+		value = recent[0]
+	}
 	m.modal = &modal{
-		kind: modalPrompt, title: "App on " + d.Name, body: body, value: m.lastApp[d.Platform],
+		kind: modalPrompt, title: "App on " + d.Name, body: body, value: value,
 		validate: func(value string) string {
 			switch {
 			case value == "" && mode.AppRequired:
@@ -756,6 +986,11 @@ func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
 	})
 	m.log.session = session
 	m.focus = paneLogs
+	if spec.App != "" {
+		m.lastApp[spec.Device.Platform] = spec.App
+		_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(spec.Device.Platform, spec.App) })
+	}
+	m.saveView()
 	return func() tea.Msg { return logEndMsg{id, session.Wait()} }
 }
 

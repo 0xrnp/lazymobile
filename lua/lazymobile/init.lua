@@ -9,6 +9,8 @@ M.config = {
   width = 0.9,
   height = 0.9,
   border = "rounded",
+  -- Hides the window from inside it, while lazymobile keeps running. false for no key.
+  toggle_key = "<C-q>",
 }
 
 local state = { buf = nil, win = nil }
@@ -62,6 +64,9 @@ local function start()
   state.buf = vim.api.nvim_create_buf(false, true)
   show()
   local buf = state.buf
+  if M.config.toggle_key then
+    vim.keymap.set("t", M.config.toggle_key, hide, { buffer = buf, desc = "Hide lazymobile" })
+  end
   local function on_exit(_, code)
     vim.schedule(function()
       if state.buf == buf then

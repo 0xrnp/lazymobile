@@ -411,6 +411,7 @@ func (m *Model) buildLines(width, height int) []string {
 	profileWidth := max(width-4-platformWidth-statusWidth-ageWidth-3, 4)
 	cursorLine := 0
 	now := m.now()
+	rowOf := make([]int, 0, len(v.list))
 	for i, b := range v.list {
 		text := fit(b.Platform, platformWidth) + " " + fit(b.Profile, profileWidth) + " " +
 			fit(buildStatus(b), statusWidth) + " " + fit(ago(now, b.CreatedAt), ageWidth)
@@ -423,11 +424,14 @@ func (m *Model) buildLines(width, height int) []string {
 			cursorLine = len(lines)
 			text = bold.Render(text)
 		}
+		rowOf = append(rowOf, len(lines))
 		lines = append(lines, " "+buildMark(b)+" "+text)
 	}
+	first := 0
 	if len(lines) > height && height > 0 {
-		first := min(max(cursorLine-height/2, 0), len(lines)-height)
+		first = min(max(cursorLine-height/2, 0), len(lines)-height)
 		lines = lines[first : first+height]
 	}
+	m.buildRows = owners(rowOf, first, len(lines))
 	return lines
 }

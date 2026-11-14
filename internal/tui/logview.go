@@ -244,7 +244,7 @@ func (v *logView) lines(width, rows int, focused bool) []string {
 				out = append(out, chosen.Render(fit(text, width)))
 				continue
 			}
-			out = append(out, levelStyle(line.Level).Render(text))
+			out = append(out, highlight(text, v.filter, levelStyle(line.Level)))
 		}
 	}
 	for len(out) < logRows {
@@ -283,7 +283,7 @@ func (v *logView) wrapped(width, rows, selected int) []string {
 			if i == selected {
 				parts[j] = chosen.Render(fit(part, width))
 			} else {
-				parts[j] = levelStyle(line.Level).Render(part)
+				parts[j] = highlight(part, v.filter, levelStyle(line.Level))
 			}
 		}
 		return parts

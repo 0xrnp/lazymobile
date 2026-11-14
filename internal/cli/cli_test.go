@@ -6,15 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/android"
+	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/eas"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/run"
 	"github.com/0xrnp/lazymobile/internal/run/runtest"
+	"github.com/0xrnp/lazymobile/internal/state"
 )
 
 const simctlList = `{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
@@ -44,6 +48,10 @@ func newEnv(t *testing.T) *env {
 				t.Error(err)
 			}
 			return run.Result{}
+		case strings.Contains(command, "simctl listapps"):
+			return runtest.Out("{}")
+		case strings.HasPrefix(command, "plutil -convert json"):
+			return runtest.Out(`{"com.example.installed": {"ApplicationType": "User", "CFBundleDisplayName": "Installed"}, "com.apple.mobilesafari": {"ApplicationType": "System"}}`)
 		case strings.HasPrefix(command, "xcrun simctl"), strings.HasPrefix(command, "open "):
 			return run.Result{}
 		case strings.HasPrefix(command, "xcode-select"):
@@ -66,6 +74,7 @@ func newEnv(t *testing.T) *env {
 			return nil
 		},
 		Doctor: func(context.Context) doctor.Report { return e.report },
+		State:  state.Store{Path: filepath.Join(t.TempDir(), "state.json")},
 		Builds: func() BuildLister {
 			if e.project == nil {
 				return nil
@@ -365,5 +374,53 @@ func TestShutdownWarnsWhenTheSimulatorAppStaysOpen(t *testing.T) {
 	}
 	if !strings.Contains(e.errs.String(), "warning: The simulator shut down, but DeviceHub could not be quit") {
 		t.Errorf("stderr = %q", e.errs.String())
+	}
+}
+
+func TestAppsListsTheOnesUsedBeforeThenTheInstalledOnes(t *testing.T) {
+	e := newEnv(t)
+	if err := e.app.State.Update(func(f *state.File) { f.RememberApp(device.IOS, "com.used.before") }); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("apps", "iPhone 16 Pro", "--json"); code != ExitOK {
+		t.Fatalf("code %d: %s", code, e.errs.String())
+	}
+	var got struct {
+		Device string            `json:"device"`
+		Apps   []state.AppChoice `json:"apps"`
+	}
+	if err := json.Unmarshal(e.out.Bytes(), &got); err != nil {
+		t.Fatalf("%v: %s", err, e.out.String())
+	}
+	want := []state.AppChoice{{ID: "com.used.before", Recent: true}, {ID: "com.example.installed", Name: "Installed", Installed: true}}
+	if got.Device != "iPhone 16 Pro" || !slices.Equal(got.Apps, want) {
+		t.Errorf("got %+v", got)
+	}
+
+	// A simulator that is not running has no installed apps to list, only the ones used before.
+	if code := e.run("apps", "iPhone 16"); code != ExitOK {
+		t.Fatalf("code %d: %s", code, e.errs.String())
+	}
+	if !strings.Contains(e.out.String(), "com.used.before") || strings.Contains(e.out.String(), "installed") {
+		t.Errorf("output: %s", e.out.String())
+	}
+	if !strings.Contains(e.errs.String(), "is not running") {
+		t.Errorf("stderr: %s", e.errs.String())
+	}
+}
+
+func TestLastAppNeedsAnAppUsedBefore(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("logs", "iPhone 16 Pro", "--last-app"); code != ExitFailure || !strings.Contains(e.errs.String(), "No iOS app id has been used yet") {
+		t.Errorf("code %d, stderr %s", code, e.errs.String())
+	}
+	if code := e.run("logs", "iPhone 16 Pro", "--last-app", "--app", "com.x"); code != ExitUsage {
+		t.Errorf("both flags: code %d", code)
+	}
+	if code := e.run("logs", "iPhone 16 Pro", "--app", "com.x; reboot"); code != ExitUsage {
+		t.Errorf("an invalid app id: code %d", code)
+	}
+	if apps := e.app.State.Load().Apps; apps != nil {
+		t.Errorf("an invalid app id was remembered: %v", apps)
 	}
 }

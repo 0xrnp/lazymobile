@@ -237,3 +237,12 @@ func (m *Manager) OpenURL(ctx context.Context, url string) error {
 	argv := []string{opener, url}
 	return apperr.FromResult(m.Runner.Run(ctx, argv, run.Options{Timeout: 30 * time.Second}), argv, "")
 }
+
+// InstalledApps lists the apps a user installed on a running simulator, emulator or Android
+// phone. iPhones are not supported.
+func (m *Manager) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
+	if d.Platform == device.IOS {
+		return m.IOS.InstalledApps(ctx, d)
+	}
+	return m.Android.InstalledApps(ctx, d)
+}

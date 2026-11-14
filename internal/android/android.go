@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -539,4 +540,30 @@ func (c *Client) Install(ctx context.Context, d device.Device, apkPath string) e
 // ADB is the path of adb, for callers that stream from it.
 func (c *Client) ADB() (string, error) {
 	return c.Opts.tool("adb")
+}
+
+// InstalledApps lists the apps a user installed on a running emulator or phone, by package name.
+// Android's own apps are left out. Android does not say an app's name without a slower query, so
+// only the package name is given.
+func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
+	if d.Platform != device.Android || !d.Ready() {
+		return nil, apperr.New(apperr.InvalidState, "%s is not running", d.Name)
+	}
+	adb, err := c.Opts.tool("adb")
+	if err != nil {
+		return nil, err
+	}
+	argv := []string{adb, "-s", d.TargetID(), "shell", "pm", "list", "packages", "-3"}
+	res := c.run(ctx, argv, actionTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return nil, err
+	}
+	var apps []device.App
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if id, found := strings.CutPrefix(strings.TrimSpace(line), "package:"); found && id != "" {
+			apps = append(apps, device.App{ID: id})
+		}
+	}
+	slices.SortFunc(apps, func(a, b device.App) int { return strings.Compare(a.ID, b.ID) })
+	return apps, nil
 }

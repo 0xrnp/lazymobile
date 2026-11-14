@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -350,5 +351,44 @@ func TestQuitSimulatorAppsDoesNothingWhenNoAppRuns(t *testing.T) {
 	}
 	if fake.Called("osascript") || fake.Called("simctl list") {
 		t.Errorf("ran %v", fake.Calls())
+	}
+}
+
+// simctl listapps prints an old-style property list; this is the JSON plutil makes of a real
+// one, shortened, with one app a user installed among the system's.
+const listappsJSON = `{
+  "com.apple.mobilesafari": {"ApplicationType": "System", "CFBundleDisplayName": "Safari"},
+  "com.example.zeta": {"ApplicationType": "User", "CFBundleName": "Zeta"},
+  "com.example.app": {"ApplicationType": "User", "CFBundleDisplayName": "Example", "CFBundleName": "ExampleApp"}
+}`
+
+func TestInstalledAppsAreTheOnesAUserAdded(t *testing.T) {
+	var stdin string
+	fake := &runtest.Fake{Answer: func(command string, _ []string, opts run.Options) run.Result {
+		switch {
+		case strings.HasPrefix(command, "xcrun simctl listapps SIM-1"):
+			return runtest.Out("{ \"com.example.app\" = { ApplicationType = User; }; }")
+		case strings.HasPrefix(command, "plutil -convert json"):
+			stdin = opts.Stdin
+			return runtest.Out(listappsJSON)
+		}
+		return run.Result{Missing: true}
+	}}
+	sim := device.Device{ID: "SIM-1", Name: "iPhone", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	apps, err := client(fake).InstalledApps(context.Background(), sim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []device.App{{ID: "com.example.app", Name: "Example"}, {ID: "com.example.zeta", Name: "Zeta"}}
+	if !slices.Equal(apps, want) {
+		t.Errorf("apps = %v", apps)
+	}
+	if !strings.Contains(stdin, "ApplicationType = User") {
+		t.Errorf("plutil was given %q, not simctl's output", stdin)
+	}
+
+	phone := device.Device{ID: "P1", Name: "Phone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	if _, err := client(fake).InstalledApps(context.Background(), phone); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an iPhone: %v", err)
 	}
 }

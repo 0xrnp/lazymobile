@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/0xrnp/lazymobile/internal/android"
@@ -20,6 +22,8 @@ import (
 	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
+	"github.com/0xrnp/lazymobile/internal/state"
+	"unicode/utf8"
 )
 
 var (
@@ -70,7 +74,9 @@ type fakeBackend struct {
 	profiles []string
 	specs    []logs.Spec
 	handlers []logs.Handlers
-	sessions []*fakeSession
+	// installed are the apps InstalledApps reports.
+	installed []device.App
+	sessions  []*fakeSession
 }
 
 func (f *fakeBackend) record(format string, args ...any) error {
@@ -142,6 +148,14 @@ func (f *fakeBackend) Disconnect(_ context.Context, d device.Device) error {
 func (f *fakeBackend) Install(_ context.Context, d device.Device, path string) error {
 	return f.record("install %s %s", d.ID, path)
 }
+func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
+	if err := f.record("apps %s", d.ID); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.installed, nil
+}
 func (f *fakeBackend) OpenURL(_ context.Context, url string) error { return f.record("open %s", url) }
 func (f *fakeBackend) StartLogs(_ context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession {
 	_ = f.record("logs %s mode=%s app=%s", spec.Device.ID, spec.Mode, spec.App)
@@ -162,9 +176,16 @@ type harness struct {
 
 func start(t *testing.T, devices ...device.Device) *harness {
 	t.Helper()
+	return startWith(t, Memory{}, devices...)
+}
+
+// startWith starts a dashboard that remembers through memory, as it does when run for real.
+func startWith(t *testing.T, memory Memory, devices ...device.Device) *harness {
+	t.Helper()
 	backend := &fakeBackend{devices: devices, fail: map[string]error{}}
 	h := &harness{t: t, backend: backend, clock: time.Unix(1_800_000_000, 0)}
 	h.m = New(context.Background(), backend, nil)
+	h.m.memory = memory
 	h.m.now = func() time.Time { return h.clock }
 	// Messages sent from outside the loop are applied at once.
 	h.m.send = func(msg tea.Msg) { h.m.Update(msg) }
@@ -1296,4 +1317,241 @@ func TestListFailureOnAnOtherwiseEmptyMachine(t *testing.T) {
 	h.press("r")
 	h.wantScreen("xcrun was not found")
 	h.wantNoScreen("No devices yet")
+}
+
+// Remembering ----------------------------------------------------------------------------------
+
+func memoryIn(t *testing.T) Memory {
+	t.Helper()
+	return Memory{Store: state.Store{Path: filepath.Join(t.TempDir(), "state.json")}, Folder: "/work/app"}
+}
+
+func TestAppsUsedBeforeAndInstalledOnesAreOffered(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) { f.RememberApp(device.Android, "com.used.before") }); err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel)
+	h.backend.installed = []device.App{{ID: "com.installed.one"}, {ID: "com.used.before"}}
+	h.selectDevice(pixel)
+	h.press("l")
+	h.wantCalls("apps Pixel_9a", 1)
+	window := h.window()
+	for _, want := range []string{"com.used.before   used before", "com.installed.one", "Every app", "Type an app id"} {
+		if !strings.Contains(window, want) {
+			t.Errorf("the list should show %q:\n%s", want, window)
+		}
+	}
+	if strings.Count(window, "com.used.before") != 1 {
+		t.Errorf("an app is listed twice:\n%s", window)
+	}
+
+	// The second one is chosen, and becomes the newest app used.
+	h.press("j", "enter")
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.installed.one", 1)
+	if got := memory.Store.Load().Apps[device.Android]; !slices.Equal(got, []string{"com.installed.one", "com.used.before"}) {
+		t.Errorf("remembered %v", got)
+	}
+
+	// "Every app" opens the log without an app.
+	h.press("tab")
+	h.press("l", "j", "j", "enter")
+	h.wantCalls("logs Pixel_9a mode=logcat app=", 2)
+}
+
+func TestTypingAnAppIDStartsFromTheLastOne(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) { f.RememberApp(device.Android, "com.used.before") }); err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel)
+	h.selectDevice(pixel)
+	h.press("l", "G", "enter")
+	if h.m.modal == nil || h.m.modal.kind != modalPrompt || h.m.modal.value != "com.used.before" {
+		t.Fatalf("modal = %+v", h.m.modal)
+	}
+}
+
+func TestTheLogLeftOpenComesBackOnTheNextStart(t *testing.T) {
+	memory := memoryIn(t)
+	first := startWith(t, memory, pixel, iphone)
+	first.openLogs(pixel, "com.example.app")
+	first.press("w", "L")
+	first.m.log.filter = "needle"
+	first.press("q")
+
+	h := startWith(t, memory, pixel, iphone)
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.example.app", 1)
+	h.wantScreen("Opened the log you left: Pixel 9a")
+	if v := h.m.log; !v.wrap || v.filter != "needle" || v.level != logs.Verbose || !v.levelChosen {
+		t.Errorf("log settings not restored: wrap %v filter %q level %v chosen %v", v.wrap, v.filter, v.level, v.levelChosen)
+	}
+	if d, _ := h.m.selected(); d.Key() != pixel.Key() {
+		t.Errorf("selected %s", d.Name)
+	}
+
+	// Another folder has its own view.
+	other := memory
+	other.Folder = "/somewhere/else"
+	h = startWith(t, other, pixel, iphone)
+	h.wantCalls("logs", 0)
+}
+
+func TestALogThatLaunchesTheAppIsNotStartedAgainOnItsOwn(t *testing.T) {
+	memory := memoryIn(t)
+	err := memory.Store.Update(func(f *state.File) {
+		f.Views = map[string]state.View{memory.Folder: {
+			Device: iphone.Key(),
+			Log:    &state.Log{Device: iphone.Key(), Mode: logs.Console, App: "com.example.app"},
+		}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel, iphone)
+	h.wantCalls("logs", 0)
+	if d, _ := h.m.selected(); d.Key() != iphone.Key() {
+		t.Errorf("selected %s", d.Name)
+	}
+}
+
+func TestALogOfADeviceThatStoppedIsNotReopened(t *testing.T) {
+	memory := memoryIn(t)
+	first := startWith(t, memory, pixel)
+	first.openLogs(pixel, "")
+	first.press("q")
+
+	stopped := pixel
+	stopped.State = device.Shutdown
+	h := startWith(t, memory, stopped)
+	h.wantCalls("logs", 0)
+}
+
+// screenRow is the screen row that shows text.
+func screenRow(t *testing.T, h *harness, text string) int {
+	t.Helper()
+	for y, line := range strings.Split(h.screen(), "\n") {
+		if strings.Contains(line, text) {
+			return y
+		}
+	}
+	t.Fatalf("%q is not on the screen:\n%s", text, h.screen())
+	return -1
+}
+
+func TestClickingADeviceSelectsIt(t *testing.T) {
+	h := start(t, iphone, pixel)
+	h.selectDevice(iphone)
+	h.press("tab")
+	h.m.Update(tea.MouseClickMsg{X: 5, Y: screenRow(t, h, "Pixel 9a"), Button: tea.MouseLeft})
+	if d, _ := h.m.selected(); d.Key() != pixel.Key() || h.m.focus != paneDevices {
+		t.Errorf("selected %s, focus %v", d.Name, h.m.focus)
+	}
+	// A heading is not a device: the selection stays.
+	h.m.Update(tea.MouseClickMsg{X: 5, Y: screenRow(t, h, "Android emulators"), Button: tea.MouseLeft})
+	if d, _ := h.m.selected(); d.Key() != pixel.Key() {
+		t.Errorf("a click on a heading selected %s", d.Name)
+	}
+}
+
+func TestFilterMatchesAreMarked(t *testing.T) {
+	out := highlight("Needle in a stack of needles", "needle", lipgloss.NewStyle())
+	if ansi.Strip(out) != "Needle in a stack of needles" {
+		t.Errorf("the text changed: %q", ansi.Strip(out))
+	}
+	for _, want := range []string{match.Render("Needle"), match.Render("needle")} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q is not marked in %q", want, out)
+		}
+	}
+	if got := highlight("nothing here", "needle", lipgloss.NewStyle()); strings.Contains(got, match.Render("needle")) {
+		t.Errorf("marked text that is not there: %q", got)
+	}
+}
+
+func TestAnAppListThatIsNoLongerWantedIsDropped(t *testing.T) {
+	h := start(t, pixel, iphone)
+	h.backend.installed = []device.App{{ID: "com.installed.one"}}
+	h.selectDevice(pixel)
+	_, slow := h.m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	// The selection moves on before the pixel's apps arrive.
+	h.selectDevice(iphone)
+	h.run(slow)
+	if h.m.modal != nil {
+		t.Fatalf("a list for the pixel opened while the iPhone is selected:\n%s", h.window())
+	}
+
+	// Asked twice for the same device, only the second answer opens the list.
+	h.selectDevice(pixel)
+	_, first := h.m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	_, second := h.m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	h.run(first)
+	if h.m.modal != nil {
+		t.Fatal("the first, older answer opened the list")
+	}
+	h.run(second)
+	if h.m.modal == nil || !strings.Contains(h.window(), "Which app on Pixel 9a?") {
+		t.Fatal("the latest answer did not open the list")
+	}
+}
+
+func TestTheViewIsSavedWithoutQuitting(t *testing.T) {
+	memory := memoryIn(t)
+	first := startWith(t, memory, pixel)
+	first.openLogs(pixel, "")
+	first.press("w")
+	first.tick(time.Second)
+	// lazymobile ends here without a quit, as when Neovim closes the terminal.
+	if view := memory.Store.Load().Views[memory.Folder]; view.Log == nil || !view.Wrap {
+		t.Fatalf("saved %+v", view)
+	}
+
+	// A stream that ended is saved as closed, so it is not reopened.
+	first.m.Update(logEndMsg{id: first.m.log.id})
+	first.tick(time.Second)
+	if view := memory.Store.Load().Views[memory.Folder]; view.Log != nil {
+		t.Errorf("an ended stream was saved as open: %+v", view.Log)
+	}
+	h := startWith(t, memory, pixel)
+	h.wantCalls("logs", 0)
+}
+
+func TestSavingWaitsForTheSavedViewToBePutBack(t *testing.T) {
+	memory := memoryIn(t)
+	first := startWith(t, memory, pixel, iphone)
+	first.openLogs(pixel, "com.example.app")
+	first.press("q")
+
+	// The first list misses the pixel because adb failed.
+	h := &harness{t: t, backend: &fakeBackend{devices: []device.Device{iphone}, listErrs: []error{errors.New("adb failed")}, fail: map[string]error{}}, clock: time.Unix(1_800_000_000, 0)}
+	h.m = New(context.Background(), h.backend, nil)
+	h.m.memory = memory
+	h.m.now = func() time.Time { return h.clock }
+	h.m.send = func(msg tea.Msg) { h.m.Update(msg) }
+	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	h.run(h.m.refresh())
+	h.tick(time.Second)
+	if view := memory.Store.Load().Views[memory.Folder]; view.Log == nil {
+		t.Fatalf("the saved view was replaced before it was put back: %+v", view)
+	}
+
+	// The next list has the pixel again, and its log comes back.
+	h.backend.mu.Lock()
+	h.backend.devices, h.backend.listErrs = []device.Device{pixel, iphone}, nil
+	h.backend.mu.Unlock()
+	h.run(h.m.refresh())
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.example.app", 1)
+}
+
+func TestMarkingKeepsCharactersWhole(t *testing.T) {
+	// Lowercasing "Ⱥ" takes one byte more and "ẞ" one byte less, so the whole text keeps its
+	// length while the positions after "Ⱥ" move.
+	text := "Ⱥ needle ẞ"
+	out := highlight(text, "needle", lipgloss.NewStyle())
+	if ansi.Strip(out) != text || !utf8.ValidString(out) {
+		t.Errorf("the text changed: %q", out)
+	}
+	if strings.Contains(out, match.Render("eedle ")) {
+		t.Errorf("the wrong part is marked: %q", out)
+	}
 }

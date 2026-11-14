@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -494,5 +495,27 @@ func TestSystemImagesListsOnlyWhatRunsHere(t *testing.T) {
 	}
 	if !strings.HasPrefix(images[0].Label, "Android 16 (API 36)") {
 		t.Errorf("label = %s", images[0].Label)
+	}
+}
+
+func TestInstalledAppsAreThePackagesAUserAdded(t *testing.T) {
+	phone := device.Device{ID: "R58M", Name: "Phone", Platform: device.Android, Kind: device.Physical, State: device.Connected}
+	fake := runtest.Table(map[string]run.Result{"pm list packages -3": runtest.Out("package:com.zeta.app\r\npackage:com.example.app\r\n\r\n")})
+	apps, err := New(fake, sdk(t, "adb")).InstalledApps(context.Background(), phone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []device.App{{ID: "com.example.app"}, {ID: "com.zeta.app"}}
+	if !slices.Equal(apps, want) {
+		t.Errorf("apps = %v", apps)
+	}
+	if !fake.Called("-s R58M shell pm list packages -3") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+
+	stopped := phone
+	stopped.State = device.Offline
+	if _, err := New(fake, sdk(t, "adb")).InstalledApps(context.Background(), stopped); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("an offline phone: %v", err)
 	}
 }

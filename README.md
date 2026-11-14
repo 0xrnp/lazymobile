@@ -128,7 +128,8 @@ Builds (inside an Expo project):
 
 Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
 shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.
-The mouse wheel scrolls the pane under it, and a click focuses a pane. Sliding sideways on a
+The mouse wheel scrolls the pane under it, and a click focuses a pane and selects the device or
+build under it. Sliding sideways on a
 trackpad (or Shift with the wheel) scrolls the log sideways. To select text with the
 mouse, hold Option (macOS) or Shift while dragging.
 Simulators and emulators keep running after you quit.
@@ -146,6 +147,21 @@ new process id, and keeps crash reports and system messages that name it.
 
 A release iOS app's `print()` and `NSLog` output goes to its standard output, which only the tool
 that launched it sees. Choose "Launch an app and show its output" to see it.
+
+When a log opens, lazymobile offers the app ids you used before and the apps installed on the
+device (simulators, emulators and Android phones), so there is nothing to type. Text matching the
+log filter is underlined.
+
+### Where you left off
+
+When you quit, lazymobile remembers, for the folder it was started in, the selected device, the
+open log and its filter, level and wrap. The next start in that folder puts them back, and opens
+the log again if its device is still running. A log that launches an app is not reopened on its
+own, since that would launch the app again. The lines themselves are not kept.
+
+Everything remembered, including the recent app ids, is in
+`~/.local/state/lazymobile/state.json` (or `$XDG_STATE_HOME/lazymobile/state.json`), readable
+only by you. Delete the file to forget it all.
 
 ## Safety
 
@@ -172,6 +188,8 @@ lazymobile delete "iPhone 17" --yes
 lazymobile install "Pixel 9a" ./app.apk
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
+lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS
+lazymobile apps "iPhone 17" [--json]     # app ids used before, and the apps installed on it
 lazymobile id "Pixel 9a"          # emulator-5554 when running
 lazymobile builds [--json] [--limit 20]
 lazymobile doctor [--json]
@@ -179,6 +197,8 @@ lazymobile doctor [--json]
 
 A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase or
 delete data need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
+
+App ids given to `logs` are remembered, newest first, and shared with the dashboard.
 
 `logs --json` prints one object per line (`text`, `level` from 1 verbose to 6 fatal, `pid`), which
 is easy for a script or a coding agent to read.
@@ -215,16 +235,21 @@ terminal, the way lazygit.nvim does. With lazy.nvim:
   "0xrnp/lazymobile",
   cmd = "Lazymobile",
   keys = { { "<leader>m", "<cmd>Lazymobile<cr>", desc = "lazymobile" } },
-  opts = {}, -- optional: { cmd = { "lazymobile", "--keep-simulator-app" }, width = 0.9, height = 0.9, border = "rounded" }
+  opts = {}, -- optional: { cmd = { "lazymobile", "--keep-simulator-app" }, width = 0.9, height = 0.9, border = "rounded", toggle_key = "<C-q>" }
 }
 ```
 
 The plugin only opens the program, so install the `lazymobile` binary as well (see Install).
 
 `:Lazymobile` opens it in Neovim's current folder, so inside an Expo project the builds pane is
-there. `q` quits it and closes the window. To get back to Neovim while it keeps running (a log
-stream keeps going), press `<C-\><C-n>` and run `:Lazymobile` again; the next `:Lazymobile`
-brings it back.
+there.
+
+- `<C-q>` inside the window hides it while lazymobile keeps running, so a log keeps streaming.
+  `:Lazymobile` (or your key) brings it back as it was. Set `toggle_key` to change the key, or to
+  `false` for none.
+- `q` quits lazymobile and closes the window. The next start in the same folder puts back the
+  device and the log you had open (see "Where you left off").
+- If lazymobile cannot start, the window stays open with its message.
 
 If you map `<Esc>` in terminal mode, lazymobile does not receive it. Its windows also close with
 `ctrl+c`.

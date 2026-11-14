@@ -2,6 +2,8 @@ package tui
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -19,7 +21,45 @@ var (
 	dim    = lipgloss.NewStyle().Faint(true)
 	bold   = lipgloss.NewStyle().Bold(true)
 	chosen = lipgloss.NewStyle().Reverse(true)
+	// match marks the text a log filter found.
+	match = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true).Underline(true)
 )
+
+// sameSizeLower reports whether lowercasing text keeps every character the same number of bytes.
+func sameSizeLower(text string) bool {
+	for _, r := range text {
+		if utf8.RuneLen(unicode.ToLower(r)) != utf8.RuneLen(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// highlight draws text in base, with every case-insensitive occurrence of find in match.
+func highlight(text, find string, base lipgloss.Style) string {
+	// Lowercasing can change the length of some characters, and then the positions found would
+	// not fit the original text.
+	if find == "" || !sameSizeLower(text) || !sameSizeLower(find) {
+		return base.Render(text)
+	}
+	lower, lowerFind := strings.ToLower(text), strings.ToLower(find)
+	var b strings.Builder
+	for {
+		i := strings.Index(lower, lowerFind)
+		if i < 0 {
+			break
+		}
+		if i > 0 {
+			b.WriteString(base.Render(text[:i]))
+		}
+		b.WriteString(match.Render(text[i : i+len(find)]))
+		text, lower = text[i+len(find):], lower[i+len(find):]
+	}
+	if text != "" {
+		b.WriteString(base.Render(text))
+	}
+	return b.String()
+}
 
 // clean makes device output safe to draw. Logs come from apps and devices, so they can hold
 // tabs and terminal escape sequences, which must never reach the user's terminal as commands.

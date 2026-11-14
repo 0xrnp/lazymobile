@@ -4,11 +4,13 @@ package ios
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -418,4 +420,44 @@ func (c *Client) Install(ctx context.Context, d device.Device, appPath string) e
 	}
 	argv := []string{"xcrun", "simctl", "install", d.ID, appPath}
 	return apperr.FromResult(c.Runner.Run(ctx, argv, run.Options{Timeout: 5 * time.Minute}), argv, notInstalled)
+}
+
+// InstalledApps lists the apps a user installed on a booted simulator, by bundle id. The apps
+// that come with iOS are left out.
+func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
+	if d.Platform != device.IOS || d.Kind != device.Simulator {
+		return nil, apperr.New(apperr.Unsupported, "Cannot list the apps on %s: only iOS simulators are supported", d.Name)
+	}
+	argv := []string{"xcrun", "simctl", "listapps", d.ID}
+	res := c.Runner.Run(ctx, argv, run.Options{Timeout: listTimeout})
+	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
+		return nil, err
+	}
+	// simctl prints an old-style property list, which plutil turns into JSON.
+	convert := []string{"plutil", "-convert", "json", "-o", "-", "-"}
+	out := c.Runner.Run(ctx, convert, run.Options{Timeout: listTimeout, Stdin: res.Stdout})
+	if err := apperr.FromResult(out, convert, ""); err != nil {
+		return nil, err
+	}
+	var listed map[string]struct {
+		ApplicationType     string
+		CFBundleDisplayName string
+		CFBundleName        string
+	}
+	if err := json.Unmarshal([]byte(out.Stdout), &listed); err != nil {
+		return nil, &apperr.Error{Code: apperr.ParseFailed, Message: "Could not read the simulator's app list: " + err.Error(), Argv: argv}
+	}
+	var apps []device.App
+	for id, app := range listed {
+		if app.ApplicationType != "User" {
+			continue
+		}
+		name := app.CFBundleDisplayName
+		if name == "" {
+			name = app.CFBundleName
+		}
+		apps = append(apps, device.App{ID: id, Name: name})
+	}
+	slices.SortFunc(apps, func(a, b device.App) int { return strings.Compare(a.ID, b.ID) })
+	return apps, nil
 }

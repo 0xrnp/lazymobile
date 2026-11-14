@@ -314,3 +314,14 @@ func TestWithoutAProjectThereIsNoBuildsPane(t *testing.T) {
 		t.Errorf("tab went to pane %d, want the logs", h.m.focus)
 	}
 }
+
+func TestClickingABuildSelectsIt(t *testing.T) {
+	builds := &fakeBuilds{list: []eas.Build{androidBuild, runningBuild, failedBuild}}
+	h := startWithBuilds(t, builds, pixel)
+	h.press("tab", "enter", "esc")
+	y := screenRow(t, h, "production")
+	h.m.Update(tea.MouseClickMsg{X: 5, Y: y, Button: tea.MouseLeft})
+	if b, _ := h.m.selectedBuild(); b.ID != failedBuild.ID || h.m.focus != paneBuilds {
+		t.Errorf("selected %s, focus %v", b.ID, h.m.focus)
+	}
+}

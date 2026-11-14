@@ -17,6 +17,7 @@ const helpText = `Devices
   e   erase, asks first         d   delete, asks first
   n   new simulator or emulator y   copy the id
   w   Android phone over Wi-Fi  x   disconnect a Wi-Fi phone
+  l offers the app ids used before and the apps on the device
 
 Logs
   j k, arrows   scroll          G   follow the newest line
@@ -35,7 +36,7 @@ Builds (inside an Expo project)
 Everywhere
   tab   next pane               ?   this help
   + -   widen or narrow devices z   zoom the focused pane
-  mouse wheel scrolls the pane under it, a click focuses it,
+  mouse wheel scrolls the pane under it, a click selects what is under it,
   sliding sideways (or Shift with the wheel) scrolls the log sideways
   q     quit
 
@@ -192,6 +193,8 @@ func (m *Model) deviceLines(width, height int) []string {
 	var lines []string
 	cursorLine := 0
 	index := 0
+	// rowOf is the line of each device, for telling which one a click is on.
+	var rowOf []int
 	for _, g := range groups {
 		var members []device.Device
 		for _, d := range m.devices {
@@ -211,6 +214,7 @@ func (m *Model) deviceLines(width, height int) []string {
 			if selected {
 				cursorLine = len(lines)
 			}
+			rowOf = append(rowOf, len(lines))
 			lines = append(lines, m.deviceRow(d, width, selected))
 			if selected && d.Detail != "" {
 				for _, part := range strings.Split(ansi.Wordwrap(d.Detail, max(width-6, 10), " "), "\n") {
@@ -241,10 +245,12 @@ func (m *Model) deviceLines(width, height int) []string {
 	}
 
 	// Scroll so the selected device stays in view.
+	first := 0
 	if len(lines) > height && height > 0 {
-		first := min(max(cursorLine-height/2, 0), len(lines)-height)
+		first = min(max(cursorLine-height/2, 0), len(lines)-height)
 		lines = lines[first : first+height]
 	}
+	m.deviceRows = owners(rowOf, first, len(lines))
 	// The selected device's details go at the bottom, when there is room for them.
 	if d, ok := m.selected(); ok {
 		details := deviceDetails(d, width)

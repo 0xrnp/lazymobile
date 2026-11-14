@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
+	"github.com/0xrnp/lazymobile/internal/state"
 )
 
 // Exit codes.
@@ -43,7 +45,8 @@ Usage:
   lazymobile erase <device> --yes  erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes
   lazymobile install <device> <path>   an .apk, or an .app folder for a simulator
-  lazymobile logs <device> [--app <id>] [--mode logcat|system|console] [--level <level>] [--json]
+  lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
+  lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device>           the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n]   Expo (EAS) builds of the project in this folder
   lazymobile doctor [--json]       what is installed, what is missing, and how to fix it
@@ -52,6 +55,9 @@ Usage:
 Once no simulator is running, Simulator or DeviceHub is quit, which closes the window it keeps
 open for a simulator that shut down. --keep-simulator-app leaves it open. The dashboard takes
 --no-window and --keep-simulator-app too.
+
+App ids given to logs are remembered, newest first, for --last-app, for apps and for the
+dashboard's app list.
 
 <device> is an id, an adb serial, a name, or a unique part of a name.
 Commands that erase or delete data need --yes.
@@ -70,6 +76,8 @@ type App struct {
 	Doctor func(ctx context.Context) doctor.Report
 	// Builds returns the Expo project of the current folder, or nil when there is none.
 	Builds func() BuildLister
+	// State remembers app ids between runs. The zero Store remembers nothing.
+	State state.Store
 }
 
 // usageError is a mistake in how a command was typed.
@@ -136,6 +144,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.install(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
+	case "apps":
+		return a.apps(ctx, rest)
 	case "id":
 		return a.id(ctx, rest)
 	case "doctor":
@@ -310,12 +320,30 @@ func (a *App) id(ctx context.Context, args []string) error {
 func (a *App) logs(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	app := fs.String("app", "", "")
+	lastApp := fs.Bool("last-app", false, "")
 	mode := fs.String("mode", "", "")
 	levelName := fs.String("level", "", "")
 	asJSON := fs.Bool("json", false, "")
 	d, err := a.one(ctx, fs, args, "logs")
 	if err != nil {
 		return err
+	}
+	if *lastApp {
+		if *app != "" {
+			return usageError{"give --app or --last-app, not both"}
+		}
+		recent := a.State.Load().Apps[d.Platform]
+		if len(recent) == 0 {
+			return apperr.New(apperr.NotFound, "No %s app id has been used yet", platformName(d.Platform)).
+				WithHint("Pass --app <id> once, or run `lazymobile apps %q` to see the installed apps.", d.Name)
+		}
+		*app = recent[0]
+		fmt.Fprintln(a.Stderr, "Using "+*app)
+	}
+	if *app != "" {
+		if !logs.ValidAppID(*app) {
+			return usageError{*app + " does not look like an app id"}
+		}
 	}
 	minimum := logs.NoLevel
 	if *levelName != "" {
@@ -342,8 +370,14 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	encoder := json.NewEncoder(a.Stdout)
+	var remember sync.Once
 	session := logs.Start(ctx, a.Manager.LogDeps(), logs.Spec{Device: d, Mode: chosen, App: *app}, logs.Handlers{
 		Lines: func(lines []logs.Line) {
+			// The app id is remembered once the log works, so a mistyped one is not offered again.
+			// Remembering is a convenience: a state file that cannot be written does not stop the log.
+			if *app != "" {
+				remember.Do(func() { _ = a.State.Update(func(f *state.File) { f.RememberApp(d.Platform, *app) }) })
+			}
 			for _, line := range lines {
 				// A line without a level belongs to the one before it, so it is kept.
 				if line.Level != logs.NoLevel && line.Level < minimum {
@@ -362,6 +396,64 @@ func (a *App) logs(ctx context.Context, args []string) error {
 		return err
 	}
 	return ctx.Err()
+}
+
+func platformName(p device.Platform) string {
+	if p == device.IOS {
+		return "iOS"
+	}
+	return "Android"
+}
+
+// apps lists the app ids that can be given to logs: the ones used before, then the ones installed
+// on the device.
+func (a *App) apps(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("apps", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	d, err := a.one(ctx, fs, args, "apps")
+	if err != nil {
+		return err
+	}
+	var installed []device.App
+	switch {
+	case !d.Ready():
+		fmt.Fprintf(a.Stderr, "%s is not running, so only app ids used before are listed.\n", d.Name)
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		fmt.Fprintln(a.Stderr, "The apps on an iPhone are not listed, only app ids used before.")
+	default:
+		if installed, err = a.Manager.InstalledApps(ctx, d); err != nil {
+			fmt.Fprintf(a.Stderr, "warning: the installed apps could not be listed: %s\n", firstLine(err.Error()))
+		}
+	}
+	choices := state.Choices(a.State.Load().Apps[d.Platform], installed)
+	if *asJSON {
+		if choices == nil {
+			choices = []state.AppChoice{}
+		}
+		return a.writeJSON(map[string]any{"device": d.Name, "apps": choices})
+	}
+	if len(choices) == 0 {
+		fmt.Fprintln(a.Stderr, "No apps to show.")
+		return nil
+	}
+	table := tabwriter.NewWriter(a.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "ID\tNAME\tFROM")
+	for _, c := range choices {
+		var from []string
+		if c.Recent {
+			from = append(from, "recent")
+		}
+		if c.Installed {
+			from = append(from, "installed")
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\n", c.ID, c.Name, strings.Join(from, ", "))
+	}
+	return table.Flush()
+}
+
+func firstLine(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
+	return line
 }
 
 func (a *App) doctor(ctx context.Context, args []string) error {

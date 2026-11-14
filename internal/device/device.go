@@ -170,3 +170,11 @@ func Match(list []Device, query string) []Device {
 	}
 	return nil
 }
+
+// App is an app installed on a device.
+type App struct {
+	// ID is the Android package name or the iOS bundle id.
+	ID string `json:"id"`
+	// Name is what the app is called on the home screen, when the platform says.
+	Name string `json:"name,omitempty"`
+}
