@@ -15,6 +15,10 @@ The device list:
 
 ![Simulators, emulators and a connected iPhone in one list](docs/devices.png)
 
+The apps installed on the device, and the ones used before, offered when a log is opened with `l`:
+
+![The list of apps offered before a log opens](docs/app-picker.png)
+
 The keys, shown over the dashboard with `?`:
 
 ![The help window over the dashboard](docs/help.png)
