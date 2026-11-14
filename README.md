@@ -46,10 +46,12 @@ Early release. What has been run, and what has not:
 | Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
 | iOS simulator boot, shut down, installing an app, and both kinds of logs | A real simulator on Xcode 27.2, with a real React Native app |
 | Erase, create and delete simulators | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
-| Expo builds pane | Listing, details, and downloading and installing an Android build on an emulator, with eas-cli 24.7 and a real Expo project. Installing an iOS simulator build, and starting or cancelling builds, have only been run with a fake `eas` |
+| Expo builds pane | Listing, details, and downloading and installing Android and iOS simulator builds, with eas-cli 24.7 and a real Expo project. Starting and cancelling builds have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone. Its logs have only been tried with fake tools |
-| Android phones (USB, Wi-Fi), `idevicesyslog` | Fake tools only. No real device has been tried |
-| Linux | Cross-compiled, and the suite runs in CI. Installed with Homebrew in a Linux container (arm64). The dashboard has not been tried on Linux by hand |
+| Android phones | A real Android phone |
+| `idevicesyslog` (an iPhone's system log) | Fake tools only |
+| Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
+| Mouse and trackpad scrolling | A real terminal on macOS |
 
 If something fails for you, please
 [open an issue](https://github.com/0xrnp/lazymobile/issues/new/choose) with the output of
