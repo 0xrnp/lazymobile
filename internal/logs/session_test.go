@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -179,7 +180,8 @@ func TestStreamThatEnds(t *testing.T) {
 			if apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("error = %v, want command_failed mentioning %q", err, tt.want)
 			}
-			if got := c.texts(); len(got) == 0 || got[0] != "one" {
+			// stdout and stderr are separate pipes, so their lines may arrive in either order.
+			if got := c.texts(); !slices.Contains(got, "one") {
 				t.Errorf("lines before the end should still arrive: %v", got)
 			}
 		})
