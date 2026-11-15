@@ -39,6 +39,7 @@ type Backend interface {
 	Connect(ctx context.Context, address string) error
 	Disconnect(ctx context.Context, d device.Device) error
 	Install(ctx context.Context, d device.Device, path string) error
+	Uninstall(ctx context.Context, d device.Device, id string) error
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
@@ -738,6 +739,8 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 				return m.act(d, "Deleting", "Deleted", isGone, func(ctx context.Context) error { return m.backend.Delete(ctx, d) })
 			})
 		}
+	case "u":
+		return m.pickUninstall(d)
 	case "x":
 		if d.Platform == device.Android && d.Transport == "wifi" {
 			return m.act(d, "Disconnecting", "Disconnected", isGone, func(ctx context.Context) error {
@@ -898,6 +901,73 @@ func (m *Model) pickApp(d device.Device, mode logs.ModeInfo) tea.Cmd {
 			}
 			return nil
 		})
+	}
+}
+
+// pickUninstall lists the apps a user installed on a running device, asks which one to remove, and
+// then asks again before doing it. Apps that come with the system are not listed.
+func (m *Model) pickUninstall(d device.Device) tea.Cmd {
+	if !d.Ready() {
+		m.setNote(d.Name+" is not running: boot or connect it to uninstall an app", true)
+		return nil
+	}
+	note := "Looking for the apps on " + d.Name + "…"
+	m.setNote(note, false)
+	m.appsAsked++
+	asked := m.appsAsked
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		apps, err := backend.InstalledApps(ctx, d)
+		return applyMsg(func(m *Model) tea.Cmd {
+			if m.note == note {
+				m.setNote("", false)
+			}
+			current, ok := m.selected()
+			if asked != m.appsAsked || m.modal != nil || !ok || current.Key() != d.Key() {
+				return nil
+			}
+			switch {
+			case err != nil:
+				m.fail("Could not list the apps on "+d.Name, err)
+			case len(apps) == 0:
+				m.setNote("No apps of yours are installed on "+d.Name, false)
+			default:
+				m.offerUninstall(d, apps)
+			}
+			return nil
+		})
+	}
+}
+
+func (m *Model) offerUninstall(d device.Device, apps []device.App) {
+	items := make([]string, len(apps))
+	for i, app := range apps {
+		var about []string
+		if app.Name != "" {
+			about = append(about, app.Name)
+		}
+		if label := app.VersionLabel(); label != "" {
+			about = append(about, label)
+		}
+		items[i] = app.ID + "   " + strings.Join(about, " · ")
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "Uninstall which app from " + d.Name + "?", items: items,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			id := apps[index].ID
+			body := "This removes " + id + " and all its data from " + d.Name + ". It cannot be undone."
+			if d.Kind == device.Physical {
+				body += "\n" + d.Name + " is a real device."
+			}
+			m.confirm("Uninstall "+id+"?", body, func(m *Model) tea.Cmd {
+				return m.act(d, "Uninstalling "+id+" from", "Uninstalled "+id+" from", nil, func(ctx context.Context) error {
+					return m.backend.Uninstall(ctx, d, id)
+				})
+			})
+			return nil
+		},
 	}
 }
 

@@ -5,6 +5,7 @@ package mobile
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,30 @@ func (m *Manager) Install(ctx context.Context, d device.Device, path string) err
 		return apperr.New(apperr.InvalidState, "iOS simulators need an .app folder").WithHint("Got: %s", path)
 	}
 	return m.IOS.Install(ctx, d, path)
+}
+
+// Uninstall removes an app and its data from a running device. Only apps the user installed can
+// go: the id must be among InstalledApps. That check is also what tells a typo from success,
+// because simctl and devicectl both report success for an app that is not there.
+func (m *Manager) Uninstall(ctx context.Context, d device.Device, id string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if !logs.ValidAppID(id) {
+		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	apps, err := m.InstalledApps(ctx, d)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(apps, func(app device.App) bool { return app.ID == id }) {
+		return apperr.New(apperr.NotFound, "%s is not an installed app on %s", id, d.Name).
+			WithHint("Run `lazymobile apps %q` to see what is installed. Apps that come with the system cannot be uninstalled.", d.Name)
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.Uninstall(ctx, d, id)
+	}
+	return m.Android.Uninstall(ctx, d, id)
 }
 
 // LogDeps are the tools a log session needs.

@@ -105,3 +105,73 @@ func TestAppInfoAsksTheToolOfTheDevicesPlatform(t *testing.T) {
 		t.Errorf("an app the iPhone does not list: %v", err)
 	}
 }
+
+// uninstallManager answers the lists and the uninstall calls of both platforms. Both iOS tools
+// report success for an app that is not there, as the real ones do.
+func uninstallManager(t *testing.T) (*Manager, *runtest.Fake) {
+	t.Helper()
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		switch {
+		case strings.Contains(command, "pm list packages -3"):
+			return runtest.Out("package:com.example.app\n")
+		case strings.Contains(command, "devicectl device info apps"), strings.Contains(command, "devicectl device uninstall app"):
+			apps := `{"result": {"apps": [{"bundleIdentifier": "com.example.app", "name": "Example"}]}}`
+			if err := os.WriteFile(argv[len(argv)-1], []byte(apps), 0o600); err != nil {
+				t.Error(err)
+			}
+			return run.Result{}
+		case strings.Contains(command, "adb -s emulator-5554 uninstall"):
+			return runtest.Out("Success\n")
+		}
+		return run.Result{}
+	}}
+	opts := android.Options{
+		OS: "darwin", Home: t.TempDir(), Getenv: func(string) string { return "" },
+		LookPath:     func(string) (string, error) { return "/usr/bin/adb", nil },
+		SDKFallbacks: []string{}, JavaFallbacks: []string{},
+	}
+	return New(fake, opts, "darwin"), fake
+}
+
+func TestUninstallRemovesAnInstalledApp(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+
+	if err := m.Uninstall(ctx, emulator, "com.example.app"); err != nil || !fake.Called("adb -s emulator-5554 uninstall com.example.app") {
+		t.Errorf("an emulator: %v, ran %v", err, fake.Calls())
+	}
+	if err := m.Uninstall(ctx, iphone, "com.example.app"); err != nil || !fake.Called("devicectl device uninstall app --device UDID com.example.app") {
+		t.Errorf("an iPhone: %v, ran %v", err, fake.Calls())
+	}
+}
+
+func TestUninstallOfWhatIsNotAUserAppRunsNothing(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	stopped := emulator
+	stopped.State = device.Shutdown
+
+	// A typo, and an app that comes with the system, are the same case: it is not in the user's list.
+	for name, err := range map[string]error{
+		"a typo on an emulator": m.Uninstall(ctx, emulator, "com.example.ap"),
+		"a typo on an iPhone":   m.Uninstall(ctx, iphone, "com.example.ap"),
+		"a system app":          m.Uninstall(ctx, emulator, "com.android.chrome"),
+	} {
+		if apperr.CodeOf(err) != apperr.NotFound {
+			t.Errorf("%s: error = %v, want not_found", name, err)
+		}
+	}
+	if err := m.Uninstall(ctx, stopped, "com.example.app"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("a stopped emulator: %v", err)
+	}
+	if err := m.Uninstall(ctx, emulator, "a; reboot"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("an injected id: %v", err)
+	}
+	if fake.Called("uninstall") {
+		t.Errorf("an uninstall ran: %v", fake.Calls())
+	}
+}

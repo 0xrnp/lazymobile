@@ -147,6 +147,8 @@ var (
 	shutdownAction = action{verb: "shut down", already: map[string]bool{"Shutdown": true, "Shutting Down": true}}
 	eraseAction    = action{verb: "erase", hint: "Shut it down first."}
 	deleteAction   = action{verb: "delete"}
+	// A shut-down simulator cannot be asked to uninstall.
+	uninstallAction = action{verb: "uninstall", hint: "Boot it first."}
 )
 
 var currentState = regexp.MustCompile(`in current state:[ \t]*([^\r\n]*)`)
@@ -429,6 +431,21 @@ func (c *Client) Install(ctx context.Context, d device.Device, appPath string) e
 	}
 	argv := []string{"xcrun", "simctl", "install", d.ID, appPath}
 	return apperr.FromResult(c.Runner.Run(ctx, argv, run.Options{Timeout: 5 * time.Minute}), argv, notInstalled)
+}
+
+// Uninstall removes an app, by bundle id, with its data, from a booted simulator or a connected
+// iPhone or iPad. Both tools report success for an id that is not installed, so the caller checks
+// that first.
+func (c *Client) Uninstall(ctx context.Context, d device.Device, bundleID string) error {
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Simulator:
+		argv := []string{"xcrun", "simctl", "uninstall", d.ID, bundleID}
+		return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, uninstallAction)
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		_, err := c.devicectl(ctx, "device", "uninstall", "app", "--device", d.ID, bundleID)
+		return err
+	}
+	return apperr.New(apperr.Unsupported, "Cannot uninstall from %s: only iOS devices are supported", d.Name)
 }
 
 // InstalledApps lists the apps a user installed on a booted simulator, or on a connected iPhone or

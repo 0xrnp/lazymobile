@@ -435,3 +435,43 @@ func TestInstalledAppsOfAnIPhoneThatCannotBeReached(t *testing.T) {
 		t.Errorf("error = %v", err)
 	}
 }
+
+func TestUninstallFromASimulatorOrAnIPhone(t *testing.T) {
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		if strings.HasPrefix(command, "xcrun devicectl device uninstall app --device P1 com.example.app --json-output ") {
+			// devicectl always writes its JSON, and prints "App uninstalled." on success.
+			if err := os.WriteFile(argv[len(argv)-1], []byte(`{"info": {"outcome": "success"}}`), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		return run.Result{}
+	}}
+	ctx := context.Background()
+	if err := client(fake).Uninstall(ctx, bootedSim, "com.example.app"); err != nil {
+		t.Errorf("a simulator: %v", err)
+	}
+	if !fake.Called("xcrun simctl uninstall " + udidBooted + " com.example.app") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+	if err := client(fake).Uninstall(ctx, iphone, "com.example.app"); err != nil {
+		t.Errorf("an iPhone: %v", err)
+	}
+	if err := client(fake).Uninstall(ctx, pixel, "com.example.app"); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an Android device: %v", err)
+	}
+}
+
+func TestUninstallFailures(t *testing.T) {
+	// simctl exits 149 for a simulator that is shut down.
+	shut := runtest.Table(map[string]run.Result{"simctl uninstall": runtest.Fail(149, "Unable to lookup in current state: Shutdown")})
+	err := client(shut).Uninstall(context.Background(), shutdownSim, "com.example.app")
+	if apperr.CodeOf(err) != apperr.InvalidState || !strings.Contains(err.Error(), "shutdown") {
+		t.Errorf("a shut-down simulator: %v", err)
+	}
+
+	unreachable := runtest.Table(map[string]run.Result{"devicectl device uninstall": runtest.Fail(1, "ERROR: The device is not able to fulfill the requested usage assertion requirements. (com.apple.dt.CoreDeviceError error 4016 (0xFB0))")})
+	err = client(unreachable).Uninstall(context.Background(), iphone, "com.example.app")
+	if apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), "not able to fulfill") {
+		t.Errorf("an iPhone that cannot be reached: %v", err)
+	}
+}

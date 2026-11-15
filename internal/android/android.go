@@ -538,6 +538,31 @@ func (c *Client) Install(ctx context.Context, d device.Device, apkPath string) e
 	return nil
 }
 
+// Uninstall removes an app, by package name, from a running emulator or connected phone, with its
+// data.
+func (c *Client) Uninstall(ctx context.Context, d device.Device, id string) error {
+	if d.Platform != device.Android || !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name)
+	}
+	if !logs.ValidAppID(id) {
+		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	adb, err := c.Opts.tool("adb")
+	if err != nil {
+		return err
+	}
+	argv := []string{adb, "-s", d.TargetID(), "uninstall", id}
+	res := c.run(ctx, argv, actionTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return err
+	}
+	// Like install, adb can exit 0 after printing "Failure [DELETE_FAILED_...]".
+	if out := res.Stdout + res.Stderr; strings.Contains(out, "Failure [") {
+		return &apperr.Error{Code: apperr.CommandFailed, Message: "Uninstall failed: " + strings.TrimSpace(out), Argv: argv}
+	}
+	return nil
+}
+
 // ADB is the path of adb, for callers that stream from it.
 func (c *Client) ADB() (string, error) {
 	return c.Opts.tool("adb")
