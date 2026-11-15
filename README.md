@@ -107,9 +107,12 @@ Logs:
 
 | Key | Action |
 | --- | --- |
-| `j` `k`, arrows | Scroll |
+| `j` `k`, arrows | Scroll. The selected line is the one `enter` and `y` use |
+| `pgup` `pgdn`, `ctrl+u` `ctrl+d`, `space` | Half a page up or down (`space` goes down) |
 | `G` | Jump to the end and follow |
 | `g` | First line |
+| `enter` | Show the selected line in full, with the lines under it that belong to it, such as a stack trace |
+| `y` | Copy the selected line, with the lines that belong to it |
 | `h` `l`, `0` | Scroll sideways, reset |
 | `w` | Wrap long lines, to read them in full |
 | `/` | Filter by text (empty clears) |
