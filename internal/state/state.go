@@ -34,8 +34,13 @@ type File struct {
 type View struct {
 	// Device is the key of the selected device.
 	Device string `json:"device,omitempty"`
-	// Log is the log stream that was open, if any.
-	Log *Log `json:"log,omitempty"`
+	// Log is the log stream that was open, if any, and Filter, Level, LevelChosen and Wrap are its
+	// settings. Second is the second log pane, which has its settings in the Log itself, and
+	// Layout is how two logs sit: "" for side by side, "stacked" for one above the other, or "one"
+	// for one at a time.
+	Log    *Log   `json:"log,omitempty"`
+	Second *Log   `json:"second,omitempty"`
+	Layout string `json:"layout,omitempty"`
 
 	Filter string     `json:"filter,omitempty"`
 	Level  logs.Level `json:"level,omitempty"`
@@ -50,6 +55,12 @@ type Log struct {
 	Device string    `json:"device"`
 	Mode   logs.Mode `json:"mode"`
 	App    string    `json:"app,omitempty"`
+
+	// The settings of a second log. The first keeps its own in View, as before there were two.
+	Filter      string     `json:"filter,omitempty"`
+	Level       logs.Level `json:"level,omitempty"`
+	LevelChosen bool       `json:"level_chosen,omitempty"`
+	Wrap        bool       `json:"wrap,omitempty"`
 }
 
 // Store reads and writes the file at Path. The zero Store, with no path, remembers nothing.

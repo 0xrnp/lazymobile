@@ -19,6 +19,7 @@ const helpText = `Devices
   n   new simulator or emulator y   copy the id
   w   Android phone over Wi-Fi  x   disconnect a Wi-Fi phone
   l offers the app ids used before and the apps on the device
+  l on another device adds a second log beside the first
 
 Logs
   j k, arrows   scroll          G   follow the newest line
@@ -28,6 +29,8 @@ Logs
   S   save to a file            x   stop the stream
   r   restart the stream        w   wrap long lines
   enter  the selected line in full, y copies it
+  X   close this log            v   side by side, above, or one at a time
+  z   full screen, again to undo; tab flips between two logs when one shows
 
 Builds (inside an Expo project)
   enter load, then details      r   refresh
@@ -60,8 +63,8 @@ type layout struct {
 	bodyHeight int
 	// devicesWidth and logsWidth are zero for a pane that is hidden.
 	devicesWidth, logsWidth int
-	// logRows is how many log lines fit.
-	logRows int
+	// logs is where each log pane is drawn. A pane that is not drawn has no width.
+	logs [logSlots]logBox
 	// buildsHeight is the height of the builds pane under the devices, or zero without one.
 	buildsHeight int
 }
@@ -73,7 +76,7 @@ func (m *Model) layout() layout {
 	case split:
 		l.devicesWidth = m.devicesWidth()
 		l.logsWidth = m.width - l.devicesWidth
-	case m.focus == paneLogs:
+	case m.focusOnLog():
 		l.logsWidth = m.width
 	default:
 		l.devicesWidth = m.width
@@ -87,8 +90,7 @@ func (m *Model) layout() layout {
 			l.buildsHeight = l.bodyHeight
 		}
 	}
-	// Two border rows and one status row are not log lines.
-	l.logRows = max(l.bodyHeight-3, 0)
+	l.logs = m.logBoxes(l.devicesWidth, l.logsWidth, l.bodyHeight)
 	return l
 }
 
@@ -155,9 +157,7 @@ func (m *Model) panes(l layout) []string {
 			left = append(left, box(m.buildsTitle(), m.buildLines(l.devicesWidth-2, l.buildsHeight-2), l.devicesWidth, l.buildsHeight, m.focus == paneBuilds)...)
 		}
 	}
-	if l.logsWidth > 0 {
-		right = box(m.log.title(l.logsWidth), m.log.lines(l.logsWidth-2, l.bodyHeight-2, m.focus == paneLogs), l.logsWidth, l.bodyHeight, m.focus == paneLogs)
-	}
+	right = m.logLines(l)
 	body := make([]string, l.bodyHeight)
 	for i := range body {
 		if i < len(left) {
@@ -170,13 +170,60 @@ func (m *Model) panes(l layout) []string {
 	return body
 }
 
+// logLines draws the log panes: one, or two one above the other or side by side.
+func (m *Model) logLines(l layout) []string {
+	var drawn [logSlots][]string
+	for slot, b := range l.logs {
+		if b.width == 0 {
+			continue
+		}
+		v := m.slot(slot)
+		focused := m.focus == logPane(slot)
+		drawn[slot] = box(v.title(b.width, m.position(slot)), v.lines(b.width-2, b.height-2, focused), b.width, b.height, focused)
+	}
+	switch {
+	case drawn[0] == nil && drawn[1] == nil:
+		return nil
+	case drawn[0] == nil:
+		return drawn[1]
+	case drawn[1] == nil:
+		return drawn[0]
+	case l.logs[0].y == l.logs[1].y:
+		rows := make([]string, len(drawn[0]))
+		for i := range rows {
+			rows[i] = drawn[0][i] + drawn[1][i]
+		}
+		return rows
+	}
+	return append(drawn[0], drawn[1]...)
+}
+
+// logHints are the keys of a log pane. The ones about two logs and the full screen come first,
+// because a narrow screen cuts the line at its end.
+func (m *Model) logHints() string {
+	var hints string
+	switch {
+	case m.zoomed && m.second.opened:
+		hints = "z back  tab other log  X close"
+	case m.zoomed:
+		hints = "z back  X close"
+	case m.second.opened && m.arrange == arrangeOne:
+		hints = "tab other log  z full screen  v layout  esc devices  X close"
+	case m.second.opened:
+		hints = "z full screen  tab next pane  v layout  X close"
+	default:
+		hints = "z full screen  tab devices  X close"
+	}
+	return hints + "  enter line  y copy  / filter  L level  w wrap  p pause  c clear  S save  x stop  r restart  ? help  q quit"
+}
+
 func (m *Model) hints() string {
 	switch {
 	case m.modal != nil:
 		return ""
-	case m.focus == paneLogs && m.log.opened:
-		return "enter line  y copy  / filter  L level  w wrap  p pause  c clear  S save  x stop  r restart  G follow  tab devices  ? help  q quit"
-	case m.focus == paneLogs:
+	case m.focusOnLog() && m.focusedLogOpen():
+		return m.logHints()
+	case m.focusOnLog():
 		return "tab devices  ? help  q quit"
 	case m.focus == paneBuilds && !m.build.asked:
 		return "enter load builds  tab next pane  ? help  q quit"

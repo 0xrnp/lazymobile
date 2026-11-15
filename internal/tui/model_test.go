@@ -827,8 +827,9 @@ func TestAnIOSSystemLogStartsAtInfoUntilALevelIsChosen(t *testing.T) {
 	h.wantNoScreen("framework noise")
 	h.wantScreen("app message", "1 hidden")
 
-	// Android starts with everything.
-	h.press("tab")
+	// Android starts with everything. A log opens beside the one that is open, so that one is
+	// closed first.
+	h.press("X")
 	h.openLogs(pixel, "")
 	if h.m.log.level != logs.NoLevel {
 		t.Fatalf("logcat level = %v, want none", h.m.log.level)
@@ -836,7 +837,7 @@ func TestAnIOSSystemLogStartsAtInfoUntilALevelIsChosen(t *testing.T) {
 
 	// A level chosen by hand is kept for the next stream.
 	h.press("L")
-	h.press("tab")
+	h.press("X")
 	h.openLogs(pixel, "")
 	if h.m.log.level != logs.Verbose {
 		t.Fatalf("level after L = %v, want verbose", h.m.log.level)
@@ -1086,7 +1087,7 @@ func TestANewStreamReplacesTheOldOne(t *testing.T) {
 	first := h.backend.handlers[0]
 	h.emit(logs.Line{Text: "from the pixel"})
 
-	h.press("tab")
+	h.press("X")
 	h.selectDevice(iphone)
 	h.press("l", "enter", "enter")
 	if !h.backend.sessions[0].isStopped() {
@@ -1517,11 +1518,11 @@ func TestTheLogHeadingKeepsTheVersionUntilNothingElseFits(t *testing.T) {
 		// Then the version, so "ended" is not what gets cut.
 		{50, "Logs: Test iPhone · com.example.app.staging · ended"},
 	} {
-		if got := v.title(c.width); got != c.want {
+		if got := v.title(c.width, ""); got != c.want {
 			t.Errorf("title(%d) = %q, want %q", c.width, got, c.want)
 		}
 	}
-	if got := (&logView{}).title(80); got != "Logs" {
+	if got := (&logView{}).title(80, ""); got != "Logs" {
 		t.Errorf("a log that is not open: %q", got)
 	}
 }
