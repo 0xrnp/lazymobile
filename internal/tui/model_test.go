@@ -151,6 +151,9 @@ func (f *fakeBackend) Disconnect(_ context.Context, d device.Device) error {
 func (f *fakeBackend) Install(_ context.Context, d device.Device, path string) error {
 	return f.record("install %s %s", d.ID, path)
 }
+func (f *fakeBackend) Uninstall(_ context.Context, d device.Device, id string) error {
+	return f.record("uninstall %s %s", d.ID, id)
+}
 func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
 	if err := f.record("apps %s", d.ID); err != nil {
 		return nil, err
@@ -1718,4 +1721,76 @@ func TestMarkingKeepsCharactersWhole(t *testing.T) {
 	if strings.Contains(out, match.Render("eedle ")) {
 		t.Errorf("the wrong part is marked: %q", out)
 	}
+}
+
+func TestUninstallListsTheAppsAndAsksBeforeRemovingOne(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{
+		{ID: "com.example.app", Name: "Example", Version: "1.4.2", Build: "87"},
+		{ID: "com.example.other", Name: "Other"},
+	}
+	h.press("u")
+	h.wantCalls("apps SIM-1", 1)
+	h.wantScreen("Uninstall which app from iPhone 17?", "com.example.app   Example · 1.4.2 (87)", "com.example.other   Other")
+
+	h.press("enter")
+	h.wantScreen("Uninstall com.example.app?", "all its data from iPhone 17", "cannot be undone")
+	h.wantCalls("uninstall", 0)
+
+	// Enter must not confirm something that cannot be undone, and no leaves it alone.
+	h.press("enter")
+	h.wantCalls("uninstall", 0)
+	h.press("n")
+	h.wantNoScreen("Uninstall com.example.app?")
+	h.wantCalls("uninstall", 0)
+
+	h.press("u", "down", "enter", "y")
+	h.wantCalls("uninstall SIM-1 com.example.other", 1)
+	h.wantScreen("Uninstalled com.example.other from iPhone 17")
+}
+
+func TestUninstallFromARealPhoneSaysSo(t *testing.T) {
+	h := start(t, usbPhone, wifiPhon)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.selectDevice(usbPhone)
+	h.press("u", "enter")
+	h.wantScreen("Uninstall com.example.app?", "Test iPhone is a real device.")
+	h.press("y")
+	h.wantCalls("uninstall UDID-1 com.example.app", 1)
+
+	h.selectDevice(wifiPhon)
+	h.press("u", "enter")
+	h.wantScreen("Pixel 8 is a real device.")
+}
+
+func TestUninstallNeedsARunningDevice(t *testing.T) {
+	h := start(t, ipad)
+	h.press("u")
+	h.wantScreen("iPad Air is not running")
+	h.wantCalls("apps", 0)
+	if h.m.modal != nil {
+		t.Error("a window opened for a device that is not running")
+	}
+}
+
+func TestUninstallSaysWhenThereIsNothingToRemoveOrTheListFails(t *testing.T) {
+	h := start(t, iphone)
+	h.press("u")
+	h.wantScreen("No apps of yours are installed on iPhone 17")
+	if h.m.modal != nil {
+		t.Error("a window opened for an empty list")
+	}
+
+	h.backend.fail["apps"] = apperr.New(apperr.CommandFailed, "devicectl could not reach the phone")
+	h.press("u")
+	h.wantScreen("Could not list the apps on iPhone 17", "could not reach the phone")
+	h.wantCalls("uninstall", 0)
+}
+
+func TestAFailedUninstallIsExplained(t *testing.T) {
+	h := start(t, pixel)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.backend.fail["uninstall"] = apperr.New(apperr.CommandFailed, "Uninstall failed: Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]")
+	h.press("u", "enter", "y")
+	h.wantScreen("Could not finish: uninstalling com.example.app from Pixel 9a", "DELETE_FAILED_DEVICE_POLICY_MANAGER")
 }

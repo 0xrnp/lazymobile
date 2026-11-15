@@ -567,3 +567,43 @@ func TestAppInfoNeedsARunningDevice(t *testing.T) {
 		t.Errorf("an offline device was asked: %v", fake.Calls())
 	}
 }
+
+func TestUninstallRunsAdbUninstall(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"uninstall com.example.app": runtest.Out("Success\n")})
+	if err := New(fake, sdk(t, "adb")).Uninstall(context.Background(), runningEmulator, "com.example.app"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("-s emulator-5554 uninstall com.example.app") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+}
+
+func TestUninstallNoticesAFailurePrintedWithExitCode0(t *testing.T) {
+	failed := runtest.Table(map[string]run.Result{"uninstall": runtest.Out("Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]\n")})
+	err := New(failed, sdk(t, "adb")).Uninstall(context.Background(), runningEmulator, "com.example.app")
+	if apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), "DELETE_FAILED_DEVICE_POLICY_MANAGER") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestUninstallRefusesBeforeAskingTheDevice(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	offline := runningEmulator
+	offline.State = device.Offline
+	for name, call := range map[string]func() error{
+		"an offline device": func() error {
+			return New(fake, sdk(t, "adb")).Uninstall(context.Background(), offline, "com.example.app")
+		},
+		"an injected id": func() error {
+			return New(fake, sdk(t, "adb")).Uninstall(context.Background(), runningEmulator, "a; reboot")
+		},
+		"an option as an id": func() error { return New(fake, sdk(t, "adb")).Uninstall(context.Background(), runningEmulator, "-k") },
+	} {
+		if apperr.CodeOf(call()) != apperr.InvalidState {
+			t.Errorf("%s: want invalid_state", name)
+		}
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("the device was asked: %v", calls)
+	}
+}

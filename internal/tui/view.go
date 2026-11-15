@@ -15,6 +15,7 @@ const helpText = `Devices
   b   boot                      B   cold boot (emulator)
   s   shut down                 l   logs (also enter)
   e   erase, asks first         d   delete, asks first
+  u   uninstall an app, asks first
   n   new simulator or emulator y   copy the id
   w   Android phone over Wi-Fi  x   disconnect a Wi-Fi phone
   l offers the app ids used before and the apps on the device

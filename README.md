@@ -27,6 +27,7 @@ The keys, shown over the dashboard with `?`:
 
 - One list for every simulator, emulator, iPhone and Android phone on the machine.
 - Boot, cold boot, shut down, erase, create and delete simulators and emulators.
+- Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Connect Android phones over Wi-Fi (pairing code or address).
 - Live logs for one device: filter by app, level and text. An Android app is followed across
   restarts.
@@ -53,6 +54,7 @@ Early release. What has been run, and what has not:
 | Expo builds pane | Listing, details, and downloading and installing Android and iOS simulator builds, with eas-cli 24.7 and a real Expo project. Starting and cancelling builds have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone, and so were its installed apps with their version and build, which also shows in the log heading. Its logs have only been tried with fake tools |
 | App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
+| Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -97,6 +99,7 @@ Devices:
 | `l`, `enter` | Logs |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
+| `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
 | `n` | New simulator or emulator |
 | `y` | Copy the id for `adb -s`, `flutter -d`, `xcrun` |
 | `w` | Pair or connect an Android phone over Wi-Fi |
@@ -178,7 +181,9 @@ only by you. Delete the file to forget it all.
 
 ## Safety
 
-- Erase, delete and wipe always ask first. Real phones are never booted, erased or deleted.
+- Erase, delete, wipe and uninstall always ask first. Real phones are never booted, shut down,
+  erased or deleted. Uninstalling an app is the one change allowed on them, and only for an app
+  you installed: the apps that come with the system are not listed and are refused.
 - The builds pane does not run `eas` until you press `enter` in it. `eas` runs your project's
   own configuration code and uses your Expo login, so it is never started just by opening the
   dashboard.
@@ -198,6 +203,7 @@ lazymobile shutdown "Pixel 9a"
 lazymobile shutdown "iPhone 17" --keep-simulator-app
 lazymobile erase "iPhone 17" --yes
 lazymobile delete "iPhone 17" --yes
+lazymobile uninstall "Pixel 9a" com.example.app --yes   # the app and its data
 lazymobile install "Pixel 9a" ./app.apk
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
@@ -208,8 +214,8 @@ lazymobile builds [--json] [--limit 20]
 lazymobile doctor [--json]
 ```
 
-A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase or
-delete data need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
+A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase,
+delete or uninstall need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
 
 App ids given to `logs` are remembered, newest first, and shared with the dashboard.
 

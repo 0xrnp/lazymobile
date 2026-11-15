@@ -44,6 +44,7 @@ Usage:
   lazymobile shutdown <device> [--keep-simulator-app]
   lazymobile erase <device> --yes  erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes
+  lazymobile uninstall <device> <app-id> --yes   remove an app and its data from a running device
   lazymobile install <device> <path>   an .apk, or an .app folder for a simulator
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
@@ -60,7 +61,7 @@ App ids given to logs are remembered, newest first, for --last-app, for apps and
 dashboard's app list.
 
 <device> is an id, an adb serial, a name, or a unique part of a name.
-Commands that erase or delete data need --yes.
+Commands that erase, delete or uninstall need --yes.
 Exit codes: 0 success, 1 failure, 2 wrong usage.
 `
 
@@ -142,6 +143,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.destructive(ctx, rest, "delete", "Deleted", a.Manager.Delete)
 	case "install":
 		return a.install(ctx, rest)
+	case "uninstall":
+		return a.uninstall(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":
@@ -305,6 +308,30 @@ func (a *App) install(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(a.Stdout, "Installed on %s\n", d.Name)
+	return nil
+}
+
+func (a *App) uninstall(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	yes := fs.Bool("yes", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 {
+		return usageError{"uninstall needs a device and an app id"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if !*yes {
+		return usageError{fmt.Sprintf("uninstall removes %s and its data from %s. Add --yes to confirm", positional[1], d.Name)}
+	}
+	if err := a.Manager.Uninstall(ctx, d, positional[1]); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Stdout, "Uninstalled %s from %s\n", positional[1], d.Name)
 	return nil
 }
 

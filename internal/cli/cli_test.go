@@ -482,3 +482,31 @@ func TestLastAppNeedsAnAppUsedBefore(t *testing.T) {
 		t.Errorf("an invalid app id was remembered: %v", apps)
 	}
 }
+
+func TestUninstallNeedsYesAndAnInstalledApp(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("uninstall", "iPhone 16 Pro", "com.example.installed"); code != ExitUsage || !strings.Contains(e.errs.String(), "--yes") {
+		t.Errorf("without --yes: code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("uninstall", "iPhone 16 Pro", "--yes"); code != ExitUsage {
+		t.Errorf("without an app id: code %d", code)
+	}
+	// simctl reports success for an app that is not there, so a typo must not get that far.
+	if code := e.run("uninstall", "iPhone 16 Pro", "com.example.typo", "--yes"); code != ExitFailure || !strings.Contains(e.errs.String(), "not an installed app") {
+		t.Errorf("a typo: code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("uninstall", "iPhone 16", "com.example.installed", "--yes"); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
+		t.Errorf("a stopped simulator: code %d, stderr %q", code, e.errs.String())
+	}
+	if e.fake.Called("simctl uninstall") {
+		t.Errorf("an uninstall ran: %v", e.fake.Calls())
+	}
+
+	if code := e.run("uninstall", "--yes", "iPhone 16 Pro", "com.example.installed"); code != ExitOK ||
+		!e.fake.Called("simctl uninstall 00000000-0000-4000-8000-0000000000A2 com.example.installed") {
+		t.Errorf("code %d, ran %v, stderr %q", code, e.fake.Calls(), e.errs.String())
+	}
+	if !strings.Contains(e.out.String(), "Uninstalled com.example.installed from iPhone 16 Pro") {
+		t.Errorf("stdout %q", e.out.String())
+	}
+}
