@@ -29,8 +29,8 @@ The keys, shown over the dashboard with `?`:
 - Boot, cold boot, shut down, erase, create and delete simulators and emulators.
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Connect Android phones over Wi-Fi (pairing code or address).
-- Live logs for one device: filter by app, level and text. An Android app is followed across
-  restarts.
+- Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
+  many logs as you like, side by side or stacked, to read several devices at once.
 - Inside an Expo project: list EAS builds, install a finished build on a running simulator or
   emulator, start and cancel builds.
 - The same features as plain commands, with `--json`, for scripts and coding agents.
@@ -54,6 +54,7 @@ Early release. What has been run, and what has not:
 | Expo builds pane | Listing, details, and downloading and installing Android and iOS simulator builds, with eas-cli 24.7 and a real Expo project. Starting and cancelling builds have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone, and so were its installed apps with their version and build, which also shows in the log heading. Its logs have only been tried with fake tools |
 | App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
+| Several logs at once | Four real system logs of an iOS simulator, in a real terminal: a grid, stacked and one at a time, the list (`a`) closing one, and quitting and coming back with the rest restored. Also a simulator's log beside a real iPhone's launch-an-app log (the launch faked). Not run: more than four logs, or Android logs in several panes. The rest is covered by tests with fake tools |
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
@@ -96,7 +97,7 @@ Devices:
 | `b` | Boot |
 | `B` | Cold boot an emulator (ignore its snapshot) |
 | `s` | Shut down |
-| `l`, `enter` | Logs |
+| `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
@@ -124,7 +125,12 @@ Logs:
 | `c` | Clear |
 | `S` | Save what is shown to a file |
 | `x` | Stop the stream |
+| `X` | Close this log. The next one takes its place |
 | `r` | Restart the stream |
+| `v` | How the logs sit: side by side (the default), stacked, or one at a time |
+| `a` | List all open logs: `enter` goes to one, `x` closes it |
+| `1` to `9` | Go to that log |
+| `z` | Show this log full screen. Again, or `esc`, to go back |
 
 Builds (inside an Expo project):
 
@@ -136,6 +142,15 @@ Builds (inside an Expo project):
 | `n` | Start a build. Shows the exact command and asks first |
 | `x` | Cancel a build that is waiting or running. Asks first |
 | `r` | Refresh |
+
+Open as many logs as you like. Each has its own pane, filter, level, wrap and scroll position, and
+its title says which it is ("Logs 2/5"). Side by side fills rows with as many columns as fit, stacked
+fills columns with as many rows as fit, and a last row with fewer logs shares the whole width. When
+the logs would be too small (under 30 columns by 6 rows each), or the screen is under 100 columns,
+only the log in focus is shown. Then `tab` goes to the next log, `a` lists all of them, and `1` to
+`9` jump straight to one. In the one-at-a-time layout, only the log in focus is shown beside the
+devices, `tab` goes from log to log, and `esc` goes to the devices. `z` shows the focused log full
+screen, and `tab` then goes from log to log.
 
 Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
 shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.
@@ -171,9 +186,10 @@ stay visible. Text matching the log filter is underlined.
 ### Where you left off
 
 When you quit, lazymobile remembers, for the folder it was started in, the selected device, the
-open log and its filter, level and wrap. The next start in that folder puts them back, and opens
-the log again if its device is still running. A log that launches an app is not reopened on its
-own, since that would launch the app again. The lines themselves are not kept.
+open logs, each with its filter, level and wrap, and how they sit. The
+next start in that folder puts them back, and opens the log again if its device is still running.
+A log that launches an app comes back too, marked "not started", and `r` launches the app:
+starting it on its own would launch the app again. The lines themselves are not kept.
 
 Everything remembered, including the recent app ids, is in
 `~/.local/state/lazymobile/state.json` (or `$XDG_STATE_HOME/lazymobile/state.json`), readable

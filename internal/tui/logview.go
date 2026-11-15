@@ -47,6 +47,9 @@ type logView struct {
 
 	status string
 	ended  bool
+	// parked is a log that came back from the last run but is not started, because starting it
+	// would launch its app again. r starts it.
+	parked bool
 	endErr error
 }
 
@@ -186,10 +189,10 @@ func (v *logView) entry() []logs.Line {
 // title is the pane's heading for a pane this wide. A heading that does not fit is cut short at
 // its end, where "paused" and "ended" are, so parts go instead: first the word "console", which
 // the first line of the log says anyway, then the version of the app.
-func (v *logView) title(width int) string {
+func (v *logView) title(width int, position string) string {
 	var title string
 	for _, shed := range []struct{ console, version bool }{{false, false}, {true, false}, {true, true}} {
-		title = v.heading(!shed.console, !shed.version)
+		title = v.heading(!shed.console, !shed.version, position)
 		// box keeps the title and its two spaces within the width, less the corners and a border.
 		if ansi.StringWidth(title)+2 <= width-3 {
 			break
@@ -198,11 +201,15 @@ func (v *logView) title(width int) string {
 	return title
 }
 
-func (v *logView) heading(withConsole, withVersion bool) string {
-	if !v.opened {
-		return "Logs"
+func (v *logView) heading(withConsole, withVersion bool, position string) string {
+	label := "Logs"
+	if position != "" {
+		label += " " + position
 	}
-	parts := []string{"Logs: " + v.spec.Device.Name}
+	if !v.opened {
+		return label
+	}
+	parts := []string{label + ": " + v.spec.Device.Name}
 	if v.spec.App != "" {
 		app := v.spec.App
 		if withVersion && v.version != "" {
@@ -220,6 +227,8 @@ func (v *logView) heading(withConsole, withVersion bool) string {
 		parts = append(parts, fmt.Sprintf("%q", v.filter))
 	}
 	switch {
+	case v.parked:
+		parts = append(parts, "not started")
 	case v.paused:
 		parts = append(parts, "paused")
 	case v.ended:
@@ -274,6 +283,8 @@ func (v *logView) lines(width, rows int, focused bool) []string {
 
 	var status string
 	switch {
+	case v.parked:
+		status = dim.Render(" Press r to launch it (it starts the app).")
 	case v.endErr != nil:
 		status = red.Render(" " + firstLine(v.endErr.Error()))
 	case v.ended:

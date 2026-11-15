@@ -250,6 +250,7 @@ var special = map[string]tea.KeyPressMsg{
 	"enter":     {Code: tea.KeyEnter},
 	"esc":       {Code: tea.KeyEscape},
 	"tab":       {Code: tea.KeyTab},
+	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
 	"backspace": {Code: tea.KeyBackspace},
 	"up":        {Code: tea.KeyUp},
 	"down":      {Code: tea.KeyDown},
@@ -766,7 +767,7 @@ func TestASelectedLogLineOpensInFullWithTheLinesThatBelongToIt(t *testing.T) {
 	)
 	// k moves the selection up from the newest line, to the stack trace line.
 	h.press("k")
-	if h.m.log.follow {
+	if h.m.logPanes[0].follow {
 		t.Fatal("the log still follows after k")
 	}
 	h.press("enter")
@@ -801,14 +802,14 @@ func TestASelectedLogLineOpensInFullWithTheLinesThatBelongToIt(t *testing.T) {
 	h.wantScreen("filler 07")
 	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	h.press("w", "r")
-	if !h.m.log.wrap {
+	if !h.m.logPanes[0].wrap {
 		t.Error("wrapping was turned off by restarting the stream")
 	}
 	h.press("w")
 
 	// Back at the newest line, following starts again.
 	h.press("j", "j")
-	if !h.m.log.follow {
+	if !h.m.logPanes[0].follow {
 		t.Error("the log does not follow after reaching the newest line")
 	}
 }
@@ -820,26 +821,27 @@ func TestAnIOSSystemLogStartsAtInfoUntilALevelIsChosen(t *testing.T) {
 	h.typeText("com.example.app")
 	h.press("enter")
 	h.wantCalls("logs SIM-1 mode=system app=com.example.app", 1)
-	if h.m.log.level != logs.Info {
-		t.Fatalf("level = %v, want info", h.m.log.level)
+	if h.m.logPanes[0].level != logs.Info {
+		t.Fatalf("level = %v, want info", h.m.logPanes[0].level)
 	}
 	h.emit(logs.Line{Text: "Db framework noise", Level: logs.Debug}, logs.Line{Text: "Df app message", Level: logs.Info})
 	h.wantNoScreen("framework noise")
 	h.wantScreen("app message", "1 hidden")
 
-	// Android starts with everything.
-	h.press("tab")
+	// Android starts with everything. A log opens beside the one that is open, so that one is
+	// closed first.
+	h.press("X")
 	h.openLogs(pixel, "")
-	if h.m.log.level != logs.NoLevel {
-		t.Fatalf("logcat level = %v, want none", h.m.log.level)
+	if h.m.logPanes[0].level != logs.NoLevel {
+		t.Fatalf("logcat level = %v, want none", h.m.logPanes[0].level)
 	}
 
 	// A level chosen by hand is kept for the next stream.
 	h.press("L")
-	h.press("tab")
+	h.press("X")
 	h.openLogs(pixel, "")
-	if h.m.log.level != logs.Verbose {
-		t.Fatalf("level after L = %v, want verbose", h.m.log.level)
+	if h.m.logPanes[0].level != logs.Verbose {
+		t.Fatalf("level after L = %v, want verbose", h.m.logPanes[0].level)
 	}
 }
 
@@ -865,23 +867,23 @@ func TestSlidingSidewaysScrollsTheLogUpToItsWidestLine(t *testing.T) {
 	}
 	slide(tea.MouseWheelRight, 0, 100)
 	widest := len("begin ") + 100 + len(" finish")
-	if want := widest - (l.logsWidth - 2); h.m.log.left != want {
-		t.Fatalf("left = %d after sliding to the end, want %d", h.m.log.left, want)
+	if want := widest - (l.logsWidth - 2); h.m.logPanes[0].left != want {
+		t.Fatalf("left = %d after sliding to the end, want %d", h.m.logPanes[0].left, want)
 	}
 	h.wantScreen("finish")
 	h.wantNoScreen("begin")
 
 	// Shift with the normal wheel slides too, for terminals without sideways events.
 	slide(tea.MouseWheelUp, tea.ModShift, 100)
-	if h.m.log.left != 0 {
-		t.Fatalf("left = %d after sliding back", h.m.log.left)
+	if h.m.logPanes[0].left != 0 {
+		t.Fatalf("left = %d after sliding back", h.m.logPanes[0].left)
 	}
 	h.wantScreen("begin")
 
 	h.press("w")
 	slide(tea.MouseWheelRight, 0, 3)
-	if h.m.log.left != 0 {
-		t.Errorf("a wrapped log slid sideways to %d", h.m.log.left)
+	if h.m.logPanes[0].left != 0 {
+		t.Errorf("a wrapped log slid sideways to %d", h.m.logPanes[0].left)
 	}
 }
 
@@ -893,7 +895,7 @@ func TestTheMouseWheelScrollsThePaneUnderIt(t *testing.T) {
 	}
 	logsX := h.m.layout().devicesWidth + 5
 	h.m.Update(tea.MouseWheelMsg{X: logsX, Y: 5, Button: tea.MouseWheelUp})
-	if h.m.log.follow {
+	if h.m.logPanes[0].follow {
 		t.Fatal("the log still follows after scrolling up")
 	}
 	h.wantScreen("scrolled")
@@ -990,13 +992,13 @@ func TestLogFilters(t *testing.T) {
 	)
 
 	// L steps the minimum level up. At "error" the trace under the error stays with it.
-	for h.m.log.level != logs.Error {
+	for h.m.logPanes[0].level != logs.Error {
 		h.press("L")
 	}
 	h.wantScreen("E network failed", "at com.example.Net.call", "error+")
 	h.wantNoScreen("D debug line", "I network ok", "a line after an info line")
 
-	for h.m.log.level != logs.NoLevel {
+	for h.m.logPanes[0].level != logs.NoLevel {
 		h.press("L")
 	}
 	h.press("/")
@@ -1071,10 +1073,10 @@ func TestOnlyTheNewestLinesAreKept(t *testing.T) {
 		}
 		h.emit(batch...)
 	}
-	if got := len(h.m.log.all); got != maxLogLines {
+	if got := len(h.m.logPanes[0].all); got != maxLogLines {
 		t.Errorf("kept %d lines, want %d", got, maxLogLines)
 	}
-	if first := h.m.log.shown[0].Text; first != "line-5000" {
+	if first := h.m.logPanes[0].shown[0].Text; first != "line-5000" {
 		t.Errorf("the oldest line kept is %s, want line-5000", first)
 	}
 	h.wantScreen("line-24999")
@@ -1086,7 +1088,7 @@ func TestANewStreamReplacesTheOldOne(t *testing.T) {
 	first := h.backend.handlers[0]
 	h.emit(logs.Line{Text: "from the pixel"})
 
-	h.press("tab")
+	h.press("X")
 	h.selectDevice(iphone)
 	h.press("l", "enter", "enter")
 	if !h.backend.sessions[0].isStopped() {
@@ -1104,7 +1106,7 @@ func TestAStreamThatFailsSaysWhy(t *testing.T) {
 	h := start(t, pixel)
 	h.openLogs(pixel, "")
 	h.emit(logs.Line{Text: "the last line"})
-	h.m.Update(logEndMsg{id: h.m.log.id, err: apperr.New(apperr.CommandFailed, "adb failed: device offline")})
+	h.m.Update(logEndMsg{id: h.m.logPanes[0].id, err: apperr.New(apperr.CommandFailed, "adb failed: device offline")})
 	h.wantScreen("the last line", "adb failed: device offline", "ended")
 
 	h.press("r")
@@ -1116,7 +1118,7 @@ func TestSaveLog(t *testing.T) {
 	h := start(t, pixel)
 	h.openLogs(pixel, "")
 	h.emit(logs.Line{Text: "D hidden", Level: logs.Debug}, logs.Line{Text: "E kept", Level: logs.Error})
-	for h.m.log.level != logs.Error {
+	for h.m.logPanes[0].level != logs.Error {
 		h.press("L")
 	}
 	path := filepath.Join(t.TempDir(), "saved.log")
@@ -1517,11 +1519,11 @@ func TestTheLogHeadingKeepsTheVersionUntilNothingElseFits(t *testing.T) {
 		// Then the version, so "ended" is not what gets cut.
 		{50, "Logs: Test iPhone · com.example.app.staging · ended"},
 	} {
-		if got := v.title(c.width); got != c.want {
+		if got := v.title(c.width, ""); got != c.want {
 			t.Errorf("title(%d) = %q, want %q", c.width, got, c.want)
 		}
 	}
-	if got := (&logView{}).title(80); got != "Logs" {
+	if got := (&logView{}).title(80, ""); got != "Logs" {
 		t.Errorf("a log that is not open: %q", got)
 	}
 }
@@ -1544,13 +1546,13 @@ func TestTheLogLeftOpenComesBackOnTheNextStart(t *testing.T) {
 	first := startWith(t, memory, pixel, iphone)
 	first.openLogs(pixel, "com.example.app")
 	first.press("w", "L")
-	first.m.log.filter = "needle"
+	first.m.logPanes[0].filter = "needle"
 	first.press("q")
 
 	h := startWith(t, memory, pixel, iphone)
 	h.wantCalls("logs Pixel_9a mode=logcat app=com.example.app", 1)
 	h.wantScreen("Opened the log you left: Pixel 9a")
-	if v := h.m.log; !v.wrap || v.filter != "needle" || v.level != logs.Verbose || !v.levelChosen {
+	if v := h.m.logPanes[0]; !v.wrap || v.filter != "needle" || v.level != logs.Verbose || !v.levelChosen {
 		t.Errorf("log settings not restored: wrap %v filter %q level %v chosen %v", v.wrap, v.filter, v.level, v.levelChosen)
 	}
 	if d, _ := h.m.selected(); d.Key() != pixel.Key() {
@@ -1674,7 +1676,7 @@ func TestTheViewIsSavedWithoutQuitting(t *testing.T) {
 	}
 
 	// A stream that ended is saved as closed, so it is not reopened.
-	first.m.Update(logEndMsg{id: first.m.log.id})
+	first.m.Update(logEndMsg{id: first.m.logPanes[0].id})
 	first.tick(time.Second)
 	if view := memory.Store.Load().Views[memory.Folder]; view.Log != nil {
 		t.Errorf("an ended stream was saved as open: %+v", view.Log)
