@@ -43,12 +43,46 @@ type modal struct {
 	// onKey, when set, sees the keys the list does not use. extraHint says what they do.
 	onKey     func(m *Model, key string, cursor int) tea.Cmd
 	extraHint string
+	// notes, when set, has a dim note for each item, shown after it.
+	notes []string
+	// filterable lets `/` narrow the list by text. The last keep items stay in the list whatever
+	// the text is, for choices such as "Type an app id…".
+	filterable bool
+	keep       int
+	filter     string
+	filtering  bool
 
 	// Keys.
 	keys *keysMenu
 
 	// top is the first body line shown, for a message that is taller than the screen.
 	top int
+}
+
+// visible is the indexes of the items shown: those that match the filter, then the kept ones.
+func (md *modal) visible() []int {
+	out := make([]int, 0, len(md.items))
+	matching := len(md.items) - md.keep
+	find := strings.ToLower(md.filter)
+	for i, item := range md.items {
+		if i >= matching || find == "" {
+			out = append(out, i)
+			continue
+		}
+		text := item
+		if i < len(md.notes) {
+			text += " " + md.notes[i]
+		}
+		if strings.Contains(strings.ToLower(text), find) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// setFilter changes the filter and puts the cursor back on the first match.
+func (md *modal) setFilter(filter string) {
+	md.filter, md.cursor = filter, 0
 }
 
 // innerWidth is the room inside the modal's border on a screen this wide.
@@ -141,24 +175,77 @@ func (m *Model) modalKey(msg tea.KeyPressMsg) tea.Cmd {
 	case modalKeys:
 		return m.keysMenuKey(msg)
 	case modalChoice:
+		return m.choiceKey(msg)
+	}
+	return nil
+}
+
+// choiceKey handles a key press in a list of choices.
+func (m *Model) choiceKey(msg tea.KeyPressMsg) tea.Cmd {
+	md := m.modal
+	key := msg.String()
+	shown := md.visible()
+	choose := func() tea.Cmd {
+		if md.cursor >= len(shown) {
+			return nil
+		}
+		m.modal = nil
+		return md.onChoose(m, shown[md.cursor])
+	}
+	if md.filtering {
 		switch key {
-		case "esc", "q", "ctrl+c":
-			m.modal = nil
-		case "up", "k":
-			md.cursor = max(md.cursor-1, 0)
-		case "down", "j":
-			md.cursor = min(md.cursor+1, len(md.items)-1)
-		case "g", "home":
-			md.cursor = 0
-		case "G", "end":
-			md.cursor = len(md.items) - 1
+		case "esc":
+			md.setFilter("")
+			md.filtering = false
 		case "enter":
-			m.modal = nil
-			return md.onChoose(m, md.cursor)
-		default:
-			if md.onKey != nil {
-				return md.onKey(m, key, md.cursor)
+			return choose()
+		case "up":
+			md.cursor = max(md.cursor-1, 0)
+		case "down":
+			md.cursor = min(md.cursor+1, len(shown)-1)
+		case "backspace":
+			if runes := []rune(md.filter); len(runes) > 0 {
+				md.setFilter(string(runes[:len(runes)-1]))
 			}
+		case "ctrl+u":
+			md.setFilter("")
+		case "ctrl+c":
+			m.modal = nil
+		default:
+			if text := msg.Key().Text; text != "" {
+				md.setFilter(md.filter + text)
+			} else if md.onKey != nil && md.cursor < len(shown) {
+				return md.onKey(m, key, shown[md.cursor])
+			}
+		}
+		return nil
+	}
+	switch key {
+	case "esc":
+		if md.filter != "" {
+			md.setFilter("")
+			return nil
+		}
+		m.modal = nil
+	case "q", "ctrl+c":
+		m.modal = nil
+	case "/":
+		if md.filterable {
+			md.filtering = true
+		}
+	case "up", "k":
+		md.cursor = max(md.cursor-1, 0)
+	case "down", "j":
+		md.cursor = min(md.cursor+1, len(shown)-1)
+	case "g", "home":
+		md.cursor = 0
+	case "G", "end":
+		md.cursor = len(shown) - 1
+	case "enter":
+		return choose()
+	default:
+		if md.onKey != nil && md.cursor < len(shown) {
+			return md.onKey(m, key, shown[md.cursor])
 		}
 	}
 	return nil
@@ -199,23 +286,51 @@ func (md *modal) render(width, height int) []string {
 		lines = append(lines, "")
 		hint = "enter: ok   esc: cancel"
 	case modalChoice:
+		shown := md.visible()
+		switch {
+		case md.filtering:
+			lines = append(lines, " "+cyan.Render("/ ")+ansi.TruncateLeft(md.filter, max(ansi.StringWidth(md.filter)-(inner-6), 0), "")+chosen.Render(" "))
+		case md.filter != "":
+			lines = append(lines, " "+dim.Render("filter: ")+md.filter)
+		}
+		if len(shown) == md.keep && md.filter != "" {
+			lines = append(lines, " "+dim.Render("Nothing matches "+md.filter))
+		}
 		// Keep the cursor in view when the list is longer than the window.
-		rows := max(min(len(md.items), height-8-len(lines)), 1)
-		first := min(max(md.cursor-rows/2, 0), max(len(md.items)-rows, 0))
-		for i := first; i < first+rows && i < len(md.items); i++ {
-			row := fit(" "+md.items[i], inner-1)
-			if i == md.cursor {
-				row = chosen.Render(row)
+		rows := max(min(len(shown), height-8-len(lines)), 1)
+		cursor := min(md.cursor, max(len(shown)-1, 0))
+		first := min(max(cursor-rows/2, 0), max(len(shown)-rows, 0))
+		for pos := first; pos < first+rows && pos < len(shown); pos++ {
+			i := shown[pos]
+			note := ""
+			if i < len(md.notes) && md.notes[i] != "" {
+				note = "  " + md.notes[i]
 			}
-			lines = append(lines, row)
+			if pos == cursor {
+				lines = append(lines, chosen.Render(fit(" "+md.items[i]+note, inner-1)))
+				continue
+			}
+			row := " " + highlight(md.items[i], md.filter, plain)
+			if note != "" {
+				row += "  " + highlight(strings.TrimPrefix(note, "  "), md.filter, dim)
+			}
+			lines = append(lines, fit(row, inner-1))
 		}
 		lines = append(lines, "")
-		hint = "enter: choose   esc: cancel"
-		if md.extraHint != "" {
-			hint = "enter: choose   " + md.extraHint + "   esc: cancel"
+		hint = "enter: choose"
+		if md.filterable && !md.filtering {
+			hint += "   /: filter"
 		}
-		if len(md.items) > rows {
-			hint += "   " + fmt.Sprintf("%d of %d", md.cursor+1, len(md.items))
+		if md.extraHint != "" {
+			hint += "   " + md.extraHint
+		}
+		if md.filtering {
+			hint += "   esc: clear"
+		} else {
+			hint += "   esc: cancel"
+		}
+		if len(shown) > rows {
+			hint += "   " + fmt.Sprintf("%d of %d", cursor+1, len(shown))
 		}
 	}
 	lines = append(lines, " "+dim.Render(hint))

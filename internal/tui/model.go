@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1007,8 +1008,9 @@ func (m *Model) pickApp(d device.Device, mode logs.ModeInfo, slot int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		// Without the installed apps, the ones used before are still offered.
-		installed, _ := backend.InstalledApps(ctx, d)
+		// Without the installed apps, the ones used before are still offered, with no note on
+		// whether each is on the device.
+		installed, err := backend.InstalledApps(ctx, d)
 		return applyMsg(func(m *Model) tea.Cmd {
 			if m.note == "Looking for the apps on "+d.Name+"…" {
 				m.setNote("", false)
@@ -1017,7 +1019,7 @@ func (m *Model) pickApp(d device.Device, mode logs.ModeInfo, slot int) tea.Cmd {
 			// selected one and nothing else has been opened.
 			current, ok := m.selected()
 			if asked == m.appsAsked && m.modal == nil && ok && current.Key() == d.Key() {
-				m.offerApps(d, mode, state.Choices(recent, installed), slot)
+				m.offerApps(d, mode, state.Choices(recent, installed), err == nil, slot)
 			}
 			return nil
 		})
@@ -1062,19 +1064,13 @@ func (m *Model) pickUninstall(d device.Device) tea.Cmd {
 }
 
 func (m *Model) offerUninstall(d device.Device, apps []device.App) {
-	items := make([]string, len(apps))
+	rows := make([]appRow, len(apps))
 	for i, app := range apps {
-		var about []string
-		if app.Name != "" {
-			about = append(about, app.Name)
-		}
-		if label := app.VersionLabel(); label != "" {
-			about = append(about, label)
-		}
-		items[i] = app.ID + "   " + strings.Join(about, " · ")
+		rows[i] = appRow{id: app.ID, name: app.Name, version: app.VersionLabel()}
 	}
+	items, notes := appRows(rows)
 	m.modal = &modal{
-		kind: modalChoice, title: "Uninstall which app from " + d.Name + "?", items: items,
+		kind: modalChoice, title: "Uninstall which app from " + d.Name + "?", items: items, notes: notes, filterable: true,
 		onChoose: func(m *Model, index int) tea.Cmd {
 			id := apps[index].ID
 			body := "This removes " + id + " and all its data from " + d.Name + ". It cannot be undone."
@@ -1091,34 +1087,110 @@ func (m *Model) offerUninstall(d device.Device, apps []device.App) {
 	}
 }
 
-func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.AppChoice, slot int) {
+// appRow is one app in a list: the id, and what tells builds of it apart.
+type appRow struct {
+	id, name, version string
+	// used marks an app whose log was opened before, and missing one that the device's app list
+	// does not have. An app used on another device may simply not be installed here yet.
+	used, missing bool
+}
+
+// appRows lays apps out in columns: the id, then the version and build, then the name. The id
+// column is as wide as the longest id, up to a limit, so the versions line up and a narrow
+// window cuts the name, not the version.
+func appRows(rows []appRow) (items, notes []string) {
+	const idLimit = 44
+	idWidth, versionWidth := 0, 0
+	marked := false
+	for _, r := range rows {
+		idWidth = max(idWidth, min(ansi.StringWidth(r.id), idLimit))
+		versionWidth = max(versionWidth, ansi.StringWidth(r.version))
+		marked = marked || r.used
+	}
+	for _, r := range rows {
+		item := fit(r.id, idWidth)
+		if marked {
+			mark := "  "
+			if r.used {
+				mark = "● "
+			}
+			item = mark + item
+		}
+		name := r.name
+		if r.missing {
+			name = "not found on this device"
+		}
+		note := strings.TrimRight(fit(r.version, versionWidth)+"  "+name, " ")
+		items, notes = append(items, item), append(notes, note)
+	}
+	return items, notes
+}
+
+// offerApps lists the apps to log. When some were used before, the list starts with only those and
+// tab shows every installed app, so the usual choice is a few lines and the rest is a key away.
+//
+// known is whether the device's app list could be read. Apps used before stay in the list either
+// way, since the same id is used on several devices, and one still being installed here is fine.
+func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.AppChoice, known bool, slot int) {
 	if len(choices) == 0 {
 		m.askApp(d, mode, slot)
 		return
 	}
-	items := make([]string, 0, len(choices)+2)
+	m.appsModal(d, mode, choices, known, slot, usedAndNot(choices), "")
+}
+
+// usedAndNot is whether some of the apps were used before and some were not.
+func usedAndNot(choices []state.AppChoice) bool {
+	var used, not bool
 	for _, c := range choices {
-		var about []string
-		if c.Name != "" {
-			about = append(about, c.Name)
-		}
-		if label := c.VersionLabel(); label != "" {
-			about = append(about, label)
-		}
-		if c.Recent {
-			about = append(about, "used before")
-		}
-		items = append(items, c.ID+"   "+strings.Join(about, " · "))
+		used, not = used || c.Recent, not || !c.Recent
 	}
+	return used && not
+}
+
+// appsModal shows the apps used before when compact, or every one. The toggle only exists when
+// some apps were used before and some were not.
+func (m *Model) appsModal(d device.Device, mode logs.ModeInfo, choices []state.AppChoice, known bool, slot int, compact bool, filter string) {
+	mixed := usedAndNot(choices)
+	shown := choices
+	title := "Which app on " + d.Name + "?"
+	if compact {
+		shown = nil
+		for _, c := range choices {
+			if c.Recent {
+				shown = append(shown, c)
+			}
+		}
+		title += " (used before)"
+	}
+	rows := make([]appRow, len(shown))
+	for i, c := range shown {
+		rows[i] = appRow{id: c.ID, name: c.Name, version: c.VersionLabel(), used: c.Recent, missing: known && !c.Installed}
+	}
+	items, notes := appRows(rows)
 	every := -1
 	if !mode.AppRequired {
 		every = len(items)
-		items = append(items, "Every app")
+		items, notes = append(items, "Every app"), append(notes, "")
 	}
 	typed := len(items)
-	items = append(items, "Type an app id…")
+	items, notes = append(items, "Type an app id…"), append(notes, "")
+	toggle := ""
+	if mixed {
+		toggle = "tab: used before"
+		if compact {
+			toggle = fmt.Sprintf("tab: all %d apps", len(choices))
+		}
+	}
 	m.modal = &modal{
-		kind: modalChoice, title: "Which app on " + d.Name + "?", items: items,
+		kind: modalChoice, title: title, items: items, notes: notes, filterable: true, keep: len(items) - len(shown),
+		filter: filter, extraHint: toggle,
+		onKey: func(m *Model, key string, _ int) tea.Cmd {
+			if key == "tab" && toggle != "" {
+				m.appsModal(d, mode, choices, known, slot, !compact, m.modal.filter)
+			}
+			return nil
+		},
 		onChoose: func(m *Model, index int) tea.Cmd {
 			switch index {
 			case typed:
@@ -1127,7 +1199,7 @@ func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.A
 			case every:
 				return m.startLogs(slot, logs.Spec{Device: d, Mode: mode.ID}, "")
 			}
-			return m.startLogs(slot, logs.Spec{Device: d, Mode: mode.ID, App: choices[index].ID}, choices[index].VersionLabel())
+			return m.startLogs(slot, logs.Spec{Device: d, Mode: mode.ID, App: shown[index].ID}, shown[index].VersionLabel())
 		},
 	}
 }
