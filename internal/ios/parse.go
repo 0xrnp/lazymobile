@@ -187,6 +187,36 @@ func ParseDevicectl(text string) ([]device.Device, error) {
 	return devices, nil
 }
 
+// ParseDevicectlApps reads `devicectl device info apps --json-output`, sorted by bundle id.
+// devicectl itself leaves out the apps that come with iOS, and hidden and internal ones, unless it
+// is asked for them, so every entry here is an app the user put on the device.
+func ParseDevicectlApps(text string) ([]device.App, error) {
+	var data struct {
+		Result *struct {
+			Apps []json.RawMessage `json:"apps"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(text), &data); err != nil || data.Result == nil || data.Result.Apps == nil {
+		return nil, apperr.New(apperr.ParseFailed, "Could not read the app list from devicectl")
+	}
+	apps := []device.App{}
+	for _, item := range data.Result.Apps {
+		var e struct {
+			BundleIdentifier string `json:"bundleIdentifier"`
+			Name             string `json:"name"`
+			Version          string `json:"version"`
+			BundleVersion    string `json:"bundleVersion"`
+		}
+		// One malformed entry must not hide the others.
+		if json.Unmarshal(item, &e) != nil || e.BundleIdentifier == "" {
+			continue
+		}
+		apps = append(apps, device.App{ID: e.BundleIdentifier, Name: e.Name, Version: e.Version, Build: e.BundleVersion})
+	}
+	sort.Slice(apps, func(i, j int) bool { return apps[i].ID < apps[j].ID })
+	return apps, nil
+}
+
 // Choice is something to pick by name, with the id the tool wants.
 type Choice struct {
 	ID   string `json:"id"`

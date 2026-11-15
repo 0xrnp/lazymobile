@@ -161,3 +161,33 @@ func TestParseDeviceTypesFallsBackToNames(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestParseDevicectlAppsKeepsVersionAndBuildInIDOrder(t *testing.T) {
+	apps, err := ParseDevicectlApps(devicectlAppsFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []device.App{
+		{ID: "com.example.app.staging", Name: "Example Staging", Version: "1.4.2", Build: "87"},
+		{ID: "com.example.preview", Name: "Example Preview", Version: "2.0.0", Build: "1"},
+	}
+	if !reflect.DeepEqual(apps, want) {
+		t.Errorf("apps = %+v\nwant   %+v", apps, want)
+	}
+}
+
+func TestParseDevicectlAppsOfADeviceWithNone(t *testing.T) {
+	apps, err := ParseDevicectlApps(`{"result": {"apps": []}}`)
+	if err != nil || apps == nil || len(apps) != 0 {
+		t.Errorf("apps = %#v, err = %v, want an empty list", apps, err)
+	}
+}
+
+func TestParseDevicectlAppsRejectsUnreadableOutput(t *testing.T) {
+	// The last is what devicectl writes when it fails: an outcome and an error, with no result.
+	for _, text := range []string{"", "nope", `{"result": {}}`, `{"result": null, "info": {"outcome": "failed"}}`} {
+		if _, err := ParseDevicectlApps(text); apperr.CodeOf(err) != apperr.ParseFailed {
+			t.Errorf("ParseDevicectlApps(%q) error = %v, want parse_failed", text, err)
+		}
+	}
+}

@@ -158,19 +158,26 @@ func (f *File) prune() {
 
 // AppChoice is an app id that can be offered, with where it came from.
 type AppChoice struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+	Build   string `json:"build,omitempty"`
 	// Recent is whether it was used before, and Installed whether it is on the device.
 	Recent    bool `json:"recent"`
 	Installed bool `json:"installed"`
 }
 
+// VersionLabel is "1.4.2 (87)", or whichever of the two is known, or "".
+func (c AppChoice) VersionLabel() string {
+	return device.App{Version: c.Version, Build: c.Build}.VersionLabel()
+}
+
 // Choices lists the recent app ids first, newest first, then the installed apps that are not
 // among them, in the order given.
 func Choices(recent []string, installed []device.App) []AppChoice {
-	names := map[string]string{}
+	byID := map[string]device.App{}
 	for _, app := range installed {
-		names[app.ID] = app.Name
+		byID[app.ID] = app
 	}
 	var choices []AppChoice
 	seen := map[string]bool{}
@@ -179,15 +186,15 @@ func Choices(recent []string, installed []device.App) []AppChoice {
 			continue
 		}
 		seen[id] = true
-		name, isInstalled := names[id]
-		choices = append(choices, AppChoice{ID: id, Name: name, Recent: true, Installed: isInstalled})
+		app, isInstalled := byID[id]
+		choices = append(choices, AppChoice{ID: id, Name: app.Name, Version: app.Version, Build: app.Build, Recent: true, Installed: isInstalled})
 	}
 	for _, app := range installed {
 		if seen[app.ID] {
 			continue
 		}
 		seen[app.ID] = true
-		choices = append(choices, AppChoice{ID: app.ID, Name: app.Name, Installed: true})
+		choices = append(choices, AppChoice{ID: app.ID, Name: app.Name, Version: app.Version, Build: app.Build, Installed: true})
 	}
 	return choices
 }

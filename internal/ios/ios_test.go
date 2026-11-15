@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -359,7 +360,8 @@ func TestQuitSimulatorAppsDoesNothingWhenNoAppRuns(t *testing.T) {
 const listappsJSON = `{
   "com.apple.mobilesafari": {"ApplicationType": "System", "CFBundleDisplayName": "Safari"},
   "com.example.zeta": {"ApplicationType": "User", "CFBundleName": "Zeta"},
-  "com.example.app": {"ApplicationType": "User", "CFBundleDisplayName": "Example", "CFBundleName": "ExampleApp"}
+  "com.example.app": {"ApplicationType": "User", "CFBundleDisplayName": "Example", "CFBundleName": "ExampleApp",
+    "CFBundleShortVersionString": "2.0.0", "CFBundleVersion": "1"}
 }`
 
 func TestInstalledAppsAreTheOnesAUserAdded(t *testing.T) {
@@ -379,7 +381,8 @@ func TestInstalledAppsAreTheOnesAUserAdded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []device.App{{ID: "com.example.app", Name: "Example"}, {ID: "com.example.zeta", Name: "Zeta"}}
+	// Zeta's plist has no version keys, which is not an error.
+	want := []device.App{{ID: "com.example.app", Name: "Example", Version: "2.0.0", Build: "1"}, {ID: "com.example.zeta", Name: "Zeta"}}
 	if !slices.Equal(apps, want) {
 		t.Errorf("apps = %v", apps)
 	}
@@ -387,8 +390,48 @@ func TestInstalledAppsAreTheOnesAUserAdded(t *testing.T) {
 		t.Errorf("plutil was given %q, not simctl's output", stdin)
 	}
 
-	phone := device.Device{ID: "P1", Name: "Phone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
-	if _, err := client(fake).InstalledApps(context.Background(), phone); apperr.CodeOf(err) != apperr.Unsupported {
-		t.Errorf("an iPhone: %v", err)
+	if _, err := client(fake).InstalledApps(context.Background(), pixel); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an Android device: %v", err)
+	}
+}
+
+var iphone = device.Device{ID: "P1", Name: "Phone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+
+func TestInstalledAppsOfAnIPhoneComeFromDevicectl(t *testing.T) {
+	var written string
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		if !strings.HasPrefix(command, "xcrun devicectl device info apps --device P1 --json-output ") {
+			return run.Result{Missing: true}
+		}
+		written = argv[len(argv)-1]
+		if err := os.WriteFile(written, []byte(devicectlAppsFixture()), 0o600); err != nil {
+			t.Error(err)
+		}
+		return run.Result{}
+	}}
+	apps, err := client(fake).InstalledApps(context.Background(), iphone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []device.App{
+		{ID: "com.example.app.staging", Name: "Example Staging", Version: "1.4.2", Build: "87"},
+		{ID: "com.example.preview", Name: "Example Preview", Version: "2.0.0", Build: "1"},
+	}
+	if !slices.Equal(apps, want) {
+		t.Errorf("apps = %+v", apps)
+	}
+	// The app ids of someone's phone do not stay in a temporary folder.
+	if _, err := os.Stat(filepath.Dir(written)); !os.IsNotExist(err) {
+		t.Errorf("the temporary folder %s was left behind (%v)", filepath.Dir(written), err)
+	}
+}
+
+func TestInstalledAppsOfAnIPhoneThatCannotBeReached(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"devicectl device info apps": runtest.Fail(1, "ERROR: The device is not able to fulfill the requested usage assertion requirements. (com.apple.dt.CoreDeviceError error 4016 (0xFB0))"),
+	})
+	_, err := client(fake).InstalledApps(context.Background(), iphone)
+	if apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), "not able to fulfill") {
+		t.Errorf("error = %v", err)
 	}
 }

@@ -155,7 +155,7 @@ func (m *Model) panes(l layout) []string {
 		}
 	}
 	if l.logsWidth > 0 {
-		right = box(m.log.title(), m.log.lines(l.logsWidth-2, l.bodyHeight-2, m.focus == paneLogs), l.logsWidth, l.bodyHeight, m.focus == paneLogs)
+		right = box(m.log.title(l.logsWidth), m.log.lines(l.logsWidth-2, l.bodyHeight-2, m.focus == paneLogs), l.logsWidth, l.bodyHeight, m.focus == paneLogs)
 	}
 	body := make([]string, l.bodyHeight)
 	for i := range body {

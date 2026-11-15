@@ -16,6 +16,7 @@ import (
 
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
+	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/run"
 )
 
@@ -566,4 +567,30 @@ func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.A
 	}
 	slices.SortFunc(apps, func(a, b device.App) int { return strings.Compare(a.ID, b.ID) })
 	return apps, nil
+}
+
+// AppInfo reads the version of one app, by package name, from a running emulator or phone. Any
+// package works, the system's too.
+func (c *Client) AppInfo(ctx context.Context, d device.Device, id string) (device.App, error) {
+	if d.Platform != device.Android || !d.Ready() {
+		return device.App{}, apperr.New(apperr.InvalidState, "%s is not running", d.Name)
+	}
+	// adb joins `shell` arguments into one command line for the device's shell.
+	if !logs.ValidAppID(id) {
+		return device.App{}, apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	adb, err := c.Opts.tool("adb")
+	if err != nil {
+		return device.App{}, err
+	}
+	argv := []string{adb, "-s", d.TargetID(), "shell", "dumpsys", "package", id}
+	res := c.run(ctx, argv, queryTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return device.App{}, err
+	}
+	version, build, found := ParsePackageVersion(res.Stdout, id)
+	if !found {
+		return device.App{}, apperr.New(apperr.NotFound, "%s is not installed on %s", id, d.Name)
+	}
+	return device.App{ID: id, Version: version, Build: build}, nil
 }

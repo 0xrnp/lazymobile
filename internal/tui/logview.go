@@ -20,6 +20,8 @@ type logView struct {
 	opened  bool
 	session mobile.LogSession
 	spec    logs.Spec
+	// version is the installed version of spec.App, such as "1.4.2 (87)", when the device says.
+	version string
 
 	// all is everything received, and shown is what passes the filters.
 	all   []logs.Line
@@ -181,15 +183,34 @@ func (v *logView) entry() []logs.Line {
 	return v.shown[head:end]
 }
 
-func (v *logView) title() string {
+// title is the pane's heading for a pane this wide. A heading that does not fit is cut short at
+// its end, where "paused" and "ended" are, so parts go instead: first the word "console", which
+// the first line of the log says anyway, then the version of the app.
+func (v *logView) title(width int) string {
+	var title string
+	for _, shed := range []struct{ console, version bool }{{false, false}, {true, false}, {true, true}} {
+		title = v.heading(!shed.console, !shed.version)
+		// box keeps the title and its two spaces within the width, less the corners and a border.
+		if ansi.StringWidth(title)+2 <= width-3 {
+			break
+		}
+	}
+	return title
+}
+
+func (v *logView) heading(withConsole, withVersion bool) string {
 	if !v.opened {
 		return "Logs"
 	}
 	parts := []string{"Logs: " + v.spec.Device.Name}
 	if v.spec.App != "" {
-		parts = append(parts, v.spec.App)
+		app := v.spec.App
+		if withVersion && v.version != "" {
+			app += " " + v.version
+		}
+		parts = append(parts, app)
 	}
-	if v.spec.Mode == logs.Console {
+	if v.spec.Mode == logs.Console && withConsole {
 		parts = append(parts, "console")
 	}
 	if v.level != logs.NoLevel {
