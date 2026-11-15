@@ -297,6 +297,9 @@ with names and ids replaced.
 The name follows the convention of lazygit and lazydocker. This project is not affiliated with
 them.
 
+Changes are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Security problems go to
+[SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT
