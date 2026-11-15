@@ -267,6 +267,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal == nil {
 			return m, m.wheel(msg)
 		}
+		if m.modal.kind == modalKeys {
+			m.modal.keys.wheel(msg.Button)
+		}
 	case tea.MouseClickMsg:
 		if m.modal == nil && msg.Button == tea.MouseLeft {
 			m.click(msg.X, msg.Y)
@@ -572,7 +575,12 @@ func (m *Model) confirm(title, body string, onYes func(m *Model) tea.Cmd) {
 }
 
 func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
+	return m.keyString(msg.String())
+}
+
+// keyString does what a key does on the dashboard. The keys menu runs an action by sending its key
+// here, so what it does is what pressing the key does.
+func (m *Model) keyString(key string) tea.Cmd {
 	if i, _, ok := m.focusedLog(); ok {
 		m.lastLog = i
 	}
@@ -580,7 +588,7 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "q", "ctrl+c":
 		return m.quit()
 	case "?":
-		m.modal = &modal{kind: modalMessage, title: "Keys", body: helpText}
+		m.modal = m.keysModal()
 		return nil
 	case "tab":
 		m.cycle(1)

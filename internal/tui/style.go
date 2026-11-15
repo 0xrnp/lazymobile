@@ -21,6 +21,9 @@ var (
 	dim    = lipgloss.NewStyle().Faint(true)
 	bold   = lipgloss.NewStyle().Bold(true)
 	chosen = lipgloss.NewStyle().Reverse(true)
+	// strike marks what cannot be done now.
+	strike = lipgloss.NewStyle().Faint(true).Strikethrough(true)
+	plain  = lipgloss.NewStyle()
 	// match marks the text a log filter found.
 	match = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true).Underline(true)
 )

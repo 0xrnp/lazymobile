@@ -11,41 +11,6 @@ import (
 	"github.com/0xrnp/lazymobile/internal/device"
 )
 
-const helpText = `Devices
-  j k, arrows   move            r   refresh
-  b   boot                      B   cold boot (emulator)
-  s   shut down                 l   logs (also enter)
-  e   erase, asks first         d   delete, asks first
-  u   uninstall an app, asks first
-  n   new simulator or emulator y   copy the id
-  w   Android phone over Wi-Fi  x   disconnect a Wi-Fi phone
-  l offers apps on the device; every log opens in a pane of its own
-
-Logs
-  j k, arrows   scroll          G   follow the newest line
-  g   first line                h l scroll sideways, 0 resets
-  /   filter by text            L   minimum level
-  p   pause or resume           c   clear
-  S   save to a file            x   stop the stream
-  r   restart the stream        w   wrap long lines
-  enter  the selected line in full, y copies it
-  X   close this log            v   layout: beside, stacked, one
-  a   list of all logs          1-9 jump to a log
-
-Builds (inside an Expo project)
-  enter load, then details      r   refresh
-  i   install on a device       o   open the build page
-  n   new build, asks first     x   cancel a build, asks first
-
-Everywhere
-  tab   next pane               ?   this help
-  + -   widen or narrow devices z   full screen, again to undo
-  mouse wheel scrolls the pane under it, a click selects what is under it,
-  sliding sideways (or Shift with the wheel) scrolls the log sideways
-  q     quit
-
-Emulators and simulators keep running after you quit.`
-
 // Below this size nothing useful fits.
 const (
 	minWidth  = 44
@@ -142,7 +107,7 @@ func (m *Model) render() string {
 	if m.noteErr {
 		note = red.Render(fit(note, m.width))
 	}
-	lines := append(body, fit(note, m.width), dim.Render(fit(" "+m.hints(), m.width)))
+	lines := append(body, fit(note, m.width), fit(" "+m.hints(), m.width))
 	return strings.Join(lines, "\n")
 }
 
@@ -209,43 +174,17 @@ func (m *Model) logLines(l layout) []string {
 	return rows
 }
 
-// logHints are the keys of a log pane. The ones about two logs and the full screen come first,
-// because a narrow screen cuts the line at its end.
-func (m *Model) logHints() string {
-	var hints string
-	switch {
-	case m.zoomed && m.logCount() > 1:
-		hints = "z back  tab next log  a all logs  X close"
-	case m.zoomed:
-		hints = "z back  X close"
-	case m.logCount() > 1 && m.arrange == arrangeOne:
-		hints = "tab next log  a all logs  z full screen  v layout  esc devices  X close"
-	case m.logCount() > 1:
-		hints = "a all logs  tab next pane  z full screen  v layout  X close"
-	default:
-		hints = "z full screen  tab devices  X close"
-	}
-	return hints + "  enter line  y copy  / filter  L level  w wrap  p pause  c clear  S save  x stop  r restart  ? help  q quit"
-}
-
+// hints is the hint line as drawn: each key in the colour the keys menu uses, its label dim.
 func (m *Model) hints() string {
-	switch {
-	case m.modal != nil:
+	if m.modal != nil {
 		return ""
-	case m.focusOnLog() && m.focusedLogOpen():
-		return m.logHints()
-	case m.focusOnLog():
-		return "tab devices  ? help  q quit"
-	case m.focus == paneBuilds && !m.build.asked:
-		return "enter load builds  tab next pane  ? help  q quit"
-	case m.focus == paneBuilds:
-		return "enter details  i install  o open page  n new build  x cancel  r refresh  tab next pane  ? help  q quit"
 	}
-	logs := "l logs"
-	if m.logCount() > 0 {
-		logs = "l another log  a all logs"
+	parts := strings.Split(m.hintsLine(m.width), hintGap)
+	for i, part := range parts {
+		key, label, _ := strings.Cut(part, " ")
+		parts[i] = cyan.Render(key) + " " + dim.Render(label)
 	}
-	return "b boot  s shut down  " + logs + "  n new  e erase  d delete  y copy id  w wi-fi  r refresh  ? help  q quit"
+	return strings.Join(parts, hintGap)
 }
 
 // deviceLines draws the device list for a pane with this much room inside its border.
