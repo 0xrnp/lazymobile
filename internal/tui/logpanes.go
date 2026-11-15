@@ -2,26 +2,32 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 )
 
-// There are two log panes. The first is m.log, where the log has always been kept, and the second
-// is m.second. A log opens in the second only while the first is taken, so the open ones are
-// always the first, or the first and the second.
-const logSlots = 2
+// Any number of logs can be open, each in a pane of its own. m.logPanes is always there and holds
+// at least one pane. Only the first can be empty, which is how the dashboard starts, so every other
+// pane has a log in it.
 
-// arrangement is how two open logs sit in the area the logs have. Its values are what the state
-// file keeps.
+// newLog asks for a pane of its own: the first, while that is empty, and otherwise a new one.
+const newLog = -1
+
+// arrangement is how open logs sit in the area the logs have. Its values are what the state file
+// keeps.
 type arrangement string
 
 const (
-	// arrangeSide is two logs next to each other, which is the default.
+	// arrangeSide fills rows with columns, as many as fit, which is side by side for a few logs.
 	arrangeSide arrangement = ""
-	// arrangeStacked is one log above the other.
+	// arrangeStacked fills columns with rows, as many as fit, which is one above the other.
 	arrangeStacked arrangement = "stacked"
-	// arrangeOne is one log at a time, the one in focus, with tab flipping to the other.
+	// arrangeOne is one log at a time, the one in focus, with tab flipping to the next.
 	arrangeOne arrangement = "one"
 )
 
@@ -36,59 +42,31 @@ func (a arrangement) next() arrangement {
 	return arrangeSide
 }
 
-// Where a log pane is smaller than this, it is not worth drawing beside another.
+// A log pane smaller than this is not worth drawing beside others.
 const (
 	minSideWidth  = 30
 	minStackedRow = 6
 )
 
-// slotOf is which log pane p is, if it is one.
-func slotOf(p pane) (int, bool) {
-	switch p {
-	case paneLogs:
-		return 0, true
-	case paneLogs2:
-		return 1, true
+// first is the pane that is always there.
+func (m *Model) first() *logView { return m.logPanes[0] }
+
+// logCount is how many logs are open.
+func (m *Model) logCount() int {
+	if !m.first().opened {
+		return 0
 	}
-	return 0, false
+	return len(m.logPanes)
 }
 
-func logPane(slot int) pane {
-	if slot == 1 {
-		return paneLogs2
-	}
-	return paneLogs
-}
-
-func (m *Model) slot(i int) *logView {
-	if i == 1 {
-		return &m.second
-	}
-	return &m.log
-}
-
-// logByID is the pane a stream's message is for, or nil when that stream was replaced or closed.
-func (m *Model) logByID(id int) *logView {
-	for i := range logSlots {
-		if v := m.slot(i); id > 0 && v.id == id {
-			return v
-		}
-	}
-	return nil
-}
+func (m *Model) focusOnLog() bool { return m.focus == paneLogs }
 
 // focusedLog is the log pane that has the focus, if the focus is on one.
 func (m *Model) focusedLog() (int, *logView, bool) {
-	slot, ok := slotOf(m.focus)
-	if !ok {
+	if m.focus != paneLogs || m.logIdx < 0 || m.logIdx >= len(m.logPanes) {
 		return 0, nil, false
 	}
-	return slot, m.slot(slot), true
-}
-
-func (m *Model) focusOnLog() bool {
-	_, ok := slotOf(m.focus)
-	return ok
+	return m.logIdx, m.logPanes[m.logIdx], true
 }
 
 func (m *Model) focusedLogOpen() bool {
@@ -96,42 +74,66 @@ func (m *Model) focusedLogOpen() bool {
 	return ok && v.opened
 }
 
+// focusLog moves the focus to log pane i.
+func (m *Model) focusLog(i int) {
+	m.focus, m.logIdx, m.lastLog = paneLogs, i, i
+}
+
+// logByID is the pane a stream's message is for, or nil when that stream was replaced or closed.
+func (m *Model) logByID(id int) *logView {
+	if id <= 0 {
+		return nil
+	}
+	for _, v := range m.logPanes {
+		if v.id == id {
+			return v
+		}
+	}
+	return nil
+}
+
 // logSessions are the log tools that are running.
 func (m *Model) logSessions() []mobile.LogSession {
 	var out []mobile.LogSession
-	for i := range logSlots {
-		if s := m.slot(i).session; s != nil {
-			out = append(out, s)
+	for _, v := range m.logPanes {
+		if v.session != nil {
+			out = append(out, v.session)
 		}
 	}
 	return out
 }
 
-// nextLogSlot is the log pane a log opens in. It goes beside the one that is open while there is
-// room, and otherwise takes the place of the one that had the focus last.
-func (m *Model) nextLogSlot() int {
-	if m.log.opened && !m.second.opened {
-		return 1
-	}
-	return m.lastLog
-}
-
-// position is "1/2" for a log pane while two logs are open, and "" otherwise.
-func (m *Model) position(slot int) string {
-	if !m.second.opened {
+// position is "2/5" for a log pane while more than one log is open, and "" otherwise.
+func (m *Model) position(i int) string {
+	if m.logCount() < 2 {
 		return ""
 	}
-	return fmt.Sprintf("%d/%d", slot+1, logSlots)
+	return strconv.Itoa(i+1) + "/" + strconv.Itoa(len(m.logPanes))
 }
 
-// parkLog puts a log in the log pane slot without starting it. It is shown, and saved, as it
-// would be if it ran, and r starts it. Like startLogs, the second pane only opens while the first
-// is taken.
-func (m *Model) parkLog(slot int, spec logs.Spec) {
-	if !m.log.opened {
-		slot = 0
+// settingsOf is an empty pane that starts with the filter, level and wrap of v.
+func settingsOf(v *logView) logView {
+	return logView{follow: true, filter: v.filter, level: v.level, levelChosen: v.levelChosen, wrap: v.wrap}
+}
+
+// slotFor is the pane a log goes in: the one asked for, or, for newLog or a pane that is gone, the
+// first while it is empty, and otherwise a new pane after the others.
+func (m *Model) slotFor(slot int) int {
+	if slot >= 0 && slot < len(m.logPanes) {
+		return slot
 	}
-	v := m.slot(slot)
+	if !m.first().opened {
+		return 0
+	}
+	m.logPanes = append(m.logPanes, &logView{follow: true})
+	return len(m.logPanes) - 1
+}
+
+// parkLog puts a log in a pane without starting it. It is shown, and saved, as it would be if it
+// ran, and r starts it.
+func (m *Model) parkLog(slot int, spec logs.Spec) {
+	slot = m.slotFor(slot)
+	v := m.logPanes[slot]
 	level := v.level
 	if !v.levelChosen {
 		level = defaultLevel(spec)
@@ -139,22 +141,60 @@ func (m *Model) parkLog(slot int, spec logs.Spec) {
 	*v = logView{opened: true, parked: true, spec: spec, follow: true, level: level, levelChosen: v.levelChosen, filter: v.filter, wrap: v.wrap}
 }
 
-// closeLog stops a log and takes its pane away. The second log moves up into the first.
+// closeLog stops a log and takes its pane away. The focus goes to the pane that took its place, or
+// the one before when it was the last. The first pane stays, empty, when it is the only one.
 func (m *Model) closeLog(slot int) {
-	v := m.slot(slot)
+	v := m.logPanes[slot]
 	if v.session != nil {
 		v.session.Stop()
 	}
-	settings := logView{follow: true, filter: v.filter, level: v.level, levelChosen: v.levelChosen, wrap: v.wrap}
-	if slot == 0 && m.second.opened {
-		m.log, m.second = m.second, logView{follow: true, filter: m.second.filter, level: m.second.level, levelChosen: m.second.levelChosen, wrap: m.second.wrap}
+	if len(m.logPanes) == 1 {
+		*v = settingsOf(v)
 	} else {
-		*v = settings
+		m.logPanes = append(m.logPanes[:slot:slot], m.logPanes[slot+1:]...)
 	}
-	m.lastLog = 0
-	m.focus = paneDevices
-	if m.log.opened {
-		m.focus = paneLogs
+	m.lastLog = min(m.lastLog, len(m.logPanes)-1)
+	if !m.first().opened {
+		m.focus = paneDevices
+		return
+	}
+	m.focusLog(min(slot, len(m.logPanes)-1))
+}
+
+// showLogs lists every open log, to jump to one or close one without leaving the list.
+func (m *Model) showLogs() {
+	if m.logCount() == 0 {
+		m.setNote("No log is open. Press l on a device", false)
+		return
+	}
+	m.modal = m.logsModal(m.logIdx)
+}
+
+func (m *Model) logsModal(cursor int) *modal {
+	items := make([]string, len(m.logPanes))
+	for i, v := range m.logPanes {
+		items[i] = fmt.Sprintf("%d  %s", i+1, strings.TrimPrefix(v.title(1000, ""), "Logs: "))
+	}
+	return &modal{
+		kind: modalChoice, title: fmt.Sprintf("Logs (%d open)", len(items)), items: items,
+		cursor: min(max(cursor, 0), len(items)-1), extraHint: "x: close it",
+		onChoose: func(m *Model, index int) tea.Cmd {
+			m.zoomed = m.zoomed && m.arrange != arrangeOne
+			m.focusLog(index)
+			return nil
+		},
+		onKey: func(m *Model, key string, cursor int) tea.Cmd {
+			if key != "x" && key != "X" {
+				return nil
+			}
+			m.closeLog(cursor)
+			if m.logCount() == 0 {
+				m.modal = nil
+				return nil
+			}
+			m.modal = m.logsModal(cursor)
+			return nil
+		},
 	}
 }
 
@@ -170,37 +210,72 @@ func (b logBox) contains(x, y int) bool {
 	return b.width > 0 && x >= b.x && x < b.x+b.width && y >= b.y && y < b.y+b.height
 }
 
-// logBoxes places the log panes in the area the logs have, which is area wide and as tall as the
-// body. A pane that is not drawn has no width. With two logs open they share the area, one above
-// the other or side by side, which is the default, as m.arrange says. When they would be too small for that, or only one pane
-// is shown on the screen, the pane in focus (or, from the devices, the one last in focus) has it all.
-func (m *Model) logBoxes(x, area, height int) [logSlots]logBox {
-	var boxes [logSlots]logBox
+// grid is how n panes sit in an area of this size: columns and rows of cells that are not smaller
+// than the least a log is worth. Side by side takes columns first, as many as fit. Stacked takes
+// rows first. It reports false when no grid keeps the cells that big.
+func (a arrangement) grid(n, area, height int) (cols, rows int, ok bool) {
+	if a == arrangeStacked {
+		rows = min(n, height/minStackedRow)
+		if rows < 1 {
+			return 0, 0, false
+		}
+		cols = (n + rows - 1) / rows
+		rows = (n + cols - 1) / cols
+	} else {
+		cols = min(n, area/minSideWidth)
+		if cols < 1 {
+			return 0, 0, false
+		}
+		rows = (n + cols - 1) / cols
+	}
+	return cols, rows, area/cols >= minSideWidth && height/rows >= minStackedRow
+}
+
+// logBoxes places the log panes in the area the logs have, which starts at column x, is area wide
+// and as tall as the body. A pane that is not drawn has no width. Open logs share the area in a
+// grid, side by side or stacked as m.arrange says, and a last row with fewer panes shares the
+// whole width. When the cells would be too small, when only one pane fits on the screen or it is
+// zoomed, or for one log at a time, the pane in focus (or, from the devices, the one last in
+// focus) has it all.
+func (m *Model) logBoxes(x, area, height int) []logBox {
+	n := len(m.logPanes)
+	boxes := make([]logBox, n)
 	if area <= 0 || height <= 0 {
 		return boxes
 	}
-	whole := func(slot int) { boxes[slot] = logBox{x: x, width: area, height: height} }
-	if !m.second.opened {
+	whole := func(i int) { boxes[i] = logBox{x: x, width: area, height: height} }
+	if n == 1 {
 		whole(0)
 		return boxes
 	}
-	shared := m.width >= splitWidth && !m.zoomed
-	if shared && m.arrange == arrangeSide && area/2 >= minSideWidth {
-		first := area / 2
-		boxes[0] = logBox{x: x, width: first, height: height}
-		boxes[1] = logBox{x: x + first, width: area - first, height: height}
-		return boxes
+	if m.width >= splitWidth && !m.zoomed && m.arrange != arrangeOne {
+		if cols, rows, ok := m.arrange.grid(n, area, height); ok {
+			index, y := 0, 0
+			for r := range rows {
+				cellHeight := height / rows
+				if r == rows-1 {
+					cellHeight = height - y
+				}
+				count := min(cols, n-index)
+				cx := x
+				for c := range count {
+					cellWidth := area / count
+					if c == count-1 {
+						cellWidth = x + area - cx
+					}
+					boxes[index] = logBox{x: cx, y: y, width: cellWidth, height: cellHeight}
+					cx += cellWidth
+					index++
+				}
+				y += cellHeight
+			}
+			return boxes
+		}
 	}
-	if shared && m.arrange == arrangeStacked && height/2 >= minStackedRow {
-		first := height / 2
-		boxes[0] = logBox{x: x, width: area, height: first}
-		boxes[1] = logBox{x: x, y: first, width: area, height: height - first}
-		return boxes
+	if m.focus == paneLogs && m.logIdx < n {
+		whole(m.logIdx)
+	} else {
+		whole(min(m.lastLog, n-1))
 	}
-	if slot, ok := slotOf(m.focus); ok {
-		whole(slot)
-		return boxes
-	}
-	whole(m.lastLog)
 	return boxes
 }

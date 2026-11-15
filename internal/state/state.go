@@ -34,12 +34,12 @@ type File struct {
 type View struct {
 	// Device is the key of the selected device.
 	Device string `json:"device,omitempty"`
-	// Log is the log stream that was open, if any, and Filter, Level, LevelChosen and Wrap are its
-	// settings. Second is the second log pane, which has its settings in the Log itself, and
-	// Layout is how two logs sit: "" for side by side, "stacked" for one above the other, or "one"
-	// for one at a time.
+	// Log is the first log stream that was open, if any, and Filter, Level, LevelChosen and Wrap are
+	// its settings. More are the other logs that were open, each with its settings in the Log
+	// itself. Layout is how the logs sit: "" for side by side, "stacked" for one above the other, or
+	// "one" for one at a time.
 	Log    *Log   `json:"log,omitempty"`
-	Second *Log   `json:"second,omitempty"`
+	More   []Log  `json:"more,omitempty"`
 	Layout string `json:"layout,omitempty"`
 
 	Filter string     `json:"filter,omitempty"`
@@ -56,7 +56,8 @@ type Log struct {
 	Mode   logs.Mode `json:"mode"`
 	App    string    `json:"app,omitempty"`
 
-	// The settings of a second log. The first keeps its own in View, as before there were two.
+	// The settings of a log that is not the first. The first keeps its own in View, as it did
+	// before there could be more than one.
 	Filter      string     `json:"filter,omitempty"`
 	Level       logs.Level `json:"level,omitempty"`
 	LevelChosen bool       `json:"level_chosen,omitempty"`

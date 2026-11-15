@@ -29,8 +29,8 @@ The keys, shown over the dashboard with `?`:
 - Boot, cold boot, shut down, erase, create and delete simulators and emulators.
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Connect Android phones over Wi-Fi (pairing code or address).
-- Live logs: filter by app, level and text. An Android app is followed across restarts. Open a
-  second log beside the first to read two devices at once.
+- Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
+  many logs as you like, side by side or stacked, to read several devices at once.
 - Inside an Expo project: list EAS builds, install a finished build on a running simulator or
   emulator, start and cancel builds.
 - The same features as plain commands, with `--json`, for scripts and coding agents.
@@ -54,7 +54,7 @@ Early release. What has been run, and what has not:
 | Expo builds pane | Listing, details, and downloading and installing Android and iOS simulator builds, with eas-cli 24.7 and a real Expo project. Starting and cancelling builds have only been run with a fake `eas` |
 | iPhones | Listed over USB with a real iPhone, and so were its installed apps with their version and build, which also shows in the log heading. Its logs have only been tried with fake tools |
 | App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
-| Two logs at once | A real iOS simulator's system log beside a real iPhone's launch-an-app log (the launch itself faked), in a real terminal: side by side, one above the other, one at a time, full screen with `z`, `tab` between them, closing with `X`, and quitting and coming back with both restored. The Android emulator was not run in two panes. The rest is covered by tests with fake tools |
+| Several logs at once | Four real system logs of an iOS simulator, in a real terminal: a grid, stacked and one at a time, the list (`a`) closing one, and quitting and coming back with the rest restored. Also a simulator's log beside a real iPhone's launch-an-app log (the launch faked). Not run: more than four logs, or Android logs in several panes. The rest is covered by tests with fake tools |
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
@@ -97,7 +97,7 @@ Devices:
 | `b` | Boot |
 | `B` | Cold boot an emulator (ignore its snapshot) |
 | `s` | Shut down |
-| `l`, `enter` | Logs. With one log open, the new one opens beside it. With two, it replaces the one you used last |
+| `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
@@ -125,9 +125,11 @@ Logs:
 | `c` | Clear |
 | `S` | Save what is shown to a file |
 | `x` | Stop the stream |
-| `X` | Close this log. The second one, if open, moves up |
+| `X` | Close this log. The next one takes its place |
 | `r` | Restart the stream |
-| `v` | How two logs sit: side by side (the default), one above the other, or one at a time |
+| `v` | How the logs sit: side by side (the default), stacked, or one at a time |
+| `a` | List all open logs: `enter` goes to one, `x` closes it |
+| `1` to `9` | Go to that log |
 | `z` | Show this log full screen. Again, or `esc`, to go back |
 
 Builds (inside an Expo project):
@@ -141,12 +143,14 @@ Builds (inside an Expo project):
 | `x` | Cancel a build that is waiting or running. Asks first |
 | `r` | Refresh |
 
-With two logs open, their titles say "Logs 1/2" and "Logs 2/2", and `tab` moves between them and the
-devices. Each log keeps its own filter, level, wrap and scroll position. In the one-at-a-time layout, only the log in focus is shown beside the devices, `tab` flips to the
-other, and `esc` goes to the devices. `z` shows the focused log full screen, and `tab` then flips
-between the two logs. When the screen is too small for two logs
-(under 100 columns, or less than 30 columns each side by side or 6 rows each one above the other),
-only the log in focus is shown, and `tab` moves between them.
+Open as many logs as you like. Each has its own pane, filter, level, wrap and scroll position, and
+its title says which it is ("Logs 2/5"). Side by side fills rows with as many columns as fit, stacked
+fills columns with as many rows as fit, and a last row with fewer logs shares the whole width. When
+the logs would be too small (under 30 columns by 6 rows each), or the screen is under 100 columns,
+only the log in focus is shown. Then `tab` goes to the next log, `a` lists all of them, and `1` to
+`9` jump straight to one. In the one-at-a-time layout, only the log in focus is shown beside the
+devices, `tab` goes from log to log, and `esc` goes to the devices. `z` shows the focused log full
+screen, and `tab` then goes from log to log.
 
 Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
 shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.

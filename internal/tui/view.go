@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,8 +19,7 @@ const helpText = `Devices
   u   uninstall an app, asks first
   n   new simulator or emulator y   copy the id
   w   Android phone over Wi-Fi  x   disconnect a Wi-Fi phone
-  l offers the app ids used before and the apps on the device
-  l on another device adds a second log beside the first
+  l offers apps on the device; every log opens in a pane of its own
 
 Logs
   j k, arrows   scroll          G   follow the newest line
@@ -29,8 +29,8 @@ Logs
   S   save to a file            x   stop the stream
   r   restart the stream        w   wrap long lines
   enter  the selected line in full, y copies it
-  X   close this log            v   side by side, above, or one at a time
-  z   full screen, again to undo; tab flips between two logs when one shows
+  X   close this log            v   layout: beside, stacked, one
+  a   list of all logs          1-9 jump to a log
 
 Builds (inside an Expo project)
   enter load, then details      r   refresh
@@ -39,7 +39,7 @@ Builds (inside an Expo project)
 
 Everywhere
   tab   next pane               ?   this help
-  + -   widen or narrow devices z   zoom the focused pane
+  + -   widen or narrow devices z   full screen, again to undo
   mouse wheel scrolls the pane under it, a click selects what is under it,
   sliding sideways (or Shift with the wheel) scrolls the log sideways
   q     quit
@@ -64,7 +64,7 @@ type layout struct {
 	// devicesWidth and logsWidth are zero for a pane that is hidden.
 	devicesWidth, logsWidth int
 	// logs is where each log pane is drawn. A pane that is not drawn has no width.
-	logs [logSlots]logBox
+	logs []logBox
 	// buildsHeight is the height of the builds pane under the devices, or zero without one.
 	buildsHeight int
 }
@@ -170,32 +170,43 @@ func (m *Model) panes(l layout) []string {
 	return body
 }
 
-// logLines draws the log panes: one, or two one above the other or side by side.
+// logLines draws the log panes, wherever the layout put them. Each screen row is made of the rows
+// of the panes it crosses, left to right.
 func (m *Model) logLines(l layout) []string {
-	var drawn [logSlots][]string
-	for slot, b := range l.logs {
+	drawn := make([][]string, len(l.logs))
+	visible := false
+	for i, b := range l.logs {
 		if b.width == 0 {
 			continue
 		}
-		v := m.slot(slot)
-		focused := m.focus == logPane(slot)
-		drawn[slot] = box(v.title(b.width, m.position(slot)), v.lines(b.width-2, b.height-2, focused), b.width, b.height, focused)
+		visible = true
+		v := m.logPanes[i]
+		focused := m.focus == paneLogs && m.logIdx == i
+		drawn[i] = box(v.title(b.width, m.position(i)), v.lines(b.width-2, b.height-2, focused), b.width, b.height, focused)
 	}
-	switch {
-	case drawn[0] == nil && drawn[1] == nil:
+	if !visible {
 		return nil
-	case drawn[0] == nil:
-		return drawn[1]
-	case drawn[1] == nil:
-		return drawn[0]
-	case l.logs[0].y == l.logs[1].y:
-		rows := make([]string, len(drawn[0]))
-		for i := range rows {
-			rows[i] = drawn[0][i] + drawn[1][i]
-		}
-		return rows
 	}
-	return append(drawn[0], drawn[1]...)
+	rows := make([]string, l.bodyHeight)
+	for y := range rows {
+		var parts []struct {
+			x    int
+			line string
+		}
+		for i, b := range l.logs {
+			if b.width > 0 && y >= b.y && y < b.y+b.height && y-b.y < len(drawn[i]) {
+				parts = append(parts, struct {
+					x    int
+					line string
+				}{b.x, drawn[i][y-b.y]})
+			}
+		}
+		sort.Slice(parts, func(i, j int) bool { return parts[i].x < parts[j].x })
+		for _, p := range parts {
+			rows[y] += p.line
+		}
+	}
+	return rows
 }
 
 // logHints are the keys of a log pane. The ones about two logs and the full screen come first,
@@ -203,14 +214,14 @@ func (m *Model) logLines(l layout) []string {
 func (m *Model) logHints() string {
 	var hints string
 	switch {
-	case m.zoomed && m.second.opened:
-		hints = "z back  tab other log  X close"
+	case m.zoomed && m.logCount() > 1:
+		hints = "z back  tab next log  a all logs  X close"
 	case m.zoomed:
 		hints = "z back  X close"
-	case m.second.opened && m.arrange == arrangeOne:
-		hints = "tab other log  z full screen  v layout  esc devices  X close"
-	case m.second.opened:
-		hints = "z full screen  tab next pane  v layout  X close"
+	case m.logCount() > 1 && m.arrange == arrangeOne:
+		hints = "tab next log  a all logs  z full screen  v layout  esc devices  X close"
+	case m.logCount() > 1:
+		hints = "a all logs  tab next pane  z full screen  v layout  X close"
 	default:
 		hints = "z full screen  tab devices  X close"
 	}
@@ -230,7 +241,11 @@ func (m *Model) hints() string {
 	case m.focus == paneBuilds:
 		return "enter details  i install  o open page  n new build  x cancel  r refresh  tab next pane  ? help  q quit"
 	}
-	return "b boot  s shut down  l logs  n new  e erase  d delete  y copy id  w wi-fi  r refresh  ? help  q quit"
+	logs := "l logs"
+	if m.logCount() > 0 {
+		logs = "l another log  a all logs"
+	}
+	return "b boot  s shut down  " + logs + "  n new  e erase  d delete  y copy id  w wi-fi  r refresh  ? help  q quit"
 }
 
 // deviceLines draws the device list for a pane with this much room inside its border.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -75,7 +76,6 @@ const (
 	paneDevices pane = iota
 	paneBuilds
 	paneLogs
-	paneLogs2
 )
 
 type (
@@ -135,12 +135,13 @@ type Model struct {
 	noteErr bool
 	// lastApp remembers the app id typed for each platform, to offer it again.
 	lastApp map[device.Platform]string
-	log     logView
-	// second is the second log pane, and arrange how the two sit. lastLog is the log pane that last
-	// had the focus.
-	second  logView
-	arrange arrangement
-	lastLog int
+	// logPanes are the log panes, left to right and top to bottom. There is always at least one.
+	// logIdx is the one with the focus while focus is on the logs, and lastLog the one that last had
+	// it. arrange is how the panes sit.
+	logPanes []*logView
+	logIdx   int
+	lastLog  int
+	arrange  arrangement
 	// logIDs counts the log streams started, so each has an id of its own.
 	logIDs int
 
@@ -168,8 +169,7 @@ func New(ctx context.Context, backend Backend, builds Builds) *Model {
 		busy:     map[string]string{},
 		settling: map[string]settling{},
 		lastApp:  map[device.Platform]string{},
-		log:      logView{follow: true},
-		second:   logView{follow: true},
+		logPanes: []*logView{{follow: true}},
 	}
 }
 
@@ -356,40 +356,53 @@ func (m *Model) restore() (tea.Cmd, bool) {
 		return nil, true
 	}
 	if len(m.listErrs) > 0 {
-		for _, key := range []string{view.Device, logDevice(view.Log), logDevice(view.Second)} {
+		keys := []string{view.Device, logDevice(view.Log)}
+		for i := range view.More {
+			keys = append(keys, view.More[i].Device)
+		}
+		for _, key := range keys {
 			if key != "" && !slices.ContainsFunc(m.devices, func(d device.Device) bool { return d.Key() == key }) {
 				return nil, false
 			}
 		}
 	}
-	m.log.filter, m.log.wrap = view.Filter, view.Wrap
+	first := m.first()
+	first.filter, first.wrap = view.Filter, view.Wrap
 	if view.LevelChosen {
-		m.log.level, m.log.levelChosen = view.Level, true
+		first.level, first.levelChosen = view.Level, true
 	}
 	m.arrange = arrangement(view.Layout)
-	if second := view.Second; second != nil {
-		m.second.filter, m.second.wrap = second.Filter, second.Wrap
-		if second.LevelChosen {
-			m.second.level, m.second.levelChosen = second.Level, true
-		}
-	}
 	for i, d := range m.devices {
 		if d.Key() == view.Device {
 			m.cursor = i
 		}
 	}
 	var cmds []tea.Cmd
-	for slot, saved := range []*state.Log{view.Log, view.Second} {
-		if saved == nil {
+	saved := []*state.Log{view.Log}
+	for i := range view.More {
+		saved = append(saved, &view.More[i])
+	}
+	for i, log := range saved {
+		if log == nil {
 			continue
 		}
 		for _, d := range m.devices {
-			if d.Key() != saved.Device || !d.Ready() {
+			if d.Key() != log.Device || !d.Ready() {
 				continue
 			}
-			spec := logs.Spec{Device: d, Mode: saved.Mode, App: saved.App}
+			// Each log goes in the next pane. The first keeps the settings kept for it in the view, and
+			// the others have their own.
+			slot := m.slotFor(newLog)
+			if i > 0 {
+				v := m.logPanes[slot]
+				v.filter, v.wrap = log.Filter, log.Wrap
+				if log.LevelChosen {
+					v.level, v.levelChosen = log.Level, true
+				}
+			}
+			spec := logs.Spec{Device: d, Mode: log.Mode, App: log.App}
 			// A log that launches an app waits for r, since starting it would launch the app again.
-			if saved.Mode == logs.Console {
+			if log.Mode == logs.Console {
 				m.parkLog(slot, spec)
 				m.setNote(waitingNote, false)
 			} else {
@@ -399,8 +412,8 @@ func (m *Model) restore() (tea.Cmd, bool) {
 			break
 		}
 	}
-	if m.log.opened {
-		m.focus, m.lastLog = paneLogs, 0
+	if m.first().opened {
+		m.focusLog(0)
 	}
 	return tea.Batch(cmds...), true
 }
@@ -420,17 +433,20 @@ func (m *Model) saveView() {
 	if m.memory.Folder == "" || !m.restored {
 		return
 	}
-	view := state.View{Filter: m.log.filter, Level: m.log.level, LevelChosen: m.log.levelChosen, Wrap: m.log.wrap, Layout: string(m.arrange)}
+	first := m.first()
+	view := state.View{Filter: first.filter, Level: first.level, LevelChosen: first.levelChosen, Wrap: first.wrap, Layout: string(m.arrange)}
 	if d, ok := m.selected(); ok {
 		view.Device = d.Key()
 	}
-	if m.log.opened && !m.log.ended {
-		view.Log = &state.Log{Device: m.log.spec.Device.Key(), Mode: m.log.spec.Mode, App: m.log.spec.App}
+	if first.opened && !first.ended {
+		view.Log = &state.Log{Device: first.spec.Device.Key(), Mode: first.spec.Mode, App: first.spec.App}
 	}
-	if v := &m.second; v.opened && !v.ended {
-		view.Second = &state.Log{
-			Device: v.spec.Device.Key(), Mode: v.spec.Mode, App: v.spec.App,
-			Filter: v.filter, Level: v.level, LevelChosen: v.levelChosen, Wrap: v.wrap,
+	for _, v := range m.logPanes[1:] {
+		if v.opened && !v.ended {
+			view.More = append(view.More, state.Log{
+				Device: v.spec.Device.Key(), Mode: v.spec.Mode, App: v.spec.App,
+				Filter: v.filter, Level: v.level, LevelChosen: v.levelChosen, Wrap: v.wrap,
+			})
 		}
 	}
 	if m.saved != nil && sameView(*m.saved, view) {
@@ -448,13 +464,7 @@ func (m *Model) saveView() {
 }
 
 func sameView(a, b state.View) bool {
-	for _, pair := range [][2]*state.Log{{a.Log, b.Log}, {a.Second, b.Second}} {
-		if (pair[0] == nil) != (pair[1] == nil) || (pair[0] != nil && *pair[0] != *pair[1]) {
-			return false
-		}
-	}
-	a.Log, b.Log, a.Second, b.Second = nil, nil, nil, nil
-	return a == b
+	return reflect.DeepEqual(a, b)
 }
 
 // settling is an action that has finished, but whose effect the device list does not show yet.
@@ -563,8 +573,8 @@ func (m *Model) confirm(title, body string, onYes func(m *Model) tea.Cmd) {
 
 func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
-	if slot, ok := slotOf(m.focus); ok {
-		m.lastLog = slot
+	if i, _, ok := m.focusedLog(); ok {
+		m.lastLog = i
 	}
 	switch key {
 	case "q", "ctrl+c":
@@ -590,21 +600,32 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "v":
 		m.arrange = m.arrange.next()
 		switch {
-		case !m.second.opened:
-			m.setNote("Press l on another device to open a second log. v chooses how the two sit", false)
+		case m.logCount() < 2:
+			m.setNote("Press l on another device to open another log. v chooses how they sit", false)
 		case m.arrange == arrangeStacked:
-			m.setNote("Logs one above the other", false)
+			m.setNote("Logs stacked", false)
 		case m.arrange == arrangeOne:
-			m.setNote("One log at a time: tab shows the other, esc goes to the devices", false)
+			m.setNote("One log at a time: tab shows the next, esc goes to the devices", false)
 		default:
 			m.setNote("Logs side by side", false)
+		}
+		return nil
+	case "a":
+		m.showLogs()
+		return nil
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// A number jumps to that log.
+		if i := int(key[0] - '1'); i < m.logCount() {
+			m.focusLog(i)
+		} else {
+			m.setNote(fmt.Sprintf("There is no log %s: %d open", key, m.logCount()), true)
 		}
 		return nil
 	case "esc":
 		m.focus, m.zoomed = paneDevices, false
 		return nil
 	}
-	if _, ok := slotOf(m.focus); ok {
+	if m.focusOnLog() {
 		return m.logKey(key)
 	}
 	if m.focus == paneBuilds {
@@ -614,31 +635,35 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // paneAt is the pane drawn at a screen cell.
-func (m *Model) paneAt(x, y int) (pane, bool) {
+// For a log pane it also says which one.
+func (m *Model) paneAt(x, y int) (pane, int, bool) {
 	l := m.layout()
 	switch {
 	case y >= l.bodyHeight:
-		return 0, false
+		return 0, 0, false
 	case x < l.devicesWidth && y >= l.bodyHeight-l.buildsHeight:
-		return paneBuilds, true
+		return paneBuilds, 0, true
 	case x < l.devicesWidth:
-		return paneDevices, true
+		return paneDevices, 0, true
 	}
-	for slot, b := range l.logs {
+	for i, b := range l.logs {
 		if b.contains(x, y) {
-			return logPane(slot), true
+			return paneLogs, i, true
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 // click focuses the pane under the pointer, and selects the device or build clicked.
 func (m *Model) click(x, y int) {
-	p, ok := m.paneAt(x, y)
+	p, index, ok := m.paneAt(x, y)
 	if !ok {
 		return
 	}
 	m.focus = p
+	if p == paneLogs {
+		m.focusLog(index)
+	}
 	l := m.layout()
 	// Rows inside a pane start under its top border.
 	switch p {
@@ -677,7 +702,7 @@ func rowAt(rows []int, row int) int {
 
 // wheel scrolls the pane under the pointer, without moving the focus.
 func (m *Model) wheel(msg tea.MouseWheelMsg) tea.Cmd {
-	p, ok := m.paneAt(msg.X, msg.Y)
+	p, index, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return nil
 	}
@@ -694,19 +719,19 @@ func (m *Model) wheel(msg tea.MouseWheelMsg) tea.Cmd {
 		step = 1
 	case tea.MouseWheelLeft, tea.MouseWheelRight:
 		// Sliding sideways moves the log view, which is the only pane wider than its window.
-		if slot, ok := slotOf(p); ok && m.slot(slot).opened && !m.slot(slot).wrap {
+		if v := m.logPanes[index]; p == paneLogs && v.opened && !v.wrap {
 			delta := map[tea.MouseButton]int{tea.MouseWheelLeft: -4, tea.MouseWheelRight: 4}[button]
-			b := m.layout().logs[slot]
-			m.slot(slot).slide(delta, b.width-2, max(b.rows(), 1))
+			b := m.layout().logs[index]
+			v.slide(delta, b.width-2, max(b.rows(), 1))
 		}
 		return nil
 	default:
 		return nil
 	}
 	key := map[int]string{-1: "up", 1: "down"}[step]
-	if slot, ok := slotOf(p); ok {
-		if m.slot(slot).opened {
-			m.slot(slot).scroll(3*step, max(m.layout().logs[slot].rows(), 1))
+	if p == paneLogs {
+		if v := m.logPanes[index]; v.opened {
+			v.scroll(3*step, max(m.layout().logs[index].rows(), 1))
 		}
 		return nil
 	}
@@ -716,24 +741,33 @@ func (m *Model) wheel(msg tea.MouseWheelMsg) tea.Cmd {
 	return m.deviceKey(key)
 }
 
-// cycle moves the focus to the next or previous pane.
+// cycle moves the focus to the next or previous pane, through the devices, the builds and every
+// log in turn. With one log shown at a time, on the whole screen or beside the devices, it goes
+// from log to log instead, and esc leaves for the devices.
 func (m *Model) cycle(step int) {
-	// With one log shown at a time, on the whole screen or beside the devices, tab flips between
-	// the two logs. esc leaves for the devices.
-	if slot, ok := slotOf(m.focus); ok && m.second.opened && (m.zoomed || m.arrange == arrangeOne) {
-		m.focus, m.lastLog = logPane(1-slot), 1-slot
+	n := m.logCount()
+	if i, _, ok := m.focusedLog(); ok && n > 1 && (m.zoomed || m.arrange == arrangeOne) {
+		m.focusLog((i + step + n) % n)
 		return
 	}
-	panes := []pane{paneDevices, paneLogs}
+	type stop struct {
+		pane  pane
+		index int
+	}
+	stops := []stop{{paneDevices, 0}}
 	if m.builds != nil {
-		panes = []pane{paneDevices, paneBuilds, paneLogs}
+		stops = append(stops, stop{paneBuilds, 0})
 	}
-	if m.second.opened {
-		panes = append(panes, paneLogs2)
+	for i := range max(n, 1) {
+		stops = append(stops, stop{paneLogs, i})
 	}
-	for i, p := range panes {
-		if p == m.focus {
-			m.focus = panes[(i+step+len(panes))%len(panes)]
+	for i, s := range stops {
+		if s.pane == m.focus && (s.pane != paneLogs || s.index == m.logIdx) {
+			next := stops[(i+step+len(stops))%len(stops)]
+			m.focus = next.pane
+			if next.pane == paneLogs {
+				m.focusLog(next.index)
+			}
 			return
 		}
 	}
@@ -822,7 +856,7 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 		m.setNote("Copied "+d.TargetID(), false)
 		return tea.SetClipboard(d.TargetID())
 	case "l", "enter":
-		return m.openLogs(d, m.nextLogSlot())
+		return m.openLogs(d, newLog)
 	}
 	if !virtual && strings.Contains("bsed", key) && len(key) == 1 {
 		m.setNote(d.Name+" is a real device: it is not booted, shut down, erased or deleted from here", true)
@@ -1117,18 +1151,15 @@ func (m *Model) askApp(d device.Device, mode logs.ModeInfo, slot int) {
 	}
 }
 
-// startLogs opens a log in the log pane slot, replacing what it showed. The second pane only
-// opens while the first is taken, otherwise the log goes in the first. version is the installed
-// version of spec.App when the caller has just been told it, such as by the app list. Without
-// one, the device is asked.
+// startLogs opens a log in the log pane slot, replacing what it showed, or in a pane of its own for
+// newLog. version is the installed version of spec.App when the caller has just been told it, such
+// as by the app list. Without one, the device is asked.
 func (m *Model) startLogs(slot int, spec logs.Spec, version string) tea.Cmd {
 	if m.note == waitingNote {
 		m.setNote("", false)
 	}
-	if !m.log.opened {
-		slot = 0
-	}
-	v := m.slot(slot)
+	slot = m.slotFor(slot)
+	v := m.logPanes[slot]
 	if v.session != nil {
 		v.session.Stop()
 	}
@@ -1146,7 +1177,7 @@ func (m *Model) startLogs(slot int, spec logs.Spec, version string) tea.Cmd {
 	})
 	v.session = session
 	v.version = version
-	m.focus, m.lastLog = logPane(slot), slot
+	m.focusLog(slot)
 	if spec.App != "" {
 		m.lastApp[spec.Device.Platform] = spec.App
 		_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(spec.Device.Platform, spec.App) })

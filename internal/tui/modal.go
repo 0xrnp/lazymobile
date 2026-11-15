@@ -39,6 +39,9 @@ type modal struct {
 	items    []string
 	cursor   int
 	onChoose func(m *Model, index int) tea.Cmd
+	// onKey, when set, sees the keys the list does not use. extraHint says what they do.
+	onKey     func(m *Model, key string, cursor int) tea.Cmd
+	extraHint string
 
 	// top is the first body line shown, for a message that is taller than the screen.
 	top int
@@ -146,6 +149,10 @@ func (m *Model) modalKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "enter":
 			m.modal = nil
 			return md.onChoose(m, md.cursor)
+		default:
+			if md.onKey != nil {
+				return md.onKey(m, key, md.cursor)
+			}
 		}
 	}
 	return nil
@@ -195,6 +202,9 @@ func (md *modal) render(width, height int) []string {
 		}
 		lines = append(lines, "")
 		hint = "enter: choose   esc: cancel"
+		if md.extraHint != "" {
+			hint = "enter: choose   " + md.extraHint + "   esc: cancel"
+		}
 		if len(md.items) > rows {
 			hint += "   " + fmt.Sprintf("%d of %d", md.cursor+1, len(md.items))
 		}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -13,9 +14,9 @@ import (
 	"github.com/0xrnp/lazymobile/internal/state"
 )
 
-// openSecond opens a log of d, typing app. It goes beside the log that is open, or takes the place
-// of the one that had the focus last when there are two.
-func (h *harness) openSecond(d device.Device, app string) {
+// openLog opens a log of d, typing app. It goes in a pane of its own after the ones that are open.
+// The focus goes back to the devices first, since l is something else while a log has it.
+func (h *harness) openLog(d device.Device, app string) {
 	h.t.Helper()
 	h.press("esc")
 	h.selectDevice(d)
@@ -35,16 +36,26 @@ func (h *harness) emitTo(n int, lines ...logs.Line) {
 	h.backend.handlers[n].Lines(lines)
 }
 
-// twoLogs is a dashboard with a log of the emulator and one of the Wi-Fi phone open.
-func twoLogs(t *testing.T) *harness {
+// logsOpen is a dashboard with n logs open, of the emulator and the Wi-Fi phone in turn: the app
+// ids are app.1, app.2 and so on, so each pane has its own title.
+func logsOpen(t *testing.T, n int) *harness {
 	t.Helper()
 	h := start(t, pixel, wifiPhon)
-	h.openLogs(pixel, "app.one")
-	h.openSecond(wifiPhon, "app.two")
-	h.wantCalls("logs Pixel_9a", 1)
-	h.wantCalls("logs 192.168.1.9:5555", 1)
+	for i := 1; i <= n; i++ {
+		d := []device.Device{pixel, wifiPhon}[(i-1)%2]
+		if i == 1 {
+			h.openLogs(d, "app.1")
+			continue
+		}
+		h.openLog(d, fmt.Sprintf("app.%d", i))
+	}
+	if got := h.m.logCount(); got != n {
+		t.Fatalf("%d logs are open, want %d", got, n)
+	}
 	return h
 }
+
+func twoLogs(t *testing.T) *harness { return logsOpen(t, 2) }
 
 // screenAt is the row and column where text starts on the screen.
 func screenAt(t *testing.T, h *harness, text string) (row, col int) {
@@ -58,20 +69,98 @@ func screenAt(t *testing.T, h *harness, text string) (row, col int) {
 	return 0, 0
 }
 
-func TestASecondLogOpensBesideTheFirstAndKeepsItsOwnLines(t *testing.T) {
-	h := twoLogs(t)
-	h.emitTo(0, logs.Line{Text: "from-the-first", Level: logs.Info})
-	h.emitTo(1, logs.Line{Text: "from-the-second", Level: logs.Info})
-	h.wantScreen("Logs 1/2: Pixel 9a", "app.one", "from-the-first", "Logs 2/2: Pixel 8", "app.two", "from-the-second")
-	if !h.m.log.opened || !h.m.second.opened || h.m.focus != paneLogs2 {
-		t.Errorf("first %v, second %v, focus %v", h.m.log.opened, h.m.second.opened, h.m.focus)
-	}
-	if got := len(h.m.log.all); got != 1 {
-		t.Errorf("the first log has %d lines, want its own 1", got)
+func (h *harness) wantFocus(index int) {
+	h.t.Helper()
+	if h.m.focus != paneLogs || h.m.logIdx != index {
+		h.t.Fatalf("focus is %v, log %d; want log %d", h.m.focus, h.m.logIdx, index)
 	}
 }
 
-func TestTwoLogsAreSideBySideUntilVSaysOtherwise(t *testing.T) {
+func TestLOpensAnotherLogBesideTheOnesThatAreOpenAndTheTitlesSayWhichIsWhich(t *testing.T) {
+	h := start(t, pixel, wifiPhon)
+	h.openLogs(pixel, "app.1")
+	// One log is just "Logs".
+	h.wantScreen("Logs: Pixel 9a")
+	h.wantNoScreen("1/2")
+
+	h.openLog(wifiPhon, "app.2")
+	h.wantScreen("Logs 1/2: Pixel 9a", "Logs 2/2: Pixel 8")
+	h.wantFocus(1)
+
+	h.openLog(pixel, "app.3")
+	h.wantScreen("Logs 1/3: Pixel 9a", "Logs 2/3: Pixel 8", "Logs 3/3: Pixel 9a")
+	h.wantFocus(2)
+	if h.m.logCount() != 3 {
+		t.Errorf("%d logs", h.m.logCount())
+	}
+}
+
+func TestEachLogKeepsItsOwnLines(t *testing.T) {
+	h := logsOpen(t, 3)
+	for i := range 3 {
+		h.emitTo(i, logs.Line{Text: fmt.Sprintf("from-log-%d", i+1), Level: logs.Info})
+	}
+	h.wantScreen("from-log-1", "from-log-2", "from-log-3")
+	for i, v := range h.m.logPanes {
+		if len(v.all) != 1 {
+			t.Errorf("log %d has %d lines, want its own 1", i+1, len(v.all))
+		}
+	}
+}
+
+func TestThreeLogsFillTheAreaInARowOfTwoAndOneThatIsWide(t *testing.T) {
+	h := logsOpen(t, 3)
+	row1, col1 := screenAt(t, h, "Logs 1/3")
+	row2, col2 := screenAt(t, h, "Logs 2/3")
+	row3, col3 := screenAt(t, h, "Logs 3/3")
+	if row1 != row2 || col2 <= col1 || row3 <= row1 || col3 != col1 {
+		t.Errorf("first (%d,%d), second (%d,%d), third (%d,%d)", row1, col1, row2, col2, row3, col3)
+	}
+	// The last row has one log, which has the whole width: its border reaches the screen's edge.
+	boxes := h.m.layout().logs
+	if boxes[2].width != boxes[0].width+boxes[1].width {
+		t.Errorf("widths %d, %d and %d: the third should span both", boxes[0].width, boxes[1].width, boxes[2].width)
+	}
+}
+
+func TestFourLogsAreAGridOfTwoByTwo(t *testing.T) {
+	h := logsOpen(t, 4)
+	boxes := h.m.layout().logs
+	if boxes[0].y != boxes[1].y || boxes[2].y != boxes[3].y || boxes[2].y <= boxes[0].y || boxes[0].x != boxes[2].x || boxes[1].x != boxes[3].x {
+		t.Errorf("boxes %+v", boxes)
+	}
+	h.wantScreen("Logs 1/4", "Logs 2/4", "Logs 3/4", "Logs 4/4")
+}
+
+func TestSixLogsAreAGridOfTwoColumnsAndThreeRows(t *testing.T) {
+	h := logsOpen(t, 6)
+	boxes := h.m.layout().logs
+	if boxes[0].y != boxes[1].y || boxes[2].y != boxes[3].y || boxes[4].y != boxes[5].y || boxes[4].y <= boxes[2].y {
+		t.Errorf("boxes %+v", boxes)
+	}
+	for i := 1; i <= 6; i++ {
+		h.wantScreen(fmt.Sprintf("Logs %d/6", i))
+	}
+}
+
+func TestManyLogsThatCannotAllFitShowTheOneInFocusAndSayHowToReachTheOthers(t *testing.T) {
+	h := logsOpen(t, 9)
+	// At 120 by 30 nine logs would be too small, so the one in focus has the area.
+	h.wantScreen("Logs 9/9", "a all logs")
+	h.wantNoScreen("Logs 1/9")
+	h.press("1")
+	h.wantFocus(0)
+	h.wantScreen("Logs 1/9")
+	h.wantNoScreen("Logs 9/9")
+
+	// A wide, tall screen has room for all of them.
+	h.m.Update(tea.WindowSizeMsg{Width: 260, Height: 50})
+	for i := 1; i <= 9; i++ {
+		h.wantScreen(fmt.Sprintf("Logs %d/9", i))
+	}
+}
+
+func TestTheLayoutCyclesThroughSideStackedAndOneAtATime(t *testing.T) {
 	h := twoLogs(t)
 	row1, col1 := screenAt(t, h, "Logs 1/2: Pixel 9a")
 	row2, col2 := screenAt(t, h, "Logs 2/2: Pixel 8")
@@ -80,276 +169,211 @@ func TestTwoLogsAreSideBySideUntilVSaysOtherwise(t *testing.T) {
 	}
 
 	h.press("v")
-	h.wantScreen("Logs one above the other")
+	h.wantScreen("Logs stacked")
 	row1, col1 = screenAt(t, h, "Logs 1/2: Pixel 9a")
 	row2, col2 = screenAt(t, h, "Logs 2/2: Pixel 8")
 	if row2 <= row1 || col1 != col2 {
 		t.Errorf("stacked: first at (%d,%d), second at (%d,%d)", row1, col1, row2, col2)
 	}
 
-	// Then one at a time: the one in focus, beside the devices.
 	h.press("v")
 	h.wantScreen("One log at a time", "Devices", "Logs 2/2: Pixel 8")
 	h.wantNoScreen("Logs 1/2: Pixel 9a")
 
 	h.press("v")
 	h.wantScreen("Logs side by side")
-	row1, _ = screenAt(t, h, "Logs 1/2: Pixel 9a")
-	row2, _ = screenAt(t, h, "Logs 2/2: Pixel 8")
-	if row1 != row2 {
-		t.Errorf("side by side again: first at row %d, second at row %d", row1, row2)
-	}
 }
-
-func TestOneLogAtATimeKeepsTheDevicesAndTabFlipsBetweenTheLogs(t *testing.T) {
-	h := twoLogs(t)
-	h.emitTo(0, logs.Line{Text: "from-the-first", Level: logs.Info})
-	h.emitTo(1, logs.Line{Text: "from-the-second", Level: logs.Info})
-	h.press("v", "v")
-	h.wantScreen("tab other log", "esc devices", "Devices", "from-the-second")
-	h.wantNoScreen("from-the-first")
-
-	// Tab shows the other log, and the devices stay on the screen.
-	h.press("tab")
-	if h.m.focus != paneLogs {
-		t.Fatalf("focus = %v, want the first log", h.m.focus)
-	}
-	h.wantScreen("Devices", "Logs 1/2: Pixel 9a", "from-the-first")
-	h.wantNoScreen("from-the-second")
-	h.press("tab")
-	h.wantScreen("Logs 2/2: Pixel 8", "from-the-second")
-
-	// Esc goes to the devices, which still show the log that was last in focus.
-	h.press("esc")
-	if h.m.focus != paneDevices {
-		t.Fatalf("focus = %v", h.m.focus)
-	}
-	h.wantScreen("Logs 2/2: Pixel 8")
-	h.wantNoScreen("Logs 1/2: Pixel 9a")
-	// Tab from the devices goes back to a log.
-	h.press("tab")
-	if h.focusIsNotALog() {
-		t.Errorf("focus = %v, want a log", h.m.focus)
-	}
-}
-
-func TestZoomInOneAtATimeStillFlipsAndGoesBack(t *testing.T) {
-	h := twoLogs(t)
-	h.press("v", "v", "z")
-	h.wantNoScreen("Devices")
-	h.press("tab")
-	h.wantScreen("Logs 1/2: Pixel 9a")
-	h.press("z")
-	h.wantScreen("Devices", "Logs 1/2: Pixel 9a")
-	h.wantNoScreen("Logs 2/2: Pixel 8")
-}
-
-func TestTheLayoutComesBackOnTheNextStart(t *testing.T) {
-	for _, layout := range []arrangement{arrangeSide, arrangeStacked, arrangeOne} {
-		memory := memoryIn(t)
-		first := startWith(t, memory, pixel, wifiPhon)
-		first.openLogs(pixel, "app.one")
-		first.openSecond(wifiPhon, "app.two")
-		for first.m.arrange != layout {
-			first.press("v")
-		}
-		first.press("q")
-
-		h := startWith(t, memory, pixel, wifiPhon)
-		if h.m.arrange != layout || !h.m.second.opened {
-			t.Errorf("layout %q came back as %q, second open %v", layout, h.m.arrange, h.m.second.opened)
-		}
-	}
-}
-
-func (h *harness) focusIsNotALog() bool { return !h.m.focusOnLog() }
 
 func TestVBeforeASecondLogSaysHowToOpenOne(t *testing.T) {
 	h := start(t, pixel)
 	h.press("v")
-	h.wantScreen("Press l on another device to open a second log")
+	h.wantScreen("Press l on another device to open another log")
 }
 
-func TestEachLogPaneKeepsItsOwnFilterAndLevel(t *testing.T) {
-	h := twoLogs(t)
+func TestEachLogPaneKeepsItsOwnFilterLevelAndWrap(t *testing.T) {
+	h := logsOpen(t, 3)
 	h.press("/")
 	h.typeText("needle")
 	h.press("enter")
-	if h.m.second.filter != "needle" || h.m.log.filter != "" {
-		t.Errorf("filters: first %q, second %q", h.m.log.filter, h.m.second.filter)
+	if h.m.logPanes[2].filter != "needle" || h.m.logPanes[0].filter != "" || h.m.logPanes[1].filter != "" {
+		t.Errorf("filters: %q %q %q", h.m.logPanes[0].filter, h.m.logPanes[1].filter, h.m.logPanes[2].filter)
 	}
-
-	before := h.m.log.level
+	before := h.m.logPanes[0].level
 	h.press("L")
-	if h.m.log.level != before || !h.m.second.levelChosen || h.m.log.levelChosen {
-		t.Errorf("the level of the second changed the first: %v, chosen %v and %v", h.m.log.level, h.m.log.levelChosen, h.m.second.levelChosen)
+	if h.m.logPanes[0].level != before || !h.m.logPanes[2].levelChosen || h.m.logPanes[0].levelChosen {
+		t.Errorf("the level of the third changed another one")
 	}
-
-	h.press("tab", "tab")
-	if h.m.focus != paneLogs {
-		t.Fatalf("focus = %v, want the first log", h.m.focus)
-	}
+	h.press("1")
 	h.press("w")
-	if !h.m.log.wrap || h.m.second.wrap {
-		t.Errorf("wrap: first %v, second %v", h.m.log.wrap, h.m.second.wrap)
+	if !h.m.logPanes[0].wrap || h.m.logPanes[1].wrap || h.m.logPanes[2].wrap {
+		t.Errorf("wrap: %v %v %v", h.m.logPanes[0].wrap, h.m.logPanes[1].wrap, h.m.logPanes[2].wrap)
 	}
 }
 
-func TestTabVisitsBothLogs(t *testing.T) {
-	h := twoLogs(t)
-	var seen []pane
-	for range 3 {
+func TestTabVisitsEveryLogAndTheDevices(t *testing.T) {
+	h := logsOpen(t, 3)
+	var seen []string
+	for range 5 {
 		h.press("tab")
-		seen = append(seen, h.m.focus)
+		if h.m.focus == paneLogs {
+			seen = append(seen, fmt.Sprintf("log%d", h.m.logIdx+1))
+		} else {
+			seen = append(seen, "devices")
+		}
 	}
-	want := []pane{paneDevices, paneLogs, paneLogs2}
-	for i := range want {
-		if seen[i] != want[i] {
-			t.Fatalf("tab went to %v, want %v", seen, want)
+	want := []string{"devices", "log1", "log2", "log3", "devices"}
+	if strings.Join(seen, " ") != strings.Join(want, " ") {
+		t.Errorf("tab went %v, want %v", seen, want)
+	}
+	h.press("shift+tab")
+	h.wantFocus(2)
+}
+
+func TestNumbersJumpToThatLog(t *testing.T) {
+	h := logsOpen(t, 4)
+	h.press("2")
+	h.wantFocus(1)
+	h.press("4")
+	h.wantFocus(3)
+	h.press("5")
+	h.wantScreen("There is no log 5: 4 open")
+	h.wantFocus(3)
+	// Also from the devices.
+	h.press("esc", "3")
+	h.wantFocus(2)
+}
+
+func TestTheListShowsEveryLogAndSwitchesToTheOneChosen(t *testing.T) {
+	h := logsOpen(t, 3)
+	h.press("esc", "a")
+	h.wantScreen("Logs (3 open)", "1  Pixel 9a · app.1", "2  Pixel 8 · app.2", "3  Pixel 9a · app.3")
+	// The highlighted one is the log that last had the focus, which is the third.
+	h.press("up", "enter")
+	h.wantFocus(1)
+	h.wantNoScreen("Logs (3 open)")
+}
+
+func TestTheListClosesLogsWithoutLeavingIt(t *testing.T) {
+	h := logsOpen(t, 3)
+	h.press("a", "x")
+	// The highlighted one is the log in focus, which is the third.
+	h.wantScreen("Logs (2 open)")
+	h.wantNoScreen("app.3   ")
+	if h.m.logCount() != 2 || !h.backend.sessions[2].isStopped() {
+		t.Fatalf("%d logs are open, third stopped %v", h.m.logCount(), h.backend.sessions[2].isStopped())
+	}
+	h.press("up", "x")
+	h.wantScreen("Logs (1 open)")
+	h.press("x")
+	h.wantNoScreen("Logs (")
+	if h.m.logCount() != 0 || h.m.modal != nil {
+		t.Errorf("%d logs open, modal %v", h.m.logCount(), h.m.modal != nil)
+	}
+	for i, s := range h.backend.sessions {
+		if !s.isStopped() {
+			t.Errorf("log %d is still running", i+1)
 		}
 	}
 }
 
-func TestLOpensBesideTheLogThatIsOpenAndTheTitlesSayWhichIsWhich(t *testing.T) {
-	h := start(t, pixel, wifiPhon)
-	h.openLogs(pixel, "app.one")
-	// One log is just "Logs".
-	h.wantScreen("Logs: Pixel 9a")
-	h.wantNoScreen("1/2")
-
-	h.openSecond(wifiPhon, "app.two")
-	h.wantScreen("Logs 1/2: Pixel 9a", "Logs 2/2: Pixel 8")
-	if !h.m.log.opened || !h.m.second.opened || h.m.focus != paneLogs2 {
-		t.Errorf("first %v, second %v, focus %v", h.m.log.opened, h.m.second.opened, h.m.focus)
-	}
-	// Back to one log, and the numbers go.
-	h.press("X")
-	h.wantScreen("Logs: Pixel 9a")
-	h.wantNoScreen("1/2")
-}
-
-func TestCapitalLInTheDevicesDoesNothing(t *testing.T) {
+func TestTheListWithNoLogOpenSaysSo(t *testing.T) {
 	h := start(t, pixel)
-	h.selectDevice(pixel)
-	h.press("L")
-	if h.m.modal != nil || h.m.log.opened {
-		t.Errorf("L opened something: modal %v, log %v", h.m.modal != nil, h.m.log.opened)
+	h.press("a")
+	h.wantScreen("No log is open")
+	if h.m.modal != nil {
+		t.Error("a window opened with nothing to list")
 	}
 }
 
-func TestLOpensTheSecondAgainInPlaceOfTheOneThatIsThere(t *testing.T) {
-	h := twoLogs(t)
-	// Both panes are taken, so a third log replaces the one that had the focus last.
-	h.openSecond(pixel, "app.three")
-	h.wantCalls("logs Pixel_9a mode=logcat app=app.three", 1)
-	if !h.backend.sessions[1].isStopped() {
-		t.Error("the log that was replaced is still running")
+func TestXClosesTheFocusedLogAndTheFocusStaysOnItsNeighbour(t *testing.T) {
+	h := logsOpen(t, 4)
+	h.press("2", "X")
+	if h.m.logCount() != 3 {
+		t.Fatalf("%d logs are open", h.m.logCount())
 	}
-	if h.m.second.spec.App != "app.three" || h.m.log.spec.App != "app.one" {
-		t.Errorf("first %q, second %q", h.m.log.spec.App, h.m.second.spec.App)
-	}
-	// A late line of the replaced stream goes nowhere.
-	h.emitTo(1, logs.Line{Text: "from-the-replaced"})
-	if got := len(h.m.second.all); got != 0 {
-		t.Errorf("a replaced stream still writes: %d lines", got)
-	}
-}
-
-func TestLOpensInTheLogThatHadTheFocusLast(t *testing.T) {
-	h := twoLogs(t)
-	// The focus goes to the devices, then to the first log, then back to the devices.
-	h.press("tab", "tab", "esc")
-	h.selectDevice(pixel)
-	h.press("l", "ctrl+u")
-	h.typeText("app.three")
-	h.press("enter")
-	if h.m.log.spec.App != "app.three" || h.m.second.spec.App != "app.two" {
-		t.Errorf("first %q, second %q", h.m.log.spec.App, h.m.second.spec.App)
-	}
-}
-
-func TestXClosesTheSecondLog(t *testing.T) {
-	h := twoLogs(t)
-	h.press("X")
-	if h.m.second.opened || !h.m.log.opened || h.m.focus != paneLogs {
-		t.Errorf("first %v, second %v, focus %v", h.m.log.opened, h.m.second.opened, h.m.focus)
-	}
-	if !h.backend.sessions[1].isStopped() || h.backend.sessions[0].isStopped() {
+	if !h.backend.sessions[1].isStopped() || h.backend.sessions[0].isStopped() || h.backend.sessions[2].isStopped() {
 		t.Error("the wrong log was stopped")
 	}
-	h.wantNoScreen("Logs 2/2: Pixel 8")
-	h.emitTo(1, logs.Line{Text: "from-the-closed"})
-	h.wantNoScreen("from-the-closed")
-}
-
-func TestClosingTheFirstLogMovesTheSecondUp(t *testing.T) {
-	h := twoLogs(t)
-	h.emitTo(1, logs.Line{Text: "from-the-second", Level: logs.Info})
-	h.press("tab", "tab")
-	if h.m.focus != paneLogs {
-		t.Fatalf("focus = %v", h.m.focus)
+	// Log 3 moved up into the place of log 2, and has the focus.
+	h.wantFocus(1)
+	if h.m.logPanes[1].spec.App != "app.3" {
+		t.Errorf("the second log is %q, want app.3", h.m.logPanes[1].spec.App)
 	}
-	h.press("X")
-	if !h.m.log.opened || h.m.second.opened || h.m.focus != paneLogs {
-		t.Fatalf("first %v, second %v, focus %v", h.m.log.opened, h.m.second.opened, h.m.focus)
-	}
-	if h.m.log.spec.Device.Key() != wifiPhon.Key() {
-		t.Errorf("the first log is of %s, want the second one", h.m.log.spec.Device.Name)
-	}
-	h.wantScreen("Logs: Pixel 8", "from-the-second")
-	if !h.backend.sessions[0].isStopped() || h.backend.sessions[1].isStopped() {
-		t.Error("the wrong log was stopped")
-	}
-	// The moved stream still reaches its pane.
-	h.emitTo(1, logs.Line{Text: "after-the-move", Level: logs.Info})
+	// A moved stream still reaches its pane, and a closed one reaches nothing.
+	h.emitTo(2, logs.Line{Text: "after-the-move", Level: logs.Info})
+	h.emitTo(1, logs.Line{Text: "from-the-closed", Level: logs.Info})
 	h.wantScreen("after-the-move")
+	h.wantNoScreen("from-the-closed")
 
-	h.press("X")
-	if h.m.log.opened || h.m.focus != paneDevices {
-		t.Errorf("closing the last log: opened %v, focus %v", h.m.log.opened, h.m.focus)
+	// The last one closed hands the focus to the one before.
+	h.press("3", "X")
+	h.wantFocus(1)
+	h.press("1", "X", "X")
+	if h.m.logCount() != 0 || h.m.focus != paneDevices {
+		t.Errorf("%d logs open, focus %v", h.m.logCount(), h.m.focus)
+	}
+	// The first pane stays, empty, and the next log opens in it.
+	h.openLog(pixel, "app.9")
+	if h.m.logCount() != 1 || len(h.m.logPanes) != 1 {
+		t.Errorf("%d logs, %d panes", h.m.logCount(), len(h.m.logPanes))
 	}
 }
 
-func TestQuittingStopsBothLogs(t *testing.T) {
-	h := twoLogs(t)
+func TestQuittingStopsEveryLog(t *testing.T) {
+	h := logsOpen(t, 4)
 	h.run(h.m.quit())
 	for i, s := range h.backend.sessions {
 		if !s.isStopped() {
-			t.Errorf("log %d is still running after quit", i)
+			t.Errorf("log %d is still running after quit", i+1)
 		}
 	}
 }
 
 func TestNarrowScreensShowOnlyTheLogInFocus(t *testing.T) {
-	h := twoLogs(t)
+	h := logsOpen(t, 3)
 	h.m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
-	h.wantScreen("Logs 2/2: Pixel 8")
-	h.wantNoScreen("Logs 1/2: Pixel 9a")
-	h.press("tab", "tab")
-	h.wantScreen("Logs 1/2: Pixel 9a")
-	h.wantNoScreen("Logs 2/2: Pixel 8")
+	h.wantScreen("Logs 3/3")
+	h.wantNoScreen("Logs 1/3")
+	h.press("1")
+	h.wantScreen("Logs 1/3")
+	h.wantNoScreen("Logs 3/3")
 }
 
-func TestZoomMakesTheLogInFocusFullScreenAndTabFlipsBetweenTheLogs(t *testing.T) {
-	h := twoLogs(t)
-	h.wantScreen("z full screen", "tab next pane")
-	h.press("z")
-	h.wantScreen("Logs 2/2: Pixel 8", "z back", "tab other log")
-	h.wantNoScreen("Logs 1/2: Pixel 9a")
-	h.wantNoScreen("Devices")
-
-	// Tab goes to the other log, not out to the devices.
-	h.press("tab")
-	if h.m.focus != paneLogs {
-		t.Fatalf("focus = %v, want the first log", h.m.focus)
+func TestOneLogAtATimeKeepsTheDevicesAndTabGoesFromLogToLog(t *testing.T) {
+	h := logsOpen(t, 3)
+	for i := range 3 {
+		h.emitTo(i, logs.Line{Text: fmt.Sprintf("from-log-%d", i+1), Level: logs.Info})
 	}
-	h.wantScreen("Logs 1/2: Pixel 9a")
-	h.wantNoScreen("Logs 2/2: Pixel 8")
-	h.press("tab")
-	h.wantScreen("Logs 2/2: Pixel 8")
+	h.press("v", "v")
+	h.wantScreen("tab next log", "esc devices", "Devices", "from-log-3")
+	h.wantNoScreen("from-log-1")
 
+	h.press("tab")
+	h.wantFocus(0)
+	h.wantScreen("Devices", "from-log-1")
+	h.wantNoScreen("from-log-3")
+	h.press("shift+tab")
+	h.wantFocus(2)
+
+	h.press("esc")
+	if h.m.focus != paneDevices {
+		t.Fatalf("focus = %v", h.m.focus)
+	}
+	h.wantScreen("Logs 3/3")
+	h.wantNoScreen("Logs 1/3")
+}
+
+func TestZoomMakesTheLogInFocusFullScreenAndTabGoesFromLogToLog(t *testing.T) {
+	h := logsOpen(t, 3)
+	h.wantScreen("a all logs", "z full screen")
 	h.press("z")
-	h.wantScreen("Devices", "Logs 1/2: Pixel 9a", "Logs 2/2: Pixel 8")
+	h.wantScreen("Logs 3/3", "z back", "tab next log")
+	h.wantNoScreen("Devices")
+	h.press("tab")
+	h.wantFocus(0)
+	h.wantScreen("Logs 1/3")
+	h.press("z")
+	h.wantScreen("Devices", "Logs 1/3", "Logs 2/3", "Logs 3/3")
 }
 
 func TestEscLeavesTheFullScreenAndGoesToTheDevices(t *testing.T) {
@@ -363,43 +387,28 @@ func TestEscLeavesTheFullScreenAndGoesToTheDevices(t *testing.T) {
 
 func TestAZoomedSingleLogSaysHowToGoBack(t *testing.T) {
 	h := start(t, pixel)
-	h.openLogs(pixel, "app.one")
+	h.openLogs(pixel, "app.1")
 	h.wantScreen("z full screen")
 	h.press("z")
 	h.wantScreen("z back")
-	h.wantNoScreen("tab other log")
+	h.wantNoScreen("tab next log")
 }
 
-func TestTwoLogsThatWouldBeTooSmallShowOnlyTheOneInFocus(t *testing.T) {
-	h := twoLogs(t)
-	// One above the other needs room for both.
-	h.press("v")
-	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
-	h.wantScreen("Logs 2/2: Pixel 8")
-	h.wantNoScreen("Logs 1/2: Pixel 9a")
-
-	// Side by side needs 30 columns each. Beside a devices pane of 48, 100 columns leave 52.
-	h.m.arrange = arrangeSide
-	h.m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	h.wantScreen("Logs 2/2: Pixel 8")
-	h.wantNoScreen("Logs 1/2: Pixel 9a")
-	h.m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
-	h.wantScreen("Logs 1/2: Pixel 9a", "Logs 2/2: Pixel 8")
-}
-
-func TestScreenFillsTheTerminalWithTwoLogs(t *testing.T) {
-	for _, side := range []bool{false, true} {
-		for _, size := range [][2]int{{120, 30}, {101, 25}, {200, 40}, {100, 13}} {
-			h := twoLogs(t)
-			h.m.arrange = map[bool]arrangement{true: arrangeSide, false: arrangeStacked}[side]
-			h.m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-			lines := strings.Split(h.screen(), "\n")
-			if len(lines) != size[1] {
-				t.Errorf("side %v at %v: %d rows", side, size, len(lines))
-			}
-			for _, line := range lines {
-				if w := utf8.RuneCountInString(line); w > size[0] {
-					t.Errorf("side %v at %v: a line is %d wide: %q", side, size, w, line)
+func TestAnyNumberOfLogsFitsOrFallsBackWithoutOverflowingTheScreen(t *testing.T) {
+	for n := 1; n <= 9; n++ {
+		h := logsOpen(t, n)
+		for _, arrange := range []arrangement{arrangeSide, arrangeStacked, arrangeOne} {
+			for _, size := range [][2]int{{80, 24}, {100, 24}, {120, 30}, {160, 40}, {101, 12}, {260, 50}} {
+				h.m.arrange = arrange
+				h.m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+				lines := strings.Split(h.screen(), "\n")
+				if len(lines) != size[1] {
+					t.Errorf("%d logs, %q, %v: %d rows", n, arrange, size, len(lines))
+				}
+				for _, line := range lines {
+					if w := utf8.RuneCountInString(line); w > size[0] {
+						t.Errorf("%d logs, %q, %v: a line is %d wide: %q", n, arrange, size, w, line)
+					}
 				}
 			}
 		}
@@ -407,120 +416,123 @@ func TestScreenFillsTheTerminalWithTwoLogs(t *testing.T) {
 }
 
 func TestClickingALogFocusesIt(t *testing.T) {
-	h := twoLogs(t)
-	row1, col1 := screenAt(t, h, "Logs 1/2: Pixel 9a")
-	h.m.Update(tea.MouseClickMsg{X: col1 + 3, Y: row1 + 2, Button: tea.MouseLeft})
-	if h.m.focus != paneLogs {
-		t.Errorf("focus = %v after clicking the first log", h.m.focus)
-	}
-	row2, col2 := screenAt(t, h, "Logs 2/2: Pixel 8")
-	h.m.Update(tea.MouseClickMsg{X: col2 + 3, Y: row2 + 2, Button: tea.MouseLeft})
-	if h.m.focus != paneLogs2 {
-		t.Errorf("focus = %v after clicking the second log", h.m.focus)
+	h := logsOpen(t, 3)
+	for i := 1; i <= 3; i++ {
+		row, col := screenAt(t, h, fmt.Sprintf("Logs %d/3", i))
+		h.m.Update(tea.MouseClickMsg{X: col + 3, Y: row + 2, Button: tea.MouseLeft})
+		h.wantFocus(i - 1)
 	}
 }
 
 func TestTheWheelScrollsTheLogUnderIt(t *testing.T) {
-	h := twoLogs(t)
+	h := logsOpen(t, 3)
 	var lines []logs.Line
 	for i := range 200 {
 		lines = append(lines, logs.Line{Text: fmt.Sprintf("line-%d", i), Level: logs.Info})
 	}
-	h.emitTo(0, lines...)
-	h.emitTo(1, lines...)
-	row, col := screenAt(t, h, "Logs 1/2: Pixel 9a")
+	for i := range 3 {
+		h.emitTo(i, lines...)
+	}
+	row, col := screenAt(t, h, "Logs 2/3")
 	h.m.Update(tea.MouseWheelMsg{X: col + 3, Y: row + 2, Button: tea.MouseWheelUp})
-	if h.m.log.follow || !h.m.second.follow {
-		t.Errorf("follow: first %v, second %v", h.m.log.follow, h.m.second.follow)
+	if h.m.logPanes[0].follow == false || h.m.logPanes[1].follow || h.m.logPanes[2].follow == false {
+		t.Errorf("follow: %v %v %v", h.m.logPanes[0].follow, h.m.logPanes[1].follow, h.m.logPanes[2].follow)
 	}
 }
 
-func TestBothLogsComeBackOnTheNextStartWithTheirOwnSettings(t *testing.T) {
+func TestManyLogsComeBackOnTheNextStartWithTheirOwnSettings(t *testing.T) {
 	memory := memoryIn(t)
 	first := startWith(t, memory, pixel, wifiPhon)
-	first.openLogs(pixel, "app.one")
-	first.openSecond(wifiPhon, "app.two")
-	first.press("w", "L")
-	first.m.second.filter = "needle"
-	first.m.log.filter = "other"
+	first.openLogs(pixel, "app.1")
+	first.openLog(wifiPhon, "app.2")
+	first.openLog(pixel, "app.3")
+	first.press("1", "w")
+	first.press("3", "L")
+	first.m.logPanes[1].filter = "needle"
+	first.m.logPanes[0].filter = "other"
 	first.press("v")
 	first.press("q")
 
 	h := startWith(t, memory, pixel, wifiPhon)
-	h.wantCalls("logs Pixel_9a mode=logcat app=app.one", 1)
-	h.wantCalls("logs 192.168.1.9:5555 mode=logcat app=app.two", 1)
-	if !h.m.log.opened || !h.m.second.opened || h.m.arrange != arrangeStacked {
-		t.Fatalf("first %v, second %v, arrangement %q", h.m.log.opened, h.m.second.opened, h.m.arrange)
+	h.wantCalls("logs Pixel_9a mode=logcat app=app.1", 1)
+	h.wantCalls("logs 192.168.1.9:5555 mode=logcat app=app.2", 1)
+	h.wantCalls("logs Pixel_9a mode=logcat app=app.3", 1)
+	if h.m.logCount() != 3 || h.m.arrange != arrangeStacked {
+		t.Fatalf("%d logs, arrangement %q", h.m.logCount(), h.m.arrange)
 	}
-	if h.m.log.spec.App != "app.one" || h.m.second.spec.App != "app.two" {
-		t.Errorf("first %q, second %q", h.m.log.spec.App, h.m.second.spec.App)
+	for i, want := range []string{"app.1", "app.2", "app.3"} {
+		if got := h.m.logPanes[i].spec.App; got != want {
+			t.Errorf("log %d is %q, want %q", i+1, got, want)
+		}
 	}
-	if h.m.log.filter != "other" || h.m.log.wrap || h.m.log.levelChosen {
-		t.Errorf("first: filter %q wrap %v chosen %v", h.m.log.filter, h.m.log.wrap, h.m.log.levelChosen)
+	if v := h.m.logPanes[0]; v.filter != "other" || !v.wrap || v.levelChosen {
+		t.Errorf("first: filter %q wrap %v chosen %v", v.filter, v.wrap, v.levelChosen)
 	}
-	if h.m.second.filter != "needle" || !h.m.second.wrap || !h.m.second.levelChosen {
-		t.Errorf("second: filter %q wrap %v chosen %v", h.m.second.filter, h.m.second.wrap, h.m.second.levelChosen)
+	if v := h.m.logPanes[1]; v.filter != "needle" || v.wrap || v.levelChosen {
+		t.Errorf("second: filter %q wrap %v chosen %v", v.filter, v.wrap, v.levelChosen)
 	}
-	if h.m.focus != paneLogs {
-		t.Errorf("focus = %v, want the first log", h.m.focus)
+	if v := h.m.logPanes[2]; v.filter != "" || v.wrap || !v.levelChosen {
+		t.Errorf("third: filter %q wrap %v chosen %v", v.filter, v.wrap, v.levelChosen)
 	}
+	h.wantFocus(0)
 }
 
-func TestAStateFileFromBeforeTwoLogsStillRestores(t *testing.T) {
+func TestAStateFileFromBeforeSeveralLogsStillRestores(t *testing.T) {
 	memory := memoryIn(t)
 	err := memory.Store.Update(func(f *state.File) {
 		f.Views = map[string]state.View{memory.Folder: {
 			Device: pixel.Key(), Filter: "old", Wrap: true,
-			Log: &state.Log{Device: pixel.Key(), Mode: logs.Logcat, App: "app.one"},
+			Log: &state.Log{Device: pixel.Key(), Mode: logs.Logcat, App: "app.1"},
 		}}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := startWith(t, memory, pixel, wifiPhon)
-	h.wantCalls("logs Pixel_9a mode=logcat app=app.one", 1)
-	if h.m.second.opened || h.m.arrange != arrangeSide || h.m.log.filter != "old" || !h.m.log.wrap {
-		t.Errorf("second %v, arrangement %q, filter %q, wrap %v", h.m.second.opened, h.m.arrange, h.m.log.filter, h.m.log.wrap)
+	h.wantCalls("logs Pixel_9a mode=logcat app=app.1", 1)
+	if h.m.logCount() != 1 || h.m.arrange != arrangeSide || h.m.logPanes[0].filter != "old" || !h.m.logPanes[0].wrap {
+		t.Errorf("%d logs, arrangement %q, filter %q, wrap %v", h.m.logCount(), h.m.arrange, h.m.logPanes[0].filter, h.m.logPanes[0].wrap)
 	}
 }
 
-func TestASecondLogWhoseFirstDeviceStoppedMovesIntoTheFirstPane(t *testing.T) {
+func TestLogsWhoseDeviceStoppedAreLeftOutAndTheRestMoveUp(t *testing.T) {
 	memory := memoryIn(t)
 	first := startWith(t, memory, pixel, wifiPhon)
-	first.openLogs(pixel, "app.one")
-	first.openSecond(wifiPhon, "app.two")
+	first.openLogs(pixel, "app.1")
+	first.openLog(wifiPhon, "app.2")
+	first.openLog(pixel, "app.3")
 	first.press("q")
 
 	stopped := pixel
 	stopped.State = device.Shutdown
 	h := startWith(t, memory, stopped, wifiPhon)
 	h.wantCalls("logs Pixel_9a", 0)
-	h.wantCalls("logs 192.168.1.9:5555 mode=logcat app=app.two", 1)
-	if !h.m.log.opened || h.m.second.opened || h.m.log.spec.Device.Key() != wifiPhon.Key() {
-		t.Errorf("first %v, second %v", h.m.log.opened, h.m.second.opened)
+	h.wantCalls("logs 192.168.1.9:5555 mode=logcat app=app.2", 1)
+	if h.m.logCount() != 1 || h.m.first().spec.Device.Key() != wifiPhon.Key() {
+		t.Errorf("%d logs open", h.m.logCount())
 	}
 }
 
 // A log that launches an app is never started on its own, since that would launch the app again.
-// It still comes back as a pane, waiting for r, so the two logs the user had stay as they were.
-func TestTwoLogsComeBackEvenWhenOneLaunchesAnApp(t *testing.T) {
+// It still comes back as a pane, waiting for r, so the logs the user had stay as they were.
+func TestLogsComeBackEvenWhenOneLaunchesAnApp(t *testing.T) {
 	memory := memoryIn(t)
 	first := startWith(t, memory, pixel, usbPhone)
-	first.openLogs(pixel, "app.one")
+	first.openLogs(pixel, "app.1")
 	first.press("esc")
 	first.selectDevice(usbPhone)
 	// The first of the phone's two logs launches an app.
 	first.press("l", "enter", "ctrl+u")
-	first.typeText("app.two")
+	first.typeText("app.2")
 	first.press("enter")
-	first.wantCalls("logs UDID-1 mode=console app=app.two", 1)
+	first.wantCalls("logs UDID-1 mode=console app=app.2", 1)
 	first.press("q")
 
 	h := startWith(t, memory, pixel, usbPhone)
-	h.wantCalls("logs Pixel_9a mode=logcat app=app.one", 1)
+	h.wantCalls("logs Pixel_9a mode=logcat app=app.1", 1)
 	h.wantCalls("logs UDID-1", 0)
-	if !h.m.log.opened || !h.m.second.opened || !h.m.second.parked {
-		t.Fatalf("first %v, second %v, parked %v", h.m.log.opened, h.m.second.opened, h.m.second.parked)
+	if h.m.logCount() != 2 || !h.m.logPanes[1].parked {
+		t.Fatalf("%d logs, parked %v", h.m.logCount(), h.m.logPanes[1].parked)
 	}
 	h.wantScreen("Logs 1/2: Pixel 9a", "Logs 2/2: Test iPhone", "Press r to launch it", "is waiting: press r")
 
@@ -528,18 +540,14 @@ func TestTwoLogsComeBackEvenWhenOneLaunchesAnApp(t *testing.T) {
 	h.press("q")
 	again := startWith(t, memory, pixel, usbPhone)
 	again.wantCalls("logs UDID-1", 0)
-	if !again.m.second.parked {
+	if !again.m.logPanes[1].parked {
 		t.Fatal("the log that was waiting to be launched was forgotten")
 	}
 
 	// r in that pane launches it.
-	again.press("tab")
-	if again.m.focus != paneLogs2 {
-		t.Fatalf("focus = %v", again.m.focus)
-	}
-	again.press("r")
-	again.wantCalls("logs UDID-1 mode=console app=app.two", 1)
-	if again.m.second.parked {
+	again.press("2", "r")
+	again.wantCalls("logs UDID-1 mode=console app=app.2", 1)
+	if again.m.logPanes[1].parked {
 		t.Error("still waiting after it was launched")
 	}
 	again.wantNoScreen("Press r to launch it")
@@ -551,15 +559,94 @@ func TestAConsoleLogInTheFirstPaneComesBackToo(t *testing.T) {
 	first := startWith(t, memory, usbPhone, pixel)
 	first.selectDevice(usbPhone)
 	first.press("l", "enter", "ctrl+u")
-	first.typeText("app.two")
+	first.typeText("app.2")
 	first.press("enter")
-	first.openSecond(pixel, "app.one")
+	first.openLog(pixel, "app.1")
 	first.press("q")
 
 	h := startWith(t, memory, usbPhone, pixel)
 	h.wantCalls("logs UDID-1", 0)
-	h.wantCalls("logs Pixel_9a mode=logcat app=app.one", 1)
-	if !h.m.log.parked || h.m.log.spec.Device.Key() != usbPhone.Key() || h.m.second.spec.Device.Key() != pixel.Key() {
-		t.Errorf("first parked %v on %s, second on %s", h.m.log.parked, h.m.log.spec.Device.Name, h.m.second.spec.Device.Name)
+	h.wantCalls("logs Pixel_9a mode=logcat app=app.1", 1)
+	if !h.m.logPanes[0].parked || h.m.logPanes[0].spec.Device.Key() != usbPhone.Key() || h.m.logPanes[1].spec.Device.Key() != pixel.Key() {
+		t.Errorf("first parked %v on %s, second on %s", h.m.logPanes[0].parked, h.m.logPanes[0].spec.Device.Name, h.m.logPanes[1].spec.Device.Name)
+	}
+}
+
+// checkPanes fails when the log panes, the focus, the log tools or the screen disagree.
+func (h *harness) checkPanes(step string) {
+	h.t.Helper()
+	m := h.m
+	if len(m.logPanes) == 0 {
+		h.t.Fatalf("%s: there is no log pane", step)
+	}
+	for i, v := range m.logPanes[1:] {
+		if !v.opened {
+			h.t.Fatalf("%s: pane %d is empty", step, i+2)
+		}
+	}
+	if m.focus == paneLogs && (m.logIdx < 0 || m.logIdx >= len(m.logPanes)) {
+		h.t.Fatalf("%s: focus is on log %d of %d", step, m.logIdx+1, len(m.logPanes))
+	}
+	// Every running log tool belongs to a pane. The other way round does not hold in a test: a
+	// stopped tool's pane learns of it from a message that the harness does not deliver.
+	running := 0
+	for _, s := range h.backend.sessions {
+		if !s.isStopped() {
+			running++
+		}
+	}
+	held := 0
+	for _, v := range m.logPanes {
+		if v.session != nil {
+			held++
+		}
+	}
+	if running > held {
+		h.t.Fatalf("%s: %d log tools are running for %d panes with a stream", step, running, held)
+	}
+	lines := strings.Split(h.screen(), "\n")
+	if len(lines) != m.height && m.width >= minWidth && m.height >= minHeight {
+		h.t.Fatalf("%s: %d rows on a %d row screen", step, len(lines), m.height)
+	}
+	for _, line := range lines {
+		if w := utf8.RuneCountInString(line); w > m.width {
+			h.t.Fatalf("%s: a line is %d wide on a %d wide screen: %q", step, w, m.width, line)
+		}
+	}
+}
+
+func TestRandomUseKeepsTheLogsConsistent(t *testing.T) {
+	keys := []string{"esc", "tab", "shift+tab", "v", "z", "X", "x", "r", "j", "k", "G", "g", "w", "p", "c", "+", "-", "L", "/", "S", "enter", "y", "?", "a", "1", "2", "3", "4", "9"}
+	sizes := [][2]int{{80, 24}, {100, 24}, {120, 30}, {160, 40}, {101, 12}, {260, 50}}
+	devices := []device.Device{pixel, wifiPhon}
+	for seed := range 3 {
+		rng := rand.New(rand.NewPCG(uint64(seed), 7))
+		h := start(t, pixel, wifiPhon)
+		for step := range 45 {
+			name := fmt.Sprintf("seed %d step %d", seed, step)
+			switch n := rng.IntN(10); {
+			case n < 3:
+				h.openLog(devices[rng.IntN(len(devices))], fmt.Sprintf("app.%d", rng.IntN(5)))
+			case n == 3:
+				size := sizes[rng.IntN(len(sizes))]
+				h.m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+			default:
+				h.press(keys[rng.IntN(len(keys))])
+			}
+			// A window left open by a random key would swallow the next ones.
+			for h.m.modal != nil {
+				h.press("esc")
+			}
+			if h.m.focusOnLog() && step%7 == 0 && len(h.backend.handlers) > 0 {
+				h.emitTo(rng.IntN(len(h.backend.handlers)), logs.Line{Text: "line", Level: logs.Info})
+			}
+			h.checkPanes(name)
+		}
+		h.run(h.m.quit())
+		for i, s := range h.backend.sessions {
+			if !s.isStopped() {
+				t.Fatalf("seed %d: log %d is still running after quit", seed, i)
+			}
+		}
 	}
 }
