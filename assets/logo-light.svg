@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="lazymobile logo">
+  <rect x="8" y="8" width="1008" height="1008" rx="216" fill="#f3f5f9" stroke="#d0d7de" stroke-width="16"/>
+  <rect x="262" y="104" width="500" height="816" rx="128" fill="#e4e9f2" stroke="#0a8fb8" stroke-width="64"/>
+  <path d="M448 226H576" stroke="#0a8fb8" stroke-width="36" stroke-linecap="round" opacity=".55"/>
+  <path d="M370 392 L508 500 L370 608" fill="none" stroke="#2f9a3f" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M562 616H652" stroke="#d08a00" stroke-width="76" stroke-linecap="round"/>
+  <path d="M370 736H650" stroke="#b5bdd2" stroke-width="40" stroke-linecap="round"/>
+  <path d="M370 806H554" stroke="#b5bdd2" stroke-width="40" stroke-linecap="round"/>
+</svg>
