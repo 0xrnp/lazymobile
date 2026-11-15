@@ -42,6 +42,7 @@ type Backend interface {
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
+	AppInfo(ctx context.Context, d device.Device, id string) (device.App, error)
 }
 
 // Memory is what the dashboard remembers between runs, and the folder it was started in, which
@@ -363,7 +364,7 @@ func (m *Model) restore() (tea.Cmd, bool) {
 	for _, d := range m.devices {
 		if d.Key() == view.Log.Device && d.Ready() {
 			m.setNote("Opened the log you left: "+d.Name, false)
-			return m.startLogs(logs.Spec{Device: d, Mode: view.Log.Mode, App: view.Log.App}), true
+			return m.startLogs(logs.Spec{Device: d, Mode: view.Log.Mode, App: view.Log.App}, ""), true
 		}
 	}
 	return nil, true
@@ -829,7 +830,7 @@ func (m *Model) logKey(key string) tea.Cmd {
 			v.session.Stop()
 		}
 	case "r":
-		return m.startLogs(v.spec)
+		return m.startLogs(v.spec, "")
 	}
 	return nil
 }
@@ -876,10 +877,6 @@ func (m *Model) openLogs(d device.Device) tea.Cmd {
 // log. With nothing to offer, it asks for an app id straight away.
 func (m *Model) pickApp(d device.Device, mode logs.ModeInfo) tea.Cmd {
 	recent := m.memory.Store.Load().Apps[d.Platform]
-	if d.Platform == device.IOS && d.Kind == device.Physical {
-		m.offerApps(d, mode, state.Choices(recent, nil))
-		return nil
-	}
 	m.setNote("Looking for the apps on "+d.Name+"…", false)
 	m.appsAsked++
 	asked := m.appsAsked
@@ -915,6 +912,9 @@ func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.A
 		if c.Name != "" {
 			about = append(about, c.Name)
 		}
+		if label := c.VersionLabel(); label != "" {
+			about = append(about, label)
+		}
 		if c.Recent {
 			about = append(about, "used before")
 		}
@@ -935,9 +935,9 @@ func (m *Model) offerApps(d device.Device, mode logs.ModeInfo, choices []state.A
 				m.askApp(d, mode)
 				return nil
 			case every:
-				return m.startLogs(logs.Spec{Device: d, Mode: mode.ID})
+				return m.startLogs(logs.Spec{Device: d, Mode: mode.ID}, "")
 			}
-			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: choices[index].ID})
+			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: choices[index].ID}, choices[index].VersionLabel())
 		},
 	}
 }
@@ -964,12 +964,14 @@ func (m *Model) askApp(d device.Device, mode logs.ModeInfo) {
 		},
 		onSubmit: func(m *Model, value string) tea.Cmd {
 			m.lastApp[d.Platform] = value
-			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: value})
+			return m.startLogs(logs.Spec{Device: d, Mode: mode.ID, App: value}, "")
 		},
 	}
 }
 
-func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
+// startLogs opens a log. version is the installed version of spec.App when the caller has just
+// been told it, such as by the app list. Without one, the device is asked.
+func (m *Model) startLogs(spec logs.Spec, version string) tea.Cmd {
 	if m.log.session != nil {
 		m.log.session.Stop()
 	}
@@ -985,13 +987,39 @@ func (m *Model) startLogs(spec logs.Spec) tea.Cmd {
 		Status: func(text string) { send(logStatusMsg{id, text}) },
 	})
 	m.log.session = session
+	m.log.version = version
 	m.focus = paneLogs
 	if spec.App != "" {
 		m.lastApp[spec.Device.Platform] = spec.App
 		_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(spec.Device.Platform, spec.App) })
 	}
 	m.saveView()
-	return func() tea.Msg { return logEndMsg{id, session.Wait()} }
+	ended := func() tea.Msg { return logEndMsg{id, session.Wait()} }
+	// Every start asks again, because a new build may have been installed since the last one, and
+	// a log reopened from a past run, or typed by hand, has no version yet.
+	if spec.App != "" && version == "" {
+		return tea.Batch(ended, m.lookupVersion(spec))
+	}
+	return ended
+}
+
+// lookupVersion asks the device which version of the log's app is installed, and shows it on the
+// log that is open when the answer comes. A device that cannot say, or cannot be reached, leaves
+// the heading as it is.
+func (m *Model) lookupVersion(spec logs.Spec) tea.Cmd {
+	id := m.log.id
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		app, err := backend.AppInfo(ctx, spec.Device, spec.App)
+		return applyMsg(func(m *Model) tea.Cmd {
+			if m.log.id == id && err == nil {
+				m.log.version = app.VersionLabel()
+			}
+			return nil
+		})
+	}
 }
 
 // defaultLevel is the level a stream starts at until one is chosen with L. An iOS simulator's

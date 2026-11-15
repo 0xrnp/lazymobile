@@ -57,27 +57,36 @@ func (c *Client) ListSimulators(ctx context.Context) ([]device.Device, error) {
 	return ParseSimctl(res.Stdout)
 }
 
-// ListPhysical lists connected and known iPhones and iPads. It needs Xcode 15 or newer.
-func (c *Client) ListPhysical(ctx context.Context) ([]device.Device, error) {
-	// devicectl only writes JSON to a file. It holds device names and ids, so it lives in a
-	// directory only this user can open and is removed at once.
+// devicectl runs `xcrun devicectl <args>` and returns the JSON it wrote. devicectl only writes JSON
+// to a file. It holds device names, ids and app ids, so it lives in a directory only this user can
+// open and is removed at once.
+func (c *Client) devicectl(ctx context.Context, args ...string) (string, error) {
 	dir, err := os.MkdirTemp("", "lazymobile-")
 	if err != nil {
-		return nil, apperr.New(apperr.CommandFailed, "Could not create a temporary directory: %v", err)
+		return "", apperr.New(apperr.CommandFailed, "Could not create a temporary directory: %v", err)
 	}
 	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "devices.json")
+	out := filepath.Join(dir, "output.json")
 
-	argv := []string{"xcrun", "devicectl", "list", "devices", "--json-output", out}
+	argv := append(append([]string{"xcrun", "devicectl"}, args...), "--json-output", out)
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: listTimeout})
 	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
-		return nil, err
+		return "", err
 	}
 	content, err := os.ReadFile(out)
 	if err != nil {
-		return nil, apperr.New(apperr.ParseFailed, "Could not read the device list from devicectl")
+		return "", apperr.New(apperr.ParseFailed, "Could not read the output of devicectl")
 	}
-	return ParseDevicectl(string(content))
+	return string(content), nil
+}
+
+// ListPhysical lists connected and known iPhones and iPads. It needs Xcode 15 or newer.
+func (c *Client) ListPhysical(ctx context.Context) ([]device.Device, error) {
+	content, err := c.devicectl(ctx, "list", "devices")
+	if err != nil {
+		return nil, err
+	}
+	return ParseDevicectl(content)
 }
 
 // ListOptions says which sources to ask.
@@ -422,12 +431,23 @@ func (c *Client) Install(ctx context.Context, d device.Device, appPath string) e
 	return apperr.FromResult(c.Runner.Run(ctx, argv, run.Options{Timeout: 5 * time.Minute}), argv, notInstalled)
 }
 
-// InstalledApps lists the apps a user installed on a booted simulator, by bundle id. The apps
-// that come with iOS are left out.
+// InstalledApps lists the apps a user installed on a booted simulator, or on a connected iPhone or
+// iPad, by bundle id. The apps that come with iOS are left out.
 func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
-	if d.Platform != device.IOS || d.Kind != device.Simulator {
-		return nil, apperr.New(apperr.Unsupported, "Cannot list the apps on %s: only iOS simulators are supported", d.Name)
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Simulator:
+		return c.simulatorApps(ctx, d)
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		content, err := c.devicectl(ctx, "device", "info", "apps", "--device", d.ID)
+		if err != nil {
+			return nil, err
+		}
+		return ParseDevicectlApps(content)
 	}
+	return nil, apperr.New(apperr.Unsupported, "Cannot list the apps on %s: only iOS devices are supported", d.Name)
+}
+
+func (c *Client) simulatorApps(ctx context.Context, d device.Device) ([]device.App, error) {
 	argv := []string{"xcrun", "simctl", "listapps", d.ID}
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: listTimeout})
 	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
@@ -440,9 +460,11 @@ func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.A
 		return nil, err
 	}
 	var listed map[string]struct {
-		ApplicationType     string
-		CFBundleDisplayName string
-		CFBundleName        string
+		ApplicationType            string
+		CFBundleDisplayName        string
+		CFBundleName               string
+		CFBundleShortVersionString string
+		CFBundleVersion            string
 	}
 	if err := json.Unmarshal([]byte(out.Stdout), &listed); err != nil {
 		return nil, &apperr.Error{Code: apperr.ParseFailed, Message: "Could not read the simulator's app list: " + err.Error(), Argv: argv}
@@ -456,7 +478,7 @@ func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.A
 		if name == "" {
 			name = app.CFBundleName
 		}
-		apps = append(apps, device.App{ID: id, Name: name})
+		apps = append(apps, device.App{ID: id, Name: name, Version: app.CFBundleShortVersionString, Build: app.CFBundleVersion})
 	}
 	slices.SortFunc(apps, func(a, b device.App) int { return strings.Compare(a.ID, b.ID) })
 	return apps, nil

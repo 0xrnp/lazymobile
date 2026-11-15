@@ -122,3 +122,54 @@ func TestFindJavaSkipsAStub(t *testing.T) {
 		t.Errorf("java = %+v, ok = %v", java, ok)
 	}
 }
+
+// The shape of `adb shell dumpsys package <id>` on Android 16, shortened, with names replaced.
+const dumpsysPackage = `Activity Resolver Table:
+  Schemes:
+      exp+example:
+        18d1291 com.example.app/.MainActivity filter 5a5edf7
+          Action: "android.intent.action.VIEW"
+
+Packages:
+  Package [com.example.app] (6600e5e):
+    appId=10214
+    pkg=Package{c881832 com.example.app}
+    codePath=/data/app/~~AAAA==/com.example.app-BBBB==
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=37 minSdk=24 targetSdk=36
+    minExtensionVersions=[]
+    versionName=0.0.47
+    hiddenApiEnforcementPolicy=2
+    splits=[base]
+`
+
+func TestParsePackageVersion(t *testing.T) {
+	// A system app that was updated is listed twice, and the updated copy, which is the one
+	// running, comes first.
+	updated := "Packages:\n  Package [com.example.chrome] (aa):\n    versionCode=20 minSdk=24 targetSdk=36\n    versionName=2.0\n" +
+		"\nHidden system packages:\n  Package [com.example.chrome] (bb):\n    versionCode=10 minSdk=24 targetSdk=36\n    versionName=1.0\n"
+	for _, c := range []struct {
+		name, text, id, version, build string
+		found                          bool
+	}{
+		{"real output", dumpsysPackage, "com.example.app", "0.0.47", "37", true},
+		{"an updated system app", updated, "com.example.chrome", "2.0", "20", true},
+		{"windows line endings", "Packages:\r\n  Package [com.example.app] (aa):\r\n    versionCode=7 minSdk=24\r\n    versionName=1.2.3\r\n", "com.example.app", "1.2.3", "7", true},
+		// Android 5 has no minSdk, and an app can have no version name.
+		{"an old layout", "Packages:\n  Package [com.example.app] (aa):\n    versionCode=37 targetSdk=22\n    versionName=null\n", "com.example.app", "", "37", true},
+		{"a name with a space", "  Package [com.example.app] (aa):\n    versionName=1.0 beta\n", "com.example.app", "1.0 beta", "", true},
+		{"not installed", "Unable to find package: com.example.gone\n", "com.example.gone", "", "", false},
+		// Another package whose id starts the same way is not this one.
+		{"a longer id", dumpsysPackage, "com.example", "", "", false},
+		{"nothing", "", "com.example.app", "", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			version, build, found := ParsePackageVersion(c.text, c.id)
+			if version != c.version || build != c.build || found != c.found {
+				t.Errorf("got (%q, %q, %v), want (%q, %q, %v)", version, build, found, c.version, c.build, c.found)
+			}
+		})
+	}
+}

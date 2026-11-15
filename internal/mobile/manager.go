@@ -238,11 +238,30 @@ func (m *Manager) OpenURL(ctx context.Context, url string) error {
 	return apperr.FromResult(m.Runner.Run(ctx, argv, run.Options{Timeout: 30 * time.Second}), argv, "")
 }
 
-// InstalledApps lists the apps a user installed on a running simulator, emulator or Android
-// phone. iPhones are not supported.
+// InstalledApps lists the apps a user installed on a running simulator, emulator, iPhone or
+// Android phone.
 func (m *Manager) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
 	if d.Platform == device.IOS {
 		return m.IOS.InstalledApps(ctx, d)
 	}
 	return m.Android.InstalledApps(ctx, d)
+}
+
+// AppInfo describes one app installed on a device, with its version and build when the platform
+// says. An app that is not installed is a not_found error. On an iPhone only the apps it lists
+// (see InstalledApps) can be found.
+func (m *Manager) AppInfo(ctx context.Context, d device.Device, id string) (device.App, error) {
+	if d.Platform == device.Android {
+		return m.Android.AppInfo(ctx, d, id)
+	}
+	apps, err := m.IOS.InstalledApps(ctx, d)
+	if err != nil {
+		return device.App{}, err
+	}
+	for _, app := range apps {
+		if app.ID == id {
+			return app, nil
+		}
+	}
+	return device.App{}, apperr.New(apperr.NotFound, "%s is not installed on %s", id, d.Name)
 }

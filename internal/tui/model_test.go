@@ -32,6 +32,7 @@ var (
 	pixel    = device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, OSVersion: "16", Serial: "emulator-5554", Source: "emulator"}
 	tablet   = device.Device{ID: "Tablet", Name: "Tablet", Platform: device.Android, Kind: device.Emulator, State: device.Shutdown, OSVersion: "15", Source: "emulator"}
 	galaxy   = device.Device{ID: "R58M", Name: "Galaxy S23", Platform: device.Android, Kind: device.Physical, State: device.Unauthorized, Transport: "usb", Source: "adb", Detail: "Unlock the phone and accept the USB debugging prompt."}
+	usbPhone = device.Device{ID: "UDID-1", Name: "Test iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected, Transport: "usb", Source: "devicectl"}
 	wifiPhon = device.Device{ID: "192.168.1.9:5555", Name: "Pixel 8", Platform: device.Android, Kind: device.Physical, State: device.Connected, Transport: "wifi", Serial: "192.168.1.9:5555", Source: "adb"}
 )
 
@@ -74,8 +75,10 @@ type fakeBackend struct {
 	profiles []string
 	specs    []logs.Spec
 	handlers []logs.Handlers
-	// installed are the apps InstalledApps reports.
+	// installed are the apps InstalledApps reports, and info what AppInfo knows about an app that
+	// is not among them, or that InstalledApps gives without a version, as Android does.
 	installed []device.App
+	info      []device.App
 	sessions  []*fakeSession
 }
 
@@ -156,6 +159,19 @@ func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]devic
 	defer f.mu.Unlock()
 	return f.installed, nil
 }
+func (f *fakeBackend) AppInfo(_ context.Context, d device.Device, id string) (device.App, error) {
+	if err := f.record("appinfo %s %s", d.ID, id); err != nil {
+		return device.App{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, app := range append(append([]device.App(nil), f.info...), f.installed...) {
+		if app.ID == id {
+			return app, nil
+		}
+	}
+	return device.App{}, apperr.New(apperr.NotFound, "%s is not installed", id)
+}
 func (f *fakeBackend) OpenURL(_ context.Context, url string) error { return f.record("open %s", url) }
 func (f *fakeBackend) StartLogs(_ context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession {
 	_ = f.record("logs %s mode=%s app=%s", spec.Device.ID, spec.Mode, spec.App)
@@ -182,7 +198,13 @@ func start(t *testing.T, devices ...device.Device) *harness {
 // startWith starts a dashboard that remembers through memory, as it does when run for real.
 func startWith(t *testing.T, memory Memory, devices ...device.Device) *harness {
 	t.Helper()
-	backend := &fakeBackend{devices: devices, fail: map[string]error{}}
+	return startWithApps(t, memory, nil, devices...)
+}
+
+// startWithApps is startWith, with apps installed on every device from the start.
+func startWithApps(t *testing.T, memory Memory, apps []device.App, devices ...device.Device) *harness {
+	t.Helper()
+	backend := &fakeBackend{devices: devices, installed: apps, fail: map[string]error{}}
 	h := &harness{t: t, backend: backend, clock: time.Unix(1_800_000_000, 0)}
 	h.m = New(context.Background(), backend, nil)
 	h.m.memory = memory
@@ -1357,6 +1379,148 @@ func TestAppsUsedBeforeAndInstalledOnesAreOffered(t *testing.T) {
 	h.press("tab")
 	h.press("l", "j", "j", "enter")
 	h.wantCalls("logs Pixel_9a mode=logcat app=", 2)
+}
+
+func TestAnIPhoneOffersItsInstalledAppsWithTheirVersion(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{
+		{ID: "com.example.app.staging", Name: "Example Staging", Version: "1.4.2", Build: "87"},
+		{ID: "com.example.preview", Name: "Example Preview", Version: "2.0.0"},
+	}
+	h.selectDevice(usbPhone)
+	h.press("l")
+	h.wantScreen("Which log of Test iPhone?")
+
+	// The first of its two logs launches an app, which is chosen from the ones on the phone.
+	h.press("enter")
+	h.wantCalls("apps UDID-1", 1)
+	h.wantScreen("Which app on Test iPhone?", "com.example.app.staging   Example Staging · 1.4.2 (87)", "com.example.preview   Example Preview · 2.0.0")
+	h.press("enter")
+	h.wantCalls("logs UDID-1 mode=console app=com.example.app.staging", 1)
+	// The version stays in the log's heading, to be read after the list is gone.
+	h.wantScreen("Logs: Test iPhone · com.example.app.staging 1.4.2 (87)")
+}
+
+func TestRestartingALogAsksForTheInstalledVersionAgain(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "1.4.2", Build: "87"}}
+	h.selectDevice(usbPhone)
+	h.press("l", "enter", "enter")
+	h.wantScreen("com.example.app.staging 1.4.2 (87)")
+
+	// A new build is installed while the log is open, and the log is restarted.
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "1.4.3", Build: "88"}}
+	h.press("r")
+	h.wantCalls("appinfo UDID-1 com.example.app.staging", 1)
+	h.wantScreen("com.example.app.staging 1.4.3 (88)")
+	h.wantNoScreen("1.4.2 (87)")
+
+	// A phone that cannot answer now shows no version, not the old one.
+	h.backend.fail["appinfo"] = errors.New("unreachable")
+	h.press("r")
+	h.wantScreen("Logs: Test iPhone · com.example.app.staging")
+	h.wantNoScreen("1.4.3", "1.4.2")
+
+	// And it is asked again at the next restart, once the phone answers.
+	delete(h.backend.fail, "appinfo")
+	h.press("r")
+	h.wantScreen("com.example.app.staging 1.4.3 (88)")
+}
+
+func TestAVersionJustListedIsNotAskedForAgain(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "1.4.2", Build: "87"}}
+	h.selectDevice(usbPhone)
+	h.press("l", "enter", "enter")
+	h.wantScreen("com.example.app.staging 1.4.2 (87)")
+	h.wantCalls("apps UDID-1", 1)
+	h.wantCalls("appinfo", 0)
+}
+
+func TestAnAndroidLogShowsTheVersionTheListDoesNotGive(t *testing.T) {
+	h := start(t, pixel)
+	// The list of an Android device has package names only. The version comes from asking about the app.
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.backend.info = []device.App{{ID: "com.example.app", Version: "0.0.47", Build: "37"}}
+	h.selectDevice(pixel)
+	h.press("l", "enter")
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.example.app", 1)
+	h.wantCalls("appinfo Pixel_9a com.example.app", 1)
+	h.wantScreen("Logs: Pixel 9a · com.example.app 0.0.47 (37)")
+
+	// An app with no version name still shows its build.
+	h.backend.info = []device.App{{ID: "com.example.app", Build: "38"}}
+	h.press("r")
+	h.wantScreen("Logs: Pixel 9a · com.example.app (38)")
+}
+
+func TestALogReopenedFromAPastRunAsksForTheVersion(t *testing.T) {
+	apps := []device.App{{ID: "com.example.app.staging", Version: "1.4.2", Build: "87"}}
+	memory := memoryIn(t)
+	first := startWithApps(t, memory, apps, usbPhone)
+	first.selectDevice(usbPhone)
+	// The device system log of the first app.
+	first.press("l", "down", "enter", "enter")
+	first.wantCalls("logs UDID-1 mode=system app=com.example.app.staging", 1)
+	first.press("q")
+
+	h := startWithApps(t, memory, apps, usbPhone)
+	h.wantCalls("logs UDID-1 mode=system app=com.example.app.staging", 1)
+	// The system log of an iPhone starts at "info+", which takes room in the heading too.
+	h.m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	h.wantScreen("Logs: Test iPhone · com.example.app.staging 1.4.2 (87) · info+")
+}
+
+func TestATypedAppIDAsksForTheVersion(t *testing.T) {
+	h := startWithApps(t, Memory{}, []device.App{{ID: "com.example.app.staging", Version: "1.4.2", Build: "87"}}, usbPhone)
+	h.selectDevice(usbPhone)
+	// "Type an app id…" is the last choice.
+	h.press("l", "enter", "G", "enter")
+	h.typeText("com.example.app.staging")
+	h.press("enter")
+	h.wantCalls("logs UDID-1 mode=console app=com.example.app.staging", 1)
+	h.wantScreen("com.example.app.staging 1.4.2 (87)")
+}
+
+func TestAVersionThatArrivesForAnEarlierStartIsDropped(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "1.4.2", Build: "87"}}
+	h.selectDevice(usbPhone)
+	h.press("l", "enter", "enter")
+
+	// The log is restarted twice. The first answer comes last, and is for a stream that is gone.
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "1.4.3", Build: "88"}}
+	_, first := h.m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	_, second := h.m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	h.run(second)
+	h.backend.installed = []device.App{{ID: "com.example.app.staging", Version: "9.9.9", Build: "1"}}
+	h.run(first)
+	h.wantScreen("com.example.app.staging 1.4.3 (88)")
+	h.wantNoScreen("9.9.9")
+}
+
+func TestTheLogHeadingKeepsTheVersionUntilNothingElseFits(t *testing.T) {
+	v := logView{
+		opened: true, ended: true, version: "1.4.2 (87)",
+		spec: logs.Spec{Device: device.Device{Name: "Test iPhone"}, Mode: logs.Console, App: "com.example.app.staging"},
+	}
+	for _, c := range []struct {
+		width int
+		want  string
+	}{
+		{120, "Logs: Test iPhone · com.example.app.staging 1.4.2 (87) · console · ended"},
+		// The word "console" goes first: the log's first line already says it.
+		{70, "Logs: Test iPhone · com.example.app.staging 1.4.2 (87) · ended"},
+		// Then the version, so "ended" is not what gets cut.
+		{50, "Logs: Test iPhone · com.example.app.staging · ended"},
+	} {
+		if got := v.title(c.width); got != c.want {
+			t.Errorf("title(%d) = %q, want %q", c.width, got, c.want)
+		}
+	}
+	if got := (&logView{}).title(80); got != "Logs" {
+		t.Errorf("a log that is not open: %q", got)
+	}
 }
 
 func TestTypingAnAppIDStartsFromTheLastOne(t *testing.T) {

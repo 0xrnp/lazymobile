@@ -112,6 +112,32 @@ func ctlDevice(c ctl, layout string) object {
 	return entry
 }
 
+// ctlApp is one entry of `devicectl device info apps`, in the shape Xcode 27 prints it.
+func ctlApp(id, name, version, build string) object {
+	return object{
+		"appClip": false, "builtByDeveloper": true, "bundleIdentifier": id, "bundleVersion": build,
+		"containerAccessible": true, "defaultApp": false, "hidden": false, "internalApp": false,
+		"name": name, "removable": true, "version": version,
+		"url": "file:///private/var/containers/Bundle/Application/00000000-0000-4000-8000-000000000001/Example.app/",
+	}
+}
+
+// devicectlAppsFixture is out of order on purpose, and ends with an entry without a bundle id.
+func devicectlAppsFixture() string {
+	return encode(object{
+		"info": object{"commandType": "devicectl.device.info.apps", "jsonVersion": 5, "outcome": "success"},
+		"result": object{
+			"apps": []object{
+				ctlApp("com.example.preview", "Example Preview", "2.0.0", "1"),
+				ctlApp("com.example.app.staging", "Example Staging", "1.4.2", "87"),
+				{"name": "No bundle id"},
+			},
+			"defaultAppsIncluded": false, "hiddenAppsIncluded": false, "internalAppsIncluded": false,
+			"removableAppsIncluded": true, "deviceIdentifier": "00000000-0000-4000-8000-0000000000B1",
+		},
+	})
+}
+
 func devicectlFixture(layout string) string {
 	devices := []object{
 		ctlDevice(ctl{udid: "00008101-0000000000000001", name: "Test iPhone", link: "connected", transport: "wired"}, layout),

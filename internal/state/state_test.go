@@ -125,6 +125,37 @@ func TestChoicesPutRecentAppsFirst(t *testing.T) {
 	}
 }
 
+func TestChoicesCarryTheVersionOfInstalledApps(t *testing.T) {
+	installed := []device.App{
+		{ID: "com.a", Name: "A", Version: "1.4.2", Build: "87"},
+		{ID: "com.b", Name: "B", Version: "2.0.0"},
+	}
+	got := Choices([]string{"com.a", "com.gone"}, installed)
+	want := []AppChoice{
+		{ID: "com.a", Name: "A", Version: "1.4.2", Build: "87", Recent: true, Installed: true},
+		{ID: "com.gone", Recent: true},
+		{ID: "com.b", Name: "B", Version: "2.0.0", Installed: true},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestVersionLabel(t *testing.T) {
+	for _, c := range []struct {
+		version, build, want string
+	}{
+		{"1.4.2", "87", "1.4.2 (87)"},
+		{"1.4.2", "", "1.4.2"},
+		{"", "87", "(87)"},
+		{"", "", ""},
+	} {
+		if got := (AppChoice{Version: c.version, Build: c.build}).VersionLabel(); got != c.want {
+			t.Errorf("VersionLabel(%q, %q) = %q, want %q", c.version, c.build, got, c.want)
+		}
+	}
+}
+
 func TestDefaultPathFollowsXDG(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "/xdg")
 	if got := DefaultPath(); got != "/xdg/lazymobile/state.json" {

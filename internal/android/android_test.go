@@ -519,3 +519,51 @@ func TestInstalledAppsAreThePackagesAUserAdded(t *testing.T) {
 		t.Errorf("an offline phone: %v", err)
 	}
 }
+
+var runningEmulator = device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+
+func TestAppInfoReadsTheVersionFromDumpsys(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell dumpsys package com.example.app": runtest.Out(dumpsysPackage)})
+	app, err := New(fake, sdk(t, "adb")).AppInfo(context.Background(), runningEmulator, "com.example.app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (device.App{ID: "com.example.app", Version: "0.0.47", Build: "37"}); app != want {
+		t.Errorf("app = %+v, want %+v", app, want)
+	}
+	if !fake.Called("-s emulator-5554 shell dumpsys package com.example.app") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+}
+
+func TestAppInfoRefusesWhatIsNotAnAppIDBeforeAskingTheDevice(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	for _, id := range []string{"", "com.example.app; reboot", "$(id)", "a b"} {
+		if _, err := New(fake, sdk(t, "adb")).AppInfo(context.Background(), runningEmulator, id); apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("AppInfo(%q) error = %v, want invalid_state", id, err)
+		}
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("the device was asked: %v", calls)
+	}
+}
+
+func TestAppInfoOfAnAppThatIsNotInstalled(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"dumpsys package": runtest.Out("Unable to find package: com.example.gone\n")})
+	_, err := New(fake, sdk(t, "adb")).AppInfo(context.Background(), runningEmulator, "com.example.gone")
+	if apperr.CodeOf(err) != apperr.NotFound {
+		t.Errorf("error = %v, want not_found", err)
+	}
+}
+
+func TestAppInfoNeedsARunningDevice(t *testing.T) {
+	offline := runningEmulator
+	offline.State = device.Offline
+	fake := runtest.Table(map[string]run.Result{})
+	if _, err := New(fake, sdk(t, "adb")).AppInfo(context.Background(), offline, "com.example.app"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("an offline device: %v", err)
+	}
+	if fake.Called("adb") {
+		t.Errorf("an offline device was asked: %v", fake.Calls())
+	}
+}

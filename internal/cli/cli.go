@@ -418,8 +418,6 @@ func (a *App) apps(ctx context.Context, args []string) error {
 	switch {
 	case !d.Ready():
 		fmt.Fprintf(a.Stderr, "%s is not running, so only app ids used before are listed.\n", d.Name)
-	case d.Platform == device.IOS && d.Kind == device.Physical:
-		fmt.Fprintln(a.Stderr, "The apps on an iPhone are not listed, only app ids used before.")
 	default:
 		if installed, err = a.Manager.InstalledApps(ctx, d); err != nil {
 			fmt.Fprintf(a.Stderr, "warning: the installed apps could not be listed: %s\n", firstLine(err.Error()))
@@ -437,7 +435,7 @@ func (a *App) apps(ctx context.Context, args []string) error {
 		return nil
 	}
 	table := tabwriter.NewWriter(a.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "ID\tNAME\tFROM")
+	fmt.Fprintln(table, "ID\tNAME\tVERSION\tFROM")
 	for _, c := range choices {
 		var from []string
 		if c.Recent {
@@ -446,7 +444,7 @@ func (a *App) apps(ctx context.Context, args []string) error {
 		if c.Installed {
 			from = append(from, "installed")
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\n", c.ID, c.Name, strings.Join(from, ", "))
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", c.ID, c.Name, c.VersionLabel(), strings.Join(from, ", "))
 	}
 	return table.Flush()
 }

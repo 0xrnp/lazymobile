@@ -409,6 +409,64 @@ func TestAppsListsTheOnesUsedBeforeThenTheInstalledOnes(t *testing.T) {
 	}
 }
 
+// A connected iPhone, and the apps devicectl lists on it, in the layout Xcode 27 writes.
+const (
+	devicectlPhone = `{"result": {"devices": [{"properties": {
+	  "hardware": {"udid": "00000000-0000-4000-8000-0000000000B1", "reality": "physical", "deviceType": "iPhone"},
+	  "state": {"name": "Test iPhone"},
+	  "connection": {"transportType": "wired", "state": "connected", "pairingState": "paired"},
+	  "software": {"osVersionNumber": "27.0"}}}]}}`
+	devicectlPhoneApps = `{"result": {"apps": [
+	  {"bundleIdentifier": "com.example.app.staging", "name": "Example Staging", "version": "1.4.2", "bundleVersion": "87"},
+	  {"bundleIdentifier": "com.example.preview", "name": "Example Preview", "version": "2.0.0", "bundleVersion": "1"}]}}`
+)
+
+func TestAppsOfAnIPhoneShowTheirVersionAndBuild(t *testing.T) {
+	e := newEnv(t)
+	base := e.fake.Answer
+	e.fake.Answer = func(command string, argv []string, opts run.Options) run.Result {
+		output := ""
+		switch {
+		case strings.Contains(command, "devicectl list devices"):
+			output = devicectlPhone
+		case strings.Contains(command, "devicectl device info apps --device 00000000-0000-4000-8000-0000000000B1"):
+			output = devicectlPhoneApps
+		default:
+			return base(command, argv, opts)
+		}
+		if err := os.WriteFile(argv[len(argv)-1], []byte(output), 0o600); err != nil {
+			t.Error(err)
+		}
+		return run.Result{}
+	}
+
+	if code := e.run("apps", "Test iPhone"); code != ExitOK {
+		t.Fatalf("code %d: %s", code, e.errs.String())
+	}
+	for _, want := range []string{"VERSION", "com.example.app.staging  Example Staging  1.4.2 (87)  installed", "com.example.preview"} {
+		if !strings.Contains(e.out.String(), want) {
+			t.Errorf("the table should contain %q:\n%s", want, e.out.String())
+		}
+	}
+
+	if code := e.run("apps", "Test iPhone", "--json"); code != ExitOK {
+		t.Fatalf("code %d: %s", code, e.errs.String())
+	}
+	var got struct {
+		Apps []state.AppChoice `json:"apps"`
+	}
+	if err := json.Unmarshal(e.out.Bytes(), &got); err != nil {
+		t.Fatalf("%v: %s", err, e.out.String())
+	}
+	want := []state.AppChoice{
+		{ID: "com.example.app.staging", Name: "Example Staging", Version: "1.4.2", Build: "87", Installed: true},
+		{ID: "com.example.preview", Name: "Example Preview", Version: "2.0.0", Build: "1", Installed: true},
+	}
+	if !slices.Equal(got.Apps, want) {
+		t.Errorf("got %+v", got.Apps)
+	}
+}
+
 func TestLastAppNeedsAnAppUsedBefore(t *testing.T) {
 	e := newEnv(t)
 	if code := e.run("logs", "iPhone 16 Pro", "--last-app"); code != ExitFailure || !strings.Contains(e.errs.String(), "No iOS app id has been used yet") {

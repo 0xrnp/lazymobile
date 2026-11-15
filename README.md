@@ -51,7 +51,8 @@ Early release. What has been run, and what has not:
 | iOS simulator boot, shut down, installing an app, and both kinds of logs | A real simulator on Xcode 27.2, with a real React Native app |
 | Erase, create and delete simulators | Fake tools only in this program. The same commands were run on real simulators and emulators in [devices.nvim](https://github.com/0xrnp/devices.nvim), which this logic is ported from |
 | Expo builds pane | Listing, details, and downloading and installing Android and iOS simulator builds, with eas-cli 24.7 and a real Expo project. Starting and cancelling builds have only been run with a fake `eas` |
-| iPhones | Listed over USB with a real iPhone. Its logs have only been tried with fake tools |
+| iPhones | Listed over USB with a real iPhone, and so were its installed apps with their version and build, which also shows in the log heading. Its logs have only been tried with fake tools |
+| App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -153,8 +154,13 @@ A release iOS app's `print()` and `NSLog` output goes to its standard output, wh
 that launched it sees. Choose "Launch an app and show its output" to see it.
 
 When a log opens, lazymobile offers the app ids you used before and the apps installed on the
-device (simulators, emulators and Android phones), so there is nothing to type. Text matching the
-log filter is underlined.
+device, so there is nothing to type. On an iPhone, the list is the developer apps `devicectl`
+reports, not the ones that come with iOS, and each shows its version and build.
+
+The log's heading shows the installed version and build of the app (`0.0.47 (37)`), on every kind
+of device. It is read from the device each time the log starts, so after you install a new build,
+restart the log with `r` to see it. In a narrow pane the heading drops the word "console", then the version, so that "paused" and "ended"
+stay visible. Text matching the log filter is underlined.
 
 ### Where you left off
 

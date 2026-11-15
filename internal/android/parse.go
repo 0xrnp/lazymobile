@@ -214,3 +214,27 @@ func Combine(names []string, entries []ADBEntry, facts map[string]Fact, info fun
 	}
 	return devices
 }
+
+var (
+	packageVersionCode = regexp.MustCompile(`(?m)^\s*versionCode=(\d+)`)
+	packageVersionName = regexp.MustCompile(`(?m)^\s*versionName=([^\r\n]+)`)
+)
+
+// ParsePackageVersion reads one package's version from `dumpsys package <id>`: the name people see
+// ("0.0.47") and the code that tells builds apart ("37"). A package the device does not know is
+// not found. An app that updates one of the system's is listed twice, the updated copy first.
+func ParsePackageVersion(text, id string) (version, build string, found bool) {
+	_, record, found := strings.Cut(text, "Package ["+id+"]")
+	if !found {
+		return "", "", false
+	}
+	if m := packageVersionCode.FindStringSubmatch(record); m != nil {
+		build = m[1]
+	}
+	if m := packageVersionName.FindStringSubmatch(record); m != nil {
+		if name := strings.TrimSpace(m[1]); name != "null" {
+			version = name
+		}
+	}
+	return version, build, true
+}

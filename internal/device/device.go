@@ -177,4 +177,21 @@ type App struct {
 	ID string `json:"id"`
 	// Name is what the app is called on the home screen, when the platform says.
 	Name string `json:"name,omitempty"`
+	// Version is the release the user sees ("1.4.2"), and Build the number that tells builds of
+	// one release apart ("87"). Either is empty when the platform does not say.
+	Version string `json:"version,omitempty"`
+	Build   string `json:"build,omitempty"`
+}
+
+// VersionLabel is "1.4.2 (87)", or whichever of the two is known, or "".
+func (a App) VersionLabel() string {
+	switch {
+	case a.Version != "" && a.Build != "":
+		return a.Version + " (" + a.Build + ")"
+	case a.Version != "":
+		return a.Version
+	case a.Build != "":
+		return "(" + a.Build + ")"
+	}
+	return ""
 }
