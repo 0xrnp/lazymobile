@@ -17,7 +17,7 @@ The device list:
 
 The apps installed on the device, and the ones used before, offered when a log is opened with `l`:
 
-![The list of apps offered before a log opens](docs/app-picker.png)
+![The apps used before, with version and build, offered before a log opens](docs/app-picker.png)
 
 </details>
 
@@ -175,6 +175,15 @@ that launched it sees. Choose "Launch an app and show its output" to see it.
 When a log opens, lazymobile offers the app ids you used before and the apps installed on the
 device, so there is nothing to type. On an iPhone, the list is the developer apps `devicectl`
 reports, not the ones that come with iOS, and each shows its version and build.
+
+The list starts with the apps you used before, marked `●`, when there are also others. `tab` shows
+every installed app and back. `/` filters by text, matching the id, the name and the version, and
+`enter` opens the first match. The version and build sit next to the id, so two builds of one app
+can be told apart. An app you used before stays in the list even when the device does not have it, marked "not found
+on this device", so you can use the same id on the next device, for a build that is still
+installing. (Apps that come with the system are not in the device's list, so they are marked too.)
+The uninstall list has the same filter. The apps are not sorted by when they
+were installed, because the app lists lazymobile reads do not give an install time.
 
 The log's heading shows the installed version and build of the app (`0.0.47 (37)`), on every kind
 of device. It is read from the device each time the log starts, so after you install a new build,

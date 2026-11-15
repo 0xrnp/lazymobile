@@ -1354,8 +1354,12 @@ func TestAppsUsedBeforeAndInstalledOnesAreOffered(t *testing.T) {
 	h.selectDevice(pixel)
 	h.press("l")
 	h.wantCalls("apps Pixel_9a", 1)
+	// The list starts with the app used before, and tab adds the rest.
+	h.wantScreen("(used before)", "● com.used.before", "tab: all 2 apps", "Every app", "Type an app id")
+	h.wantNoScreen("com.installed.one")
+	h.press("tab")
 	window := h.window()
-	for _, want := range []string{"com.used.before   used before", "com.installed.one", "Every app", "Type an app id"} {
+	for _, want := range []string{"● com.used.before", "  com.installed.one", "tab: used before", "Every app", "Type an app id"} {
 		if !strings.Contains(window, want) {
 			t.Errorf("the list should show %q:\n%s", want, window)
 		}
@@ -1377,6 +1381,79 @@ func TestAppsUsedBeforeAndInstalledOnesAreOffered(t *testing.T) {
 	h.wantCalls("logs Pixel_9a mode=logcat app=", 2)
 }
 
+func TestAnAppUsedOnAnotherDeviceStaysListedWhileItIsNotInstalledHere(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) { f.RememberApp(device.Android, "com.new.build") }); err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel)
+	h.backend.installed = []device.App{{ID: "com.other.app"}}
+	h.selectDevice(pixel)
+	h.press("l")
+	h.wantScreen("● com.new.build", "not found on this device")
+
+	// It can still be chosen, for the log of an app that is about to be installed.
+	h.press("enter")
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.new.build", 1)
+}
+
+func TestAppsUsedBeforeAreNotMarkedMissingWhenTheDeviceListFailed(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) { f.RememberApp(device.Android, "com.new.build") }); err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel)
+	h.backend.fail = map[string]error{"apps ": errors.New("adb: device offline")}
+	h.selectDevice(pixel)
+	h.press("l")
+	h.wantScreen("com.new.build", "Every app")
+	h.wantNoScreen("not found on this device")
+}
+
+func TestTheAppListIsFilteredByTyping(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) { f.RememberApp(device.Android, "com.used.before") }); err != nil {
+		t.Fatal(err)
+	}
+	h := startWith(t, memory, pixel)
+	h.backend.installed = []device.App{{ID: "com.used.before"}, {ID: "com.shop.app"}, {ID: "com.shop.beta"}, {ID: "org.other"}}
+	h.selectDevice(pixel)
+	h.press("l")
+	h.press("tab")
+	h.wantScreen("com.shop.app", "com.shop.beta", "org.other", "/: filter")
+
+	// Typing narrows the list to what matches, and the fixed choices stay.
+	h.press("/")
+	h.typeText("shop")
+	h.wantScreen("/ shop", "com.shop.app", "com.shop.beta", "Type an app id")
+	h.wantNoScreen("org.other", "com.used.before")
+	h.typeText("x")
+	h.wantScreen("Nothing matches shopx", "Type an app id")
+
+	// Enter chooses the first match, not the first app of the whole list.
+	h.press("backspace", "backspace", "backspace", "backspace", "backspace")
+	h.typeText("beta")
+	h.wantScreen("com.shop.beta")
+	h.press("enter")
+	h.wantCalls("logs Pixel_9a mode=logcat app=com.shop.beta", 1)
+}
+
+func TestEscapeClearsTheAppFilterBeforeClosingTheList(t *testing.T) {
+	h := start(t, pixel)
+	h.backend.installed = []device.App{{ID: "com.shop.app"}, {ID: "org.other"}}
+	h.selectDevice(pixel)
+	h.press("l")
+	h.wantCalls("apps Pixel_9a", 1)
+	h.press("/")
+	h.typeText("shop")
+	h.wantNoScreen("org.other")
+	h.press("esc")
+	h.wantScreen("org.other")
+	h.wantScreen("Which app on Pixel 9a?")
+	h.press("esc")
+	h.wantNoScreen("Which app on Pixel 9a?")
+}
+
 func TestAnIPhoneOffersItsInstalledAppsWithTheirVersion(t *testing.T) {
 	h := start(t, usbPhone)
 	h.backend.installed = []device.App{
@@ -1390,7 +1467,8 @@ func TestAnIPhoneOffersItsInstalledAppsWithTheirVersion(t *testing.T) {
 	// The first of its two logs launches an app, which is chosen from the ones on the phone.
 	h.press("enter")
 	h.wantCalls("apps UDID-1", 1)
-	h.wantScreen("Which app on Test iPhone?", "com.example.app.staging   Example Staging · 1.4.2 (87)", "com.example.preview   Example Preview · 2.0.0")
+	h.wantScreen("Which app on Test iPhone?", "com.example.app.staging  1.4.2 (87)  Example Staging", "com.example.preview", "2.0.0", "Example Preview")
+	h.wantNoScreen("tab:")
 	h.press("enter")
 	h.wantCalls("logs UDID-1 mode=console app=com.example.app.staging", 1)
 	// The version stays in the log's heading, to be read after the list is gone.
@@ -1724,7 +1802,7 @@ func TestUninstallListsTheAppsAndAsksBeforeRemovingOne(t *testing.T) {
 	}
 	h.press("u")
 	h.wantCalls("apps SIM-1", 1)
-	h.wantScreen("Uninstall which app from iPhone 17?", "com.example.app   Example · 1.4.2 (87)", "com.example.other   Other")
+	h.wantScreen("Uninstall which app from iPhone 17?", "com.example.app    1.4.2 (87)  Example", "com.example.other", "Other")
 
 	h.press("enter")
 	h.wantScreen("Uninstall com.example.app?", "all its data from iPhone 17", "cannot be undone")
