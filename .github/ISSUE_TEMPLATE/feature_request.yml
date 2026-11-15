@@ -1,0 +1,36 @@
+name: Feature request
+description: Something lazymobile should do, or do differently
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The task, not the feature. What takes too long or is awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you imagine it working. A key, a command, a screen.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      multiple: true
+      options:
+        - iOS simulator
+        - iPhone or iPad
+        - Android emulator
+        - Android phone
+        - Logs
+        - Expo builds
+        - Commands and --json
+        - Neovim plugin
+        - Something else
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: The commands or tools you use now, if any.
