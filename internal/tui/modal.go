@@ -16,6 +16,7 @@ const (
 	modalConfirm
 	modalPrompt
 	modalChoice
+	modalKeys
 )
 
 // modal is a small window over the dashboard that takes all keys until it closes.
@@ -42,6 +43,9 @@ type modal struct {
 	// onKey, when set, sees the keys the list does not use. extraHint says what they do.
 	onKey     func(m *Model, key string, cursor int) tea.Cmd
 	extraHint string
+
+	// Keys.
+	keys *keysMenu
 
 	// top is the first body line shown, for a message that is taller than the screen.
 	top int
@@ -134,6 +138,8 @@ func (m *Model) modalKey(msg tea.KeyPressMsg) tea.Cmd {
 				md.problem = ""
 			}
 		}
+	case modalKeys:
+		return m.keysMenuKey(msg)
 	case modalChoice:
 		switch key {
 		case "esc", "q", "ctrl+c":
@@ -161,6 +167,9 @@ func (m *Model) modalKey(msg tea.KeyPressMsg) tea.Cmd {
 // render draws the modal's window for a width by height screen. The caller places it.
 func (md *modal) render(width, height int) []string {
 	inner := innerWidth(width)
+	if md.kind == modalKeys {
+		return md.keys.render(inner, height)
+	}
 	lines := md.bodyLines(inner)
 	last := md.maxTop(width, height)
 	top := min(md.top, last)

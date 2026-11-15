@@ -1247,25 +1247,12 @@ func TestPasteGoesIntoAPrompt(t *testing.T) {
 	h.wantCalls("logs Pixel_9a mode=logcat app=com.example.app", 1)
 }
 
-func TestHelp(t *testing.T) {
-	h := start(t, iphone)
-	h.press("?")
-	h.wantScreen("cold boot", "minimum level")
-	h.press("G")
-	h.wantScreen("keep running after you quit")
-	h.press("q")
-	h.wantScreen("iPhone 17")
-	if h.m.modal != nil {
-		t.Error("help did not close")
-	}
-}
-
 // A window opens over the dashboard, which stays in view behind it.
 func TestTheDashboardStaysVisibleBehindAWindow(t *testing.T) {
 	h := start(t, iphone, pixel)
 	h.press("?")
 	screen := h.screen()
-	for _, want := range []string{"Keys", "cold boot", "Devices", "Logs"} {
+	for _, want := range []string{"Keys", "Boot a simulator", "Devices", "Everywhere"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen should show %q:\n%s", want, screen)
 		}
@@ -1279,10 +1266,10 @@ func TestTheDashboardStaysVisibleBehindAWindow(t *testing.T) {
 			t.Errorf("line %d is %d columns wide, want 120: %q", i, w, line)
 		}
 	}
-	// The window is drawn over the panes, so one row holds the device behind and the help in front.
+	// The window is drawn over the panes, so one row holds the device behind and the menu in front.
 	both := false
 	for _, line := range lines {
-		both = both || strings.Contains(line, "iPhone 17") && strings.Contains(line, "arrows")
+		both = both || strings.Contains(line, "Pixel 9a") && strings.Contains(line, "j k  Move")
 	}
 	if !both {
 		t.Errorf("the devices are hidden behind the window:\n%s", screen)
@@ -1310,15 +1297,19 @@ func TestAWindowOverWideCharactersFillsTheTerminalExactly(t *testing.T) {
 func TestATallMessageScrolls(t *testing.T) {
 	h := start(t, iphone)
 	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
-	h.press("?")
+	var body []string
+	for i := 1; i <= 40; i++ {
+		body = append(body, fmt.Sprintf("line %d", i))
+	}
+	h.m.message("Long", strings.Join(body, "\n"))
 	h.wantScreen("j k: scroll", "0%")
-	h.wantNoScreen("keep running after you quit")
+	h.wantNoScreen("line 40")
 	h.press("j")
 	if h.m.modal == nil {
 		t.Fatal("scrolling closed the window")
 	}
 	h.press("G")
-	h.wantScreen("keep running after you quit", "100%")
+	h.wantScreen("line 40", "100%")
 	h.press("g")
 	h.wantScreen("0%")
 	h.press("x")

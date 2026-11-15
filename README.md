@@ -19,10 +19,6 @@ The apps installed on the device, and the ones used before, offered when a log i
 
 ![The list of apps offered before a log opens](docs/app-picker.png)
 
-The keys, shown over the dashboard with `?`:
-
-![The help window over the dashboard](docs/help.png)
-
 </details>
 
 - One list for every simulator, emulator, iPhone and Android phone on the machine.
@@ -153,10 +149,12 @@ devices, `tab` goes from log to log, and `esc` goes to the devices. `z` shows th
 screen, and `tab` then goes from log to log.
 
 Everywhere: `tab` moves to the next pane, `+` and `-` widen or narrow the devices pane, `z`
-shows only the focused pane on the whole screen (again to undo), `?` shows the keys, `q` quits.
-The mouse wheel scrolls the pane under it, and a click focuses a pane and selects the device or
-build under it. Sliding sideways on a
-trackpad (or Shift with the wheel) scrolls the log sideways. To select text with the
+shows only the focused pane on the whole screen (again to undo), `?` opens the keys menu, `q` quits.
+The keys menu lists what the keys do, those of the focused pane first. `/` filters it, `enter`
+runs the action under the cursor (a question still asks first), and one that cannot be done now is
+struck through, with the reason below. The mouse wheel scrolls the pane under it, and a click
+focuses a pane and selects the device or build under it. Sliding sideways on a trackpad (or Shift
+with the wheel) scrolls the log sideways. To select text with the
 mouse, hold Option (macOS) or Shift while dragging.
 Simulators and emulators keep running after you quit.
 
