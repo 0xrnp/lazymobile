@@ -63,7 +63,9 @@ version may change behaviour.
    the `HOMEBREW_TAP_TOKEN` secret.
 4. Read the release notes, then check `brew upgrade lazymobile` and `go install` pick it up.
 
-The notes are grouped by the labels on the merged pull requests (`.github/release.yml`).
+The notes list the commit subjects since the last tag (`changelog` in `.goreleaser.yaml`), so write
+each as a short sentence in the imperative. The maintainer commits to `main` directly, and runs
+`make check` first. Pull requests from others are squash merged, and their title is the subject.
 
 Never move or delete a published tag. The Go module proxy keeps the first copy it saw, so a moved
 tag leaves `go install` and Homebrew users with different code. If a release is bad, fix it and

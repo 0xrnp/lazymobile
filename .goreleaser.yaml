@@ -41,5 +41,10 @@ homebrew_casks:
             run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/lazymobile"]
           end
 
+# The maintainer commits to main directly, so the notes list commits, not merged pull requests.
 changelog:
-  use: github-native
+  use: git
+  sort: desc
+  filters:
+    exclude:
+      - '^Merge '
