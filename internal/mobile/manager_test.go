@@ -602,3 +602,50 @@ func TestPermissionNamesDifferByPlatform(t *testing.T) {
 		t.Errorf("Android: %v", android)
 	}
 }
+
+func TestRecordingNamesFollowThePlatformsVideoFormat(t *testing.T) {
+	at := time.Date(2026, 11, 16, 7, 50, 32, 0, time.UTC)
+	if got := RecordingName(device.Device{Name: "iPhone 17", Platform: device.IOS}, at); got != "lazymobile-iPhone-17-20261116-075032.mov" {
+		t.Errorf("iOS: %q", got)
+	}
+	if got := RecordingName(device.Device{Name: "Pixel 9a", Platform: device.Android}, at); got != "lazymobile-Pixel-9a-20261116-075032.mp4" {
+		t.Errorf("Android: %q", got)
+	}
+}
+
+func TestRecordingIsSavedForTheUserAloneAndNeverReplacesAFile(t *testing.T) {
+	m, fake := screenshotManager(t)
+	dir := t.TempDir()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	stopped := simulator
+	stopped.State = device.Shutdown
+	ctx := context.Background()
+
+	path, err := m.Record(ctx, simulator, filepath.Join(dir, "a.mov"), time.Second)
+	if err != nil || !fake.Called("simctl io SIM recordVideo "+path) {
+		t.Fatalf("record: %v, calls %v", err, fake.Calls())
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("file %v, error %v", info, err)
+	}
+
+	before := len(fake.Calls())
+	for name, err := range map[string]error{
+		"a file that is there":       func() error { _, err := m.Record(ctx, simulator, path, 0); return err }(),
+		"a folder that is not there": func() error { _, err := m.Record(ctx, simulator, filepath.Join(dir, "no", "a.mov"), 0); return err }(),
+		"a stopped device":           func() error { _, err := m.Record(ctx, stopped, filepath.Join(dir, "b.mov"), 0); return err }(),
+		"a negative duration": func() error {
+			_, err := m.Record(ctx, simulator, filepath.Join(dir, "c.mov"), -time.Second)
+			return err
+		}(),
+		"an iPhone": func() error { _, err := m.Record(ctx, iphone, filepath.Join(dir, "d.mov"), 0); return err }(),
+	} {
+		if code := apperr.CodeOf(err); code != apperr.InvalidState && code != apperr.Unsupported {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(fake.Calls()) != before {
+		t.Errorf("a tool ran: %v", fake.Calls()[before:])
+	}
+}

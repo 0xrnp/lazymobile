@@ -37,7 +37,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 ## Commands that change a device
 
-`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link`, `screenshot`, `appearance` (with a mode), `location`, `statusbar`, `permission` and `cleardata` print:
+`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link`, `screenshot`, `appearance` (with a mode), `location`, `statusbar`, `permission`, `cleardata` and `record` print:
 
 ```json
 {

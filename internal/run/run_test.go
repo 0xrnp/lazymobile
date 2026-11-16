@@ -76,3 +76,11 @@ func TestDetachReportsAMissingProgram(t *testing.T) {
 		t.Errorf("missing = %v, err = %v", missing, err)
 	}
 }
+
+func TestInterruptEndsACommandThatCleansUpOnSIGINT(t *testing.T) {
+	script := `trap 'echo finished; exit 0' INT; while true; do sleep 0.1; done`
+	res := Exec{}.Run(context.Background(), []string{"sh", "-c", script}, Options{Timeout: 500 * time.Millisecond, Interrupt: true})
+	if !res.TimedOut || !strings.Contains(res.Stdout, "finished") {
+		t.Errorf("an interrupted command should run its cleanup: %+v", res)
+	}
+}

@@ -34,6 +34,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Launch, restart or stop an app on a running device.
 - Open a deep link, take a screenshot, and switch dark and light mode, on a simulator, emulator or Android phone.
+- Record the screen of a simulator, emulator or Android phone to a video, from the command line.
 - Put a simulator or emulator at a place, and give it the tidy status bar of a screenshot.
 - Grant or revoke an app's permission, and clear its data, on a simulator or emulator.
 - Connect Android phones over Wi-Fi (pairing code or address).
@@ -69,6 +70,7 @@ Early release. What has been run, and what has not:
 | Crash marking | A real crash of an Android 16 emulator's Settings app (`am crash`), streamed with `logs --json`: the report's lines were marked. The `e` keys in the dashboard, only with fake log lines. Not run: an iOS crash, a React Native error, a native signal. Their patterns come from known log formats |
 | Links and screenshots | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: a web address with `&` in it, a link no app handles, a PNG saved, and a second screenshot to the same file refused. The dashboard keys `p` and `t`, only with fake tools. Not run: an Android phone, other Xcode or Android versions |
 | Dark and light mode | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: read, switch both ways, and a bad mode refused. The dashboard key `m`, only with fake tools. Not run: an Android phone, Android before 10 (expected to say it needs Android 10), other Xcode versions |
+| Screen recording | A real iOS 27.2 simulator and a real Android 16 emulator, from `record`: a video of valid format saved with `--duration` and with Ctrl-C, a second recording to the same file refused, Android's 3 minute limit refused, and the copy on the device removed. No dashboard key yet. Not run: an Android phone, an iPhone (Apple's tools cannot record one), videos longer than a few seconds |
 | Location and status bar | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands. The status bar was checked in real screenshots (9:41 and 12:00, full battery and signal). The location was accepted by both tools, and a latitude off the globe is refused here before it reaches them. Not checked: that an app inside the device sees the new place. The dashboard keys `f`, `c` and `C`, only with fake tools |
 | Permissions and clear data | A real iOS 27.2 simulator and a real Android 16 emulator (API 36), from the commands. On Android a grant and a revoke were checked in the package manager (`granted=true`, then `false`). Refusals were run too: an app that is not installed, a permission the app does not ask for, a made-up name, and clear data without `--yes`. The dashboard menu, only with fake tools. Not run: other Android versions (photos and notifications use different permissions before Android 13), real phones, which are left alone |
 | Android phones | A real Android phone |
@@ -252,7 +254,7 @@ only by you. Delete the file to forget it all.
   erased or deleted. On them lazymobile only uninstalls an app (only one you installed: the apps
   that come with the system are refused), launches, restarts or stops an app, and, on an Android
   phone, opens a link, takes a screenshot or switches dark mode. A location, a status bar, an app's permissions and its data are only changed on simulators and emulators.
-- A screenshot never replaces a file, and is readable only by you, since a screen can show
+- A screenshot or a recording never replaces a file, and is readable only by you, since a screen can show
   personal data. A link is checked before it reaches an Android phone's shell.
 - The builds pane does not run `eas` until you press `enter` in it. `eas` runs your project's
   own configuration code and uses your Expo login, so it is never started just by opening the
@@ -284,6 +286,7 @@ lazymobile location "Pixel 9a" 37.7749,-122.4194   # or: clear (simulators only)
 lazymobile statusbar "iPhone 17" clean   # or: reset
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
+lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
 lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS

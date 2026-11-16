@@ -998,3 +998,25 @@ func TestClearDataErasesOnlyAnInstalledApp(t *testing.T) {
 		t.Errorf("a refusal that exits 0: %v", err)
 	}
 }
+
+func TestRecordingPullsTheVideoAndAlwaysRemovesTheCopyOnTheDevice(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell screenrecord": {}, "pull": {}, "shell rm": {}})
+	c := New(fake, sdk(t, "adb"))
+	if err := c.Record(context.Background(), runningEmulator, "/tmp/out.mp4", 2500*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"screenrecord --time-limit 3 /sdcard/lazymobile-", "pull /sdcard/lazymobile-", "shell rm -f /sdcard/lazymobile-"} {
+		if !fake.Called(want) {
+			t.Errorf("did not run %q: %v", want, fake.Calls())
+		}
+	}
+
+	failed := runtest.Table(map[string]run.Result{"shell screenrecord": runtest.Fail(1, "no encoder"), "shell rm": {}})
+	if err := New(failed, sdk(t, "adb")).Record(context.Background(), runningEmulator, "/tmp/out.mp4", time.Second); err == nil || !failed.Called("shell rm -f") || failed.Called(" pull ") {
+		t.Errorf("a failed recording: %v, calls %v", err, failed.Calls())
+	}
+
+	if err := c.Record(context.Background(), runningEmulator, "/tmp/out.mp4", 4*time.Minute); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("longer than screenrecord allows: %v", err)
+	}
+}

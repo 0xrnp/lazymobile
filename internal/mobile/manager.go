@@ -414,7 +414,17 @@ func (m *Manager) SetStatusBar(ctx context.Context, d device.Device, clean bool)
 }
 
 // ScreenshotName is a file name for a screenshot of d taken at now.
-func ScreenshotName(d device.Device, now time.Time) string {
+func ScreenshotName(d device.Device, now time.Time) string { return mediaName(d, now, "png") }
+
+// RecordingName is a file name for a screen recording of d started at now.
+func RecordingName(d device.Device, now time.Time) string {
+	if d.Platform == device.IOS {
+		return mediaName(d, now, "mov")
+	}
+	return mediaName(d, now, "mp4")
+}
+
+func mediaName(d device.Device, now time.Time, extension string) string {
 	name := strings.Trim(strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_':
@@ -422,7 +432,53 @@ func ScreenshotName(d device.Device, now time.Time) string {
 		}
 		return '-'
 	}, d.Name), "-")
-	return fmt.Sprintf("lazymobile-%s-%s.png", name, now.Format("20060102-150405"))
+	return fmt.Sprintf("lazymobile-%s-%s.%s", name, now.Format("20060102-150405"), extension)
+}
+
+// checkNewFile makes path absolute, and checks that its folder exists and that nothing is there
+// yet. Pictures and videos of a screen never replace a file.
+func checkNewFile(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", apperr.New(apperr.InvalidState, "That does not look like a file name: %v", err)
+	}
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || !info.IsDir() {
+		return "", apperr.New(apperr.InvalidState, "The folder %s does not exist", filepath.Dir(path)).WithHint("Choose a file in a folder that exists.")
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return "", apperr.New(apperr.InvalidState, "%s already exists", path).WithHint("Choose another name: a screenshot or recording never replaces a file.")
+	}
+	return path, nil
+}
+
+// Record films a running simulator's, emulator's or Android phone's screen until ctx ends, or
+// until limit has passed when it is not zero. Ending ctx is how a recording is stopped, so it is
+// not an error: the video that was made is saved. An Android device records at most three minutes
+// (android.MaxRecording). It returns the full path. It never replaces a file, and only the user
+// can read the video, since a screen can show personal data.
+func (m *Manager) Record(ctx context.Context, d device.Device, path string, limit time.Duration) (string, error) {
+	if !d.Ready() {
+		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if limit < 0 {
+		return "", apperr.New(apperr.InvalidState, "A recording cannot last %s", limit)
+	}
+	path, err := checkNewFile(path)
+	if err != nil {
+		return "", err
+	}
+	if d.Platform == device.IOS {
+		err = m.IOS.Record(ctx, d, path, limit)
+	} else {
+		err = m.Android.Record(ctx, d, path, limit)
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return "", apperr.New(apperr.CommandFailed, "Could not restrict %s: %v", path, err)
+	}
+	return path, nil
 }
 
 // Screenshot saves a PNG of a running simulator's, emulator's or Android phone's screen, and
@@ -432,15 +488,9 @@ func (m *Manager) Screenshot(ctx context.Context, d device.Device, path string) 
 	if !d.Ready() {
 		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
 	}
-	path, err := filepath.Abs(path)
+	path, err := checkNewFile(path)
 	if err != nil {
-		return "", apperr.New(apperr.InvalidState, "That does not look like a file name: %v", err)
-	}
-	if info, err := os.Stat(filepath.Dir(path)); err != nil || !info.IsDir() {
-		return "", apperr.New(apperr.InvalidState, "The folder %s does not exist", filepath.Dir(path)).WithHint("Choose a file in a folder that exists.")
-	}
-	if _, err := os.Lstat(path); err == nil {
-		return "", apperr.New(apperr.InvalidState, "%s already exists", path).WithHint("Choose another name: a screenshot never replaces a file.")
+		return "", err
 	}
 	if d.Platform == device.IOS {
 		if err := m.IOS.Screenshot(ctx, d, path); err != nil {

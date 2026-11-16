@@ -37,6 +37,9 @@ type Options struct {
 	Stdin string
 	// Dir is the working directory. Empty means the current one.
 	Dir string
+	// Interrupt stops the command, at the end of Timeout or when ctx ends, with an interrupt in
+	// place of a termination. A recorder needs it to finish its file, and is given time to.
+	Interrupt bool
 }
 
 // Runner runs a command to completion. Backends take one so tests can answer for the tools.
@@ -69,6 +72,10 @@ func (Exec) Run(ctx context.Context, argv []string, opts Options) Result {
 	}
 	cmd.Dir = opts.Dir
 	Group(cmd)
+	if opts.Interrupt {
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT) }
+		cmd.WaitDelay = 30 * time.Second
+	}
 
 	err := cmd.Run()
 	res := Result{Stdout: stdout.String(), Stderr: stderr.String()}

@@ -56,6 +56,7 @@ Usage:
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
+  lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
@@ -245,6 +246,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.statusBar(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
+	case "record":
+		return a.record(ctx, rest)
 	case "screenshot":
 		return a.screenshot(ctx, rest)
 	case "logs":
@@ -636,6 +639,34 @@ func (a *App) screenshot(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.done(*asJSON, result{Action: "screenshot", Device: d, Path: path}, "Saved "+path)
+}
+
+func (a *App) record(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("record", flag.ContinueOnError)
+	out := fs.String("out", "", "")
+	duration := fs.Duration("duration", 0, "")
+	asJSON := fs.Bool("json", false, "")
+	d, err := a.one(ctx, fs, args, "record")
+	if err != nil {
+		return err
+	}
+	if *duration < 0 {
+		return usageError{"--duration cannot be negative"}
+	}
+	if *out == "" {
+		*out = mobile.RecordingName(d, time.Now())
+	}
+	// Ctrl-C ends the recording and keeps the video, so it must not end the command.
+	recording, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if !*asJSON {
+		fmt.Fprintf(a.Stderr, "Recording %s. Press Ctrl-C to stop.\n", d.Name)
+	}
+	path, err := a.Manager.Record(recording, d, *out, *duration)
+	if err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "record", Device: d, Path: path}, "Saved "+path)
 }
 
 func (a *App) stop(ctx context.Context, args []string) error {

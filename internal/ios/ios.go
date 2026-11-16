@@ -5,6 +5,7 @@ package ios
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -579,6 +580,28 @@ func (c *Client) SetPermission(ctx context.Context, d device.Device, bundleID, s
 	}
 	argv := []string{"xcrun", "simctl", "privacy", d.ID, verb, service, bundleID}
 	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, permissionAction)
+}
+
+var recordAction = action{verb: "record the screen", hint: "Boot it first."}
+
+// Record films a booted simulator's screen into path until ctx ends or limit passes (no limit when
+// it is zero). Both end it with an interrupt, which is how simctl finishes the video, so neither
+// is an error as long as a video was saved.
+func (c *Client) Record(ctx context.Context, d device.Device, path string, limit time.Duration) error {
+	if err := onlySimulator(d, "record the screen"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "io", d.ID, "recordVideo", path}
+	res := c.Runner.Run(ctx, argv, run.Options{Timeout: limit, Interrupt: true})
+	if !res.TimedOut && !errors.Is(res.Err, context.Canceled) {
+		if err := actionError(res, argv, recordAction); err != nil {
+			return err
+		}
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+		return &apperr.Error{Code: apperr.CommandFailed, Message: "simctl did not save a video", Argv: argv, Stderr: res.Stderr}
+	}
+	return nil
 }
 
 var (

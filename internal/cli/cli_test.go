@@ -881,3 +881,20 @@ func TestClearDataNeedsYesAndAnEmulator(t *testing.T) {
 		t.Errorf("a tool ran: %v", e.fake.Calls())
 	}
 }
+
+func TestRecordRefusesBeforeAnyToolRuns(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	if code := e.run("record", "iPhone 16 Pro", "--duration", "-5s"); code != ExitUsage {
+		t.Errorf("a negative duration: code %d", code)
+	}
+	if code := e.run("record", "iPhone 16 Pro", "--out", filepath.Join(dir, "no", "a.mov")); code != ExitFailure {
+		t.Errorf("a folder that is not there: code %d", code)
+	}
+	if code := e.run("record"); code != ExitUsage {
+		t.Errorf("no device: code %d", code)
+	}
+	if e.fake.Called("recordVideo") {
+		t.Errorf("a recording started: %v", e.fake.Calls())
+	}
+}
