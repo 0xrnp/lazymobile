@@ -287,6 +287,47 @@ func (m *Manager) SetAppearance(ctx context.Context, d device.Device, mode strin
 	return m.Android.SetAppearance(ctx, d, mode)
 }
 
+// PermissionNames are the permissions an app on this platform can be given or refused.
+func PermissionNames(platform device.Platform) []string {
+	if platform == device.IOS {
+		return ios.PermissionNames()
+	}
+	return android.PermissionNames()
+}
+
+// SetPermission grants or revokes a permission of an app on a running simulator or emulator. See
+// PermissionNames. Real phones are left alone.
+func (m *Manager) SetPermission(ctx context.Context, d device.Device, id, name string, grant bool) error {
+	if err := virtualDevice(d, "its apps' permissions"); err != nil {
+		return err
+	}
+	if !logs.ValidAppID(id) {
+		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id).
+			WithHint("Use a package name or bundle id, such as com.example.app.")
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.SetPermission(ctx, d, id, name, grant)
+	}
+	return m.Android.SetPermission(ctx, d, id, name, grant)
+}
+
+// ClearData erases all the data of an app on a running emulator, as if it had just been
+// installed. An iOS simulator has no such command: uninstalling the app does it.
+func (m *Manager) ClearData(ctx context.Context, d device.Device, id string) error {
+	if err := virtualDevice(d, "its apps' data"); err != nil {
+		return err
+	}
+	if !logs.ValidAppID(id) {
+		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id).
+			WithHint("Use a package name or bundle id, such as com.example.app.")
+	}
+	if d.Platform == device.IOS {
+		return apperr.New(apperr.Unsupported, "Apple's tools cannot clear an app's data").
+			WithHint("Uninstall the app and install it again.")
+	}
+	return m.Android.ClearData(ctx, d, id)
+}
+
 // ParseLocation reads "latitude,longitude", such as "37.7749,-122.4194".
 func ParseLocation(text string) (lat, lon float64, err error) {
 	parts := strings.Split(text, ",")

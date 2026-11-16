@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -557,5 +558,47 @@ func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testin
 	}
 	if err := m.SetStatusBar(ctx, simulator, false); err != nil || !fake.Called("simctl status_bar SIM clear") {
 		t.Errorf("status bar: %v, calls %v", err, fake.Calls())
+	}
+}
+
+func TestPermissionsAndClearDataLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	phone := device.Device{ID: "R58M", Name: "My Galaxy", Platform: device.Android, Kind: device.Physical, State: device.Connected, Serial: "R58M"}
+	stopped := emulator
+	stopped.State = device.Shutdown
+
+	for name, err := range map[string]error{
+		"a permission of an iPhone app":   m.SetPermission(ctx, iphone, "com.example.app", "photos", true),
+		"a permission of a phone's app":   m.SetPermission(ctx, phone, "com.example.app", "camera", true),
+		"data of a phone's app":           m.ClearData(ctx, phone, "com.example.app"),
+		"a permission on a stopped one":   m.SetPermission(ctx, stopped, "com.example.app", "camera", true),
+		"data on a stopped one":           m.ClearData(ctx, stopped, "com.example.app"),
+		"an injected app id":              m.SetPermission(ctx, emulator, "a; reboot", "camera", true),
+		"an option as an app id for data": m.ClearData(ctx, emulator, "-a"),
+		"data of an iOS app":              m.ClearData(ctx, simulator, "com.example.app"),
+	} {
+		if code := apperr.CodeOf(err); code != apperr.Unsupported && code != apperr.InvalidState {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+	if err := m.SetPermission(ctx, emulator, "com.example.app", "camera", true); err != nil || !fake.Called("pm grant com.example.app android.permission.CAMERA") {
+		t.Errorf("an emulator: %v, calls %v", err, fake.Calls())
+	}
+}
+
+func TestPermissionNamesDifferByPlatform(t *testing.T) {
+	ios, android := PermissionNames(device.IOS), PermissionNames(device.Android)
+	if !slices.Contains(ios, "photos") || slices.Contains(ios, "camera") {
+		t.Errorf("iOS: %v (a simulator has no camera permission)", ios)
+	}
+	if !slices.Contains(android, "camera") || !slices.Contains(android, "notifications") {
+		t.Errorf("Android: %v", android)
 	}
 }

@@ -881,3 +881,120 @@ func TestStatusBarGoesThroughDemoMode(t *testing.T) {
 		t.Errorf("reset: %v, calls %v", err, fake.Calls())
 	}
 }
+
+// What pm printed on a real Android 16 emulator (API 36).
+const (
+	pmUnknownPermission = "\nException occurred while executing 'grant':\njava.lang.IllegalArgumentException: Unknown permission android.permission.NO_SUCH_PERMISSION\n\tat com.android.server.permission.access.permission.PermissionService.setRuntimePermissionGranted(PermissionService.kt:985)\n"
+	pmNotChangeable     = "\nException occurred while executing 'grant':\njava.lang.SecurityException: Permission android.permission.INTERNET requested by package com.android.chrome is not a changeable permission type\n"
+	pmPackageNotFound   = "Failure [package not found]\nError: package not found\n"
+	pmNotRequested      = "\nException occurred while executing 'grant':\njava.lang.SecurityException: Package com.example.app has not requested permission android.permission.ACCESS_COARSE_LOCATION\n"
+)
+
+func TestPermissionNamesBecomeTheAndroidPermissionsTheyStandFor(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell getprop ro.build.version.sdk": runtest.Out("36\n"), "shell pm": {}})
+	c := New(fake, sdk(t, "adb"))
+	ctx := context.Background()
+	for name, want := range map[string][]string{
+		"camera":                      {"pm grant com.example.app android.permission.CAMERA"},
+		"microphone":                  {"pm grant com.example.app android.permission.RECORD_AUDIO"},
+		"location":                    {"android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"},
+		"photos":                      {"android.permission.READ_MEDIA_IMAGES"},
+		"notifications":               {"android.permission.POST_NOTIFICATIONS"},
+		"android.permission.READ_SMS": {"pm grant com.example.app android.permission.READ_SMS"},
+	} {
+		before := len(fake.Calls())
+		if err := c.SetPermission(ctx, runningEmulator, "com.example.app", name, true); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		ran := strings.Join(fake.Calls()[before:], "\n")
+		for _, part := range want {
+			if !strings.Contains(ran, part) {
+				t.Errorf("%s did not run %q:\n%s", name, part, ran)
+			}
+		}
+	}
+}
+
+func TestPhotosAndNotificationsDependOnTheAndroidVersion(t *testing.T) {
+	old := runtest.Table(map[string]run.Result{"shell getprop ro.build.version.sdk": runtest.Out("30\n"), "shell pm": {}})
+	c := New(old, sdk(t, "adb"))
+	if err := c.SetPermission(context.Background(), runningEmulator, "com.example.app", "photos", true); err != nil || !old.Called("android.permission.READ_EXTERNAL_STORAGE") {
+		t.Errorf("photos on API 30: %v, calls %v", err, old.Calls())
+	}
+	if err := c.SetPermission(context.Background(), runningEmulator, "com.example.app", "notifications", true); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("notifications on API 30: %v", err)
+	}
+}
+
+func TestPermissionFailuresAreExplained(t *testing.T) {
+	ctx := context.Background()
+	for name, tt := range map[string]struct {
+		perm   string
+		result run.Result
+		code   apperr.Code
+	}{
+		"an app that is not installed": {"camera", run.Result{Code: 1, Stdout: pmPackageNotFound}, apperr.NotFound},
+		"a permission that is not one": {"android.permission.NO_SUCH_PERMISSION", run.Result{Code: 255, Stdout: pmUnknownPermission}, apperr.InvalidState},
+		"one the app does not ask for": {"camera", run.Result{Code: 255, Stdout: pmNotChangeable}, apperr.InvalidState},
+	} {
+		fake := runtest.Table(map[string]run.Result{"shell pm grant": tt.result})
+		if err := New(fake, sdk(t, "adb")).SetPermission(ctx, runningEmulator, "com.example.app", tt.perm, true); apperr.CodeOf(err) != tt.code {
+			t.Errorf("%s: %v, want %s", name, err, tt.code)
+		}
+	}
+
+	// Location is two permissions, and an app may ask for only one. That is a success.
+	fake := runtest.Table(map[string]run.Result{
+		"pm grant com.example.app android.permission.ACCESS_FINE_LOCATION":   {},
+		"pm grant com.example.app android.permission.ACCESS_COARSE_LOCATION": {Code: 255, Stdout: pmNotRequested},
+	})
+	if err := New(fake, sdk(t, "adb")).SetPermission(ctx, runningEmulator, "com.example.app", "location", true); err != nil {
+		t.Errorf("one of two location permissions: %v", err)
+	}
+	none := runtest.Table(map[string]run.Result{"pm grant": {Code: 255, Stdout: pmNotRequested}})
+	if err := New(none, sdk(t, "adb")).SetPermission(ctx, runningEmulator, "com.example.app", "location", true); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("neither location permission: %v", err)
+	}
+}
+
+func TestPermissionRefusesBeforeAskingTheDevice(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	c := New(fake, sdk(t, "adb"))
+	offline := runningEmulator
+	offline.State = device.Offline
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"an offline device":   c.SetPermission(ctx, offline, "com.example.app", "camera", true),
+		"an injected app id":  c.SetPermission(ctx, runningEmulator, "a; reboot", "camera", true),
+		"an injected name":    c.SetPermission(ctx, runningEmulator, "com.example.app", "camera; reboot", true),
+		"an option as a name": c.SetPermission(ctx, runningEmulator, "com.example.app", "-g", true),
+		"no name":             c.SetPermission(ctx, runningEmulator, "com.example.app", "", true),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("the device was asked: %v", fake.Calls())
+	}
+}
+
+func TestClearDataErasesOnlyAnInstalledApp(t *testing.T) {
+	ctx := context.Background()
+	fake := runtest.Table(map[string]run.Result{
+		"shell dumpsys package com.example.app": runtest.Out(dumpsysPackage),
+		"shell dumpsys package com.example.ap":  runtest.Out(""),
+		"shell pm clear":                        runtest.Out("Success\n"),
+	})
+	c := New(fake, sdk(t, "adb"))
+	if err := c.ClearData(ctx, runningEmulator, "com.example.ap"); apperr.CodeOf(err) != apperr.NotFound || fake.Called("pm clear") {
+		t.Errorf("a typo: %v, calls %v", err, fake.Calls())
+	}
+	if err := c.ClearData(ctx, runningEmulator, "com.example.app"); err != nil || !fake.Called("-s emulator-5554 shell pm clear com.example.app") {
+		t.Errorf("an installed app: %v, calls %v", err, fake.Calls())
+	}
+	failed := runtest.Table(map[string]run.Result{"shell dumpsys package": runtest.Out(dumpsysPackage), "shell pm clear": runtest.Out("Failed\n")})
+	if err := New(failed, sdk(t, "adb")).ClearData(ctx, runningEmulator, "com.example.app"); apperr.CodeOf(err) != apperr.CommandFailed {
+		t.Errorf("a refusal that exits 0: %v", err)
+	}
+}

@@ -692,3 +692,41 @@ func TestStatusBarOfASimulatorIsTidiedAndRestored(t *testing.T) {
 		t.Errorf("a shut-down simulator: %v", err)
 	}
 }
+
+func TestPermissionIsGrantedOrRevokedOnlyForAnInstalledApp(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"simctl get_app_container " + udidBooted + " com.example.app": runtest.Out("/path/App.app\n"),
+		"simctl privacy": {},
+	})
+	c := client(fake)
+	ctx := context.Background()
+	if err := c.SetPermission(ctx, bootedSim, "com.example.app", "photos", true); err != nil || !fake.Called("xcrun simctl privacy "+udidBooted+" grant photos com.example.app") {
+		t.Errorf("grant: %v, calls %v", err, fake.Calls())
+	}
+	if err := c.SetPermission(ctx, bootedSim, "com.example.app", "location", false); err != nil || !fake.Called("xcrun simctl privacy "+udidBooted+" revoke location com.example.app") {
+		t.Errorf("revoke: %v, calls %v", err, fake.Calls())
+	}
+
+	// simctl says success for an app that is not there, so nothing may be sent for one.
+	missing := runtest.Table(map[string]run.Result{"simctl get_app_container": runtest.Fail(2, simctlNoContainer), "simctl privacy": {}})
+	err := client(missing).SetPermission(ctx, bootedSim, "com.example.nope", "photos", true)
+	if apperr.CodeOf(err) != apperr.NotFound || missing.Called("simctl privacy") {
+		t.Errorf("an app that is not installed: %v, calls %v", err, missing.Calls())
+	}
+}
+
+func TestPermissionRefusesWhatSimctlHasNoServiceForAndAnIPhone(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	ctx := context.Background()
+	for _, service := range []string{"camera", "bogus", "all", "photos; reboot", ""} {
+		if err := client(fake).SetPermission(ctx, bootedSim, "com.example.app", service, true); apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%q: %v, want invalid_state", service, err)
+		}
+	}
+	if err := client(fake).SetPermission(ctx, iphone, "com.example.app", "photos", true); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an iPhone: %v", err)
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("a tool ran: %v", calls)
+	}
+}

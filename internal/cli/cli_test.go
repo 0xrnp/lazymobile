@@ -54,6 +54,8 @@ func newEnv(t *testing.T) *env {
 			return runtest.Out(`{"com.example.installed": {"ApplicationType": "User", "CFBundleDisplayName": "Installed"}, "com.apple.mobilesafari": {"ApplicationType": "System"}}`)
 		case strings.Contains(command, "simctl ui") && strings.HasSuffix(command, "appearance"):
 			return runtest.Out("light\n")
+		case strings.Contains(command, "simctl get_app_container"):
+			return runtest.Out("/path/App.app\n")
 		case strings.Contains(command, "simctl io"):
 			if err := os.WriteFile(argv[len(argv)-1], []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
 				t.Error(err)
@@ -832,6 +834,50 @@ func TestLocationAndStatusBarUsageAndRefusals(t *testing.T) {
 		}
 	}
 	if e.fake.Called("simctl location") || e.fake.Called("status_bar") {
+		t.Errorf("a tool ran: %v", e.fake.Calls())
+	}
+}
+
+func TestPermissionGrantsAndRevokesOnASimulator(t *testing.T) {
+	e := newEnv(t)
+	const booted = "00000000-0000-4000-8000-0000000000A2"
+	if code := e.run("permission", "iPhone 16 Pro", "grant", "photos", "com.example.installed"); code != ExitOK ||
+		!e.fake.Called("simctl privacy "+booted+" grant photos com.example.installed") ||
+		!strings.Contains(e.out.String(), "Granted photos to com.example.installed on iPhone 16 Pro") {
+		t.Errorf("grant: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("permission", "iPhone 16 Pro", "revoke", "location", "com.example.installed"); code != ExitOK ||
+		!strings.Contains(e.out.String(), "Revoked location from com.example.installed on iPhone 16 Pro") {
+		t.Errorf("revoke: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("permission", "iPhone 16 Pro", "revoke", "location", "com.example.installed", "--json"); code != ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	if out := e.object(t); out["action"] != "permission_revoke" || out["permission"] != "location" || out["app"] != "com.example.installed" {
+		t.Errorf("printed %v", out)
+	}
+	for _, args := range [][]string{
+		{"permission"}, {"permission", "iPhone 16 Pro", "grant", "photos"}, {"permission", "iPhone 16 Pro", "allow", "photos", "a.b"},
+	} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	if code := e.run("permission", "iPhone 16 Pro", "grant", "camera", "com.example.installed"); code != ExitFailure {
+		t.Errorf("a permission a simulator does not have: code %d", code)
+	}
+}
+
+func TestClearDataNeedsYesAndAnEmulator(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("cleardata", "iPhone 16 Pro", "com.example.installed"); code != ExitUsage || !strings.Contains(e.errs.String(), "--yes") {
+		t.Errorf("without --yes: code %d, stderr %q", code, e.errs.String())
+	}
+	// An iOS simulator has no way to do it, and says what to do instead.
+	if code := e.run("cleardata", "iPhone 16 Pro", "com.example.installed", "--yes"); code != ExitFailure || !strings.Contains(e.errs.String(), "Uninstall the app") {
+		t.Errorf("on a simulator: code %d, stderr %q", code, e.errs.String())
+	}
+	if e.fake.Called("rm ") || e.fake.Called("get_app_container") {
 		t.Errorf("a tool ran: %v", e.fake.Calls())
 	}
 }

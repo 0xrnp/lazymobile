@@ -37,7 +37,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 ## Commands that change a device
 
-`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link`, `screenshot`, `appearance` (with a mode), `location` and `statusbar` print:
+`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link`, `screenshot`, `appearance` (with a mode), `location`, `statusbar`, `permission` and `cleardata` print:
 
 ```json
 {
@@ -56,7 +56,8 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 `appearance` also has `appearance`, the mode it switched to (`dark` or `light`). `location` has
 `location`, which is `latitude,longitude` or `cleared`. `statusbar` has `action` set to
-`statusbar_clean` or `statusbar_reset`.
+`statusbar_clean` or `statusbar_reset`. `permission` has `action` set to `permission_grant` or
+`permission_revoke`, and `permission`, the name that was given.
 
 `id` prints `{"device": {...}, "id": "emulator-5554"}`. `appearance` without a mode prints
 `{"device": {...}, "appearance": "dark"}`, where Android can also say `auto` for a device that

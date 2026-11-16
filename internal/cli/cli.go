@@ -51,6 +51,8 @@ Usage:
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light
+  lazymobile permission <device> grant|revoke <permission> <app-id> [--json]   such as camera, location, photos
+  lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
@@ -70,7 +72,7 @@ App ids given to logs and launch are remembered, newest first, for --last-app, f
 dashboard's app list.
 
 <device> is an id, an adb serial, a name, or a unique part of a name.
-Commands that erase, delete or uninstall need --yes.
+Commands that erase, delete, uninstall or clear data need --yes.
 Exit codes: 0 success, 1 failure, 2 wrong usage.
 With --json, a failure is printed on stdout as {"error": {"code", "message", "hint"}} and the exit
 code is the same. See docs/json.md.
@@ -184,6 +186,8 @@ type result struct {
 	URL    string        `json:"url,omitempty"`
 	// Appearance is the mode a device was switched to.
 	Appearance string `json:"appearance,omitempty"`
+	// Permission is the permission that was granted or revoked.
+	Permission string `json:"permission,omitempty"`
 	// Location is "latitude,longitude", or "cleared".
 	Location string   `json:"location,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
@@ -231,6 +235,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.stop(ctx, rest)
 	case "appearance":
 		return a.appearance(ctx, rest)
+	case "permission":
+		return a.permission(ctx, rest)
+	case "cleardata":
+		return a.clearData(ctx, rest)
 	case "location":
 		return a.location(ctx, rest)
 	case "statusbar":
@@ -493,6 +501,48 @@ func (a *App) appearance(ctx context.Context, args []string) error {
 	}
 	return a.done(*asJSON, result{Action: "appearance", Device: d, Appearance: positional[1]},
 		fmt.Sprintf("%s is now in %s mode", d.Name, positional[1]))
+}
+
+func (a *App) permission(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("permission", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 4 || (positional[1] != "grant" && positional[1] != "revoke") {
+		return usageError{"permission needs a device, grant or revoke, a permission and an app id"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	grant, name, app := positional[1] == "grant", positional[2], positional[3]
+	if err := a.Manager.SetPermission(ctx, d, app, name, grant); err != nil {
+		return err
+	}
+	sentence := fmt.Sprintf("Revoked %s from %s on %s", name, app, d.Name)
+	if grant {
+		sentence = fmt.Sprintf("Granted %s to %s on %s", name, app, d.Name)
+	}
+	return a.done(*asJSON, result{Action: "permission_" + positional[1], Device: d, App: app, Permission: name}, sentence)
+}
+
+func (a *App) clearData(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("cleardata", flag.ContinueOnError)
+	yes := fs.Bool("yes", false, "")
+	asJSON := fs.Bool("json", false, "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
+	if err != nil {
+		return err
+	}
+	if !*yes {
+		return usageError{fmt.Sprintf("cleardata erases everything %s saved on %s. Add --yes to confirm", app, d.Name)}
+	}
+	if err := a.Manager.ClearData(ctx, d, app); err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "cleardata", Device: d, App: app}, fmt.Sprintf("Cleared the data of %s on %s", app, d.Name))
 }
 
 func (a *App) location(ctx context.Context, args []string) error {

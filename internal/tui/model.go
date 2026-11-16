@@ -43,6 +43,8 @@ type Backend interface {
 	Stop(ctx context.Context, d device.Device, id string) error
 	Appearance(ctx context.Context, d device.Device) (string, error)
 	SetAppearance(ctx context.Context, d device.Device, mode string) error
+	SetPermission(ctx context.Context, d device.Device, id, name string, grant bool) error
+	ClearData(ctx context.Context, d device.Device, id string) error
 	SetLocation(ctx context.Context, d device.Device, lat, lon float64) error
 	ClearLocation(ctx context.Context, d device.Device) error
 	SetStatusBar(ctx context.Context, d device.Device, clean bool) error

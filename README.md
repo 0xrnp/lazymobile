@@ -35,6 +35,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Launch, restart or stop an app on a running device.
 - Open a deep link, take a screenshot, and switch dark and light mode, on a simulator, emulator or Android phone.
 - Put a simulator or emulator at a place, and give it the tidy status bar of a screenshot.
+- Grant or revoke an app's permission, and clear its data, on a simulator or emulator.
 - Connect Android phones over Wi-Fi (pairing code or address).
 - Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
   many logs as you like, side by side or stacked, to read several devices at once.
@@ -69,6 +70,7 @@ Early release. What has been run, and what has not:
 | Links and screenshots | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: a web address with `&` in it, a link no app handles, a PNG saved, and a second screenshot to the same file refused. The dashboard keys `p` and `t`, only with fake tools. Not run: an Android phone, other Xcode or Android versions |
 | Dark and light mode | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: read, switch both ways, and a bad mode refused. The dashboard key `m`, only with fake tools. Not run: an Android phone, Android before 10 (expected to say it needs Android 10), other Xcode versions |
 | Location and status bar | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands. The status bar was checked in real screenshots (9:41 and 12:00, full battery and signal). The location was accepted by both tools, and a latitude off the globe is refused here before it reaches them. Not checked: that an app inside the device sees the new place. The dashboard keys `f`, `c` and `C`, only with fake tools |
+| Permissions and clear data | A real iOS 27.2 simulator and a real Android 16 emulator (API 36), from the commands. On Android a grant and a revoke were checked in the package manager (`granted=true`, then `false`). Refusals were run too: an app that is not installed, a permission the app does not ask for, a made-up name, and clear data without `--yes`. The dashboard menu, only with fake tools. Not run: other Android versions (photos and notifications use different permissions before Android 13), real phones, which are left alone |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -127,7 +129,7 @@ Devices:
 | `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
-| `o` | Launch, restart or stop an app: pick one, then pick what to do. An iPhone's apps can be launched and restarted, not stopped |
+| `o` | Pick an app, then what to do with it: launch, restart or stop it. On a simulator or emulator also grant or revoke a permission, and on an emulator clear its data (asks first). An iPhone's apps can be launched and restarted, not stopped |
 | `f` | Put a simulator or emulator at a place (latitude,longitude). On a simulator, `clear` takes it off. Not for real phones |
 | `c` `C` | Tidy the status bar of a simulator or emulator for a screenshot (9:41, full battery and signal), or restore it. Not for real phones |
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
@@ -249,7 +251,7 @@ only by you. Delete the file to forget it all.
 - Erase, delete, wipe and uninstall always ask first. Real phones are never booted, shut down,
   erased or deleted. On them lazymobile only uninstalls an app (only one you installed: the apps
   that come with the system are refused), launches, restarts or stops an app, and, on an Android
-  phone, opens a link, takes a screenshot or switches dark mode. A location and a status bar are only set on simulators and emulators.
+  phone, opens a link, takes a screenshot or switches dark mode. A location, a status bar, an app's permissions and its data are only changed on simulators and emulators.
 - A screenshot never replaces a file, and is readable only by you, since a screen can show
   personal data. A link is checked before it reaches an Android phone's shell.
 - The builds pane does not run `eas` until you press `enter` in it. `eas` runs your project's
@@ -276,6 +278,8 @@ lazymobile install "Pixel 9a" ./app.apk
 lazymobile launch "Pixel 9a" com.example.app [--restart]
 lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
 lazymobile appearance "Pixel 9a" [dark|light]   # no mode shows the current one (Android 10 or newer)
+lazymobile permission "Pixel 9a" grant camera com.example.app   # camera, location, photos, notifications...
+lazymobile cleardata "Pixel 9a" com.example.app --yes   # emulators; on iOS, uninstall instead
 lazymobile location "Pixel 9a" 37.7749,-122.4194   # or: clear (simulators only)
 lazymobile statusbar "iPhone 17" clean   # or: reset
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
@@ -290,7 +294,7 @@ lazymobile doctor [--json]
 ```
 
 A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase,
-delete or uninstall need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
+delete, uninstall or clear data need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
 
 App ids given to `logs` and `launch` are remembered, newest first, and shared with the dashboard.
 

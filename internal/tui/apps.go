@@ -273,30 +273,62 @@ func (m *Model) openLink(d device.Device) tea.Cmd {
 	return nil
 }
 
-// appAction is one thing that can be done to an app on a device.
+// appAction is one thing that can be done to an app on a device. It either runs at once, or goes
+// on to ask something first.
 type appAction struct {
 	label, doing, done string
 	run                func(ctx context.Context, backend Backend, d device.Device, id string) error
+	// next, when set, replaces run: it opens the next question.
+	next func(m *Model, d device.Device, id string)
 }
 
 var (
-	launchApp = appAction{"Launch", "Launching", "Launched", func(ctx context.Context, b Backend, d device.Device, id string) error {
+	launchApp = appAction{label: "Launch", doing: "Launching", done: "Launched", run: func(ctx context.Context, b Backend, d device.Device, id string) error {
 		return b.Launch(ctx, d, id, mobile.LaunchOptions{})
 	}}
-	restartApp = appAction{"Restart", "Restarting", "Restarted", func(ctx context.Context, b Backend, d device.Device, id string) error {
+	restartApp = appAction{label: "Restart", doing: "Restarting", done: "Restarted", run: func(ctx context.Context, b Backend, d device.Device, id string) error {
 		return b.Launch(ctx, d, id, mobile.LaunchOptions{Restart: true})
 	}}
-	stopApp = appAction{"Stop", "Stopping", "Stopped", func(ctx context.Context, b Backend, d device.Device, id string) error {
+	stopApp = appAction{label: "Stop", doing: "Stopping", done: "Stopped", run: func(ctx context.Context, b Backend, d device.Device, id string) error {
 		return b.Stop(ctx, d, id)
+	}}
+	grantPermission = appAction{label: "Grant a permission…", next: func(m *Model, d device.Device, id string) {
+		m.permissionModal(d, id, true)
+	}}
+	revokePermission = appAction{label: "Revoke a permission…", next: func(m *Model, d device.Device, id string) {
+		m.permissionModal(d, id, false)
+	}}
+	clearData = appAction{label: "Clear its data…", next: func(m *Model, d device.Device, id string) {
+		m.confirm("Clear the data of "+id+"?", "This erases everything "+id+" saved on "+d.Name+", as if it had just been installed. It cannot be undone.",
+			func(m *Model) tea.Cmd {
+				backend := m.backend
+				return m.act(d, "Clearing the data of "+id+" on", "Cleared the data of "+id+" on", nil, func(ctx context.Context) error {
+					return backend.ClearData(ctx, d, id)
+				})
+			})
 	}}
 )
 
-func (m *Model) appActionModal(d device.Device, id string) {
+// appActionsFor is what can be done to an app on d. An iPhone's app cannot be stopped on its own,
+// and its permissions are left alone with the rest of the phone. An iOS simulator has no way to
+// clear an app's data.
+func appActionsFor(d device.Device) []appAction {
 	actions := []appAction{launchApp, restartApp, stopApp}
-	if d.Platform == device.IOS && d.Kind == device.Physical {
-		// An iPhone's app cannot be stopped on its own. Restart stops the running copy.
-		actions = actions[:2]
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		return actions[:2]
+	case d.Kind == device.Physical:
+		return actions
 	}
+	actions = append(actions, grantPermission, revokePermission)
+	if d.Platform == device.Android {
+		actions = append(actions, clearData)
+	}
+	return actions
+}
+
+func (m *Model) appActionModal(d device.Device, id string) {
+	actions := appActionsFor(d)
 	labels := make([]string, len(actions))
 	for i, action := range actions {
 		labels[i] = action.label
@@ -306,9 +338,32 @@ func (m *Model) appActionModal(d device.Device, id string) {
 		onChoose: func(m *Model, index int) tea.Cmd {
 			action := actions[index]
 			_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(d.Platform, id) })
+			if action.next != nil {
+				action.next(m, d, id)
+				return nil
+			}
 			backend := m.backend
 			return m.act(d, action.doing+" "+id+" on", action.done+" "+id+" on", nil, func(ctx context.Context) error {
 				return action.run(ctx, backend, d, id)
+			})
+		},
+	}
+}
+
+// permissionModal asks which permission of an app to grant or revoke.
+func (m *Model) permissionModal(d device.Device, id string, grant bool) {
+	names := mobile.PermissionNames(d.Platform)
+	verb, doing, done, preposition := "Revoke", "Revoking", "Revoked", "from"
+	if grant {
+		verb, doing, done, preposition = "Grant", "Granting", "Granted", "to"
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: verb + " which permission of " + id + "?", items: names, filterable: true,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			name := names[index]
+			backend := m.backend
+			return m.act(d, doing+" "+name+" "+preposition+" "+id+" on", done+" "+name+" "+preposition+" "+id+" on", nil, func(ctx context.Context) error {
+				return backend.SetPermission(ctx, d, id, name, grant)
 			})
 		},
 	}

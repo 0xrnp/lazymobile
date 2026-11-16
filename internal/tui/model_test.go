@@ -180,6 +180,12 @@ func (f *fakeBackend) ClearLocation(_ context.Context, d device.Device) error {
 func (f *fakeBackend) SetStatusBar(_ context.Context, d device.Device, clean bool) error {
 	return f.record("statusbar %s clean=%v", d.ID, clean)
 }
+func (f *fakeBackend) SetPermission(_ context.Context, d device.Device, id, name string, grant bool) error {
+	return f.record("permission %s %s %s grant=%v", d.ID, id, name, grant)
+}
+func (f *fakeBackend) ClearData(_ context.Context, d device.Device, id string) error {
+	return f.record("cleardata %s %s", d.ID, id)
+}
 func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
 	return f.record("link %s %s", d.ID, link)
 }
@@ -2139,5 +2145,60 @@ func TestLocationAndStatusBarKeysLeaveRealPhonesAloneAndNeedARunningDevice(t *te
 	h.wantCalls("statusbar", 0)
 	if h.m.modal != nil {
 		t.Error("a window opened for a real device")
+	}
+}
+
+func TestAnAppsPermissionsAreGrantedAndRevokedFromTheAppMenu(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.press("o", "enter")
+	h.wantScreen("com.example.app on iPhone 17", "Grant a permission…", "Revoke a permission…")
+	h.wantNoScreen("Clear its data")
+
+	h.press("down", "down", "down", "enter")
+	h.wantScreen("Grant which permission of com.example.app?", "photos", "microphone")
+	h.wantNoScreen("camera")
+	h.typeText("/")
+	h.typeText("photos")
+	h.press("enter")
+	h.wantCalls("permission SIM-1 com.example.app photos grant=true", 1)
+	h.wantScreen("Granted photos to com.example.app on iPhone 17")
+
+	h.press("o", "enter", "down", "down", "down", "down", "enter")
+	h.wantScreen("Revoke which permission of com.example.app?")
+	h.press("enter")
+	h.wantCalls("permission SIM-1 com.example.app location grant=false", 1)
+	h.wantScreen("Revoked location from com.example.app on iPhone 17")
+}
+
+func TestClearingAnEmulatorsAppDataAsksFirst(t *testing.T) {
+	h := start(t, pixel)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.press("o", "enter", "down", "down", "down", "down", "down", "enter")
+	h.wantScreen("Clear the data of com.example.app?", "everything com.example.app saved on Pixel 9a", "cannot be undone")
+	h.wantCalls("cleardata", 0)
+
+	// Enter must not confirm something that cannot be undone, and no leaves it alone.
+	h.press("enter")
+	h.wantCalls("cleardata", 0)
+	h.press("n")
+	h.wantNoScreen("Clear the data of")
+	h.wantCalls("cleardata", 0)
+
+	h.press("o", "enter", "down", "down", "down", "down", "down", "enter", "y")
+	h.wantCalls("cleardata Pixel_9a com.example.app", 1)
+	h.wantScreen("Cleared the data of com.example.app on Pixel 9a")
+}
+
+func TestRealPhonesAreOfferedNoPermissionOrDataActions(t *testing.T) {
+	h := start(t, usbPhone, wifiPhon)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	for _, d := range []device.Device{usbPhone, wifiPhon} {
+		h.selectDevice(d)
+		h.press("o", "enter")
+		h.wantScreen("com.example.app on " + d.Name)
+		h.wantNoScreen("permission")
+		h.wantNoScreen("Clear its data")
+		h.press("esc")
 	}
 }
