@@ -49,6 +49,7 @@ Usage:
   lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
+  lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
@@ -174,11 +175,13 @@ type result struct {
 	OK     bool   `json:"ok"`
 	Action string `json:"action"`
 	// Device is as it was found, before the action.
-	Device   device.Device `json:"device"`
-	App      string        `json:"app,omitempty"`
-	Path     string        `json:"path,omitempty"`
-	URL      string        `json:"url,omitempty"`
-	Warnings []string      `json:"warnings,omitempty"`
+	Device device.Device `json:"device"`
+	App    string        `json:"app,omitempty"`
+	Path   string        `json:"path,omitempty"`
+	URL    string        `json:"url,omitempty"`
+	// Appearance is the mode a device was switched to.
+	Appearance string   `json:"appearance,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
 }
 
 // done reports a finished action: the object with --json, the sentence otherwise.
@@ -221,6 +224,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.launch(ctx, rest)
 	case "stop":
 		return a.stop(ctx, rest)
+	case "appearance":
+		return a.appearance(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
 	case "screenshot":
@@ -447,6 +452,38 @@ func (a *App) launch(ctx context.Context, args []string) error {
 		action, done = "restart", "Restarted"
 	}
 	return a.done(*asJSON, result{Action: action, Device: d, App: app}, fmt.Sprintf("%s %s on %s", done, app, d.Name))
+}
+
+func (a *App) appearance(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("appearance", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) < 1 || len(positional) > 2 {
+		return usageError{"appearance needs a device, and dark or light to switch it"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if len(positional) == 1 {
+		mode, err := a.Manager.Appearance(ctx, d)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return a.writeJSON(map[string]any{"device": d, "appearance": mode})
+		}
+		fmt.Fprintln(a.Stdout, mode)
+		return nil
+	}
+	if err := a.Manager.SetAppearance(ctx, d, positional[1]); err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "appearance", Device: d, Appearance: positional[1]},
+		fmt.Sprintf("%s is now in %s mode", d.Name, positional[1]))
 }
 
 func (a *App) link(ctx context.Context, args []string) error {

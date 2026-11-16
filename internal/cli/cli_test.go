@@ -52,6 +52,8 @@ func newEnv(t *testing.T) *env {
 			return runtest.Out("{}")
 		case strings.HasPrefix(command, "plutil -convert json"):
 			return runtest.Out(`{"com.example.installed": {"ApplicationType": "User", "CFBundleDisplayName": "Installed"}, "com.apple.mobilesafari": {"ApplicationType": "System"}}`)
+		case strings.Contains(command, "simctl ui") && strings.HasSuffix(command, "appearance"):
+			return runtest.Out("light\n")
 		case strings.Contains(command, "simctl io"):
 			if err := os.WriteFile(argv[len(argv)-1], []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
 				t.Error(err)
@@ -757,5 +759,33 @@ func TestScreenshotWithoutAFileNameGoesInTheCurrentFolderUnderADatedName(t *test
 	matches, _ := filepath.Glob(filepath.Join(dir, "lazymobile-iPhone-16-Pro-*.png"))
 	if len(matches) != 1 {
 		t.Errorf("files %v, out %q", matches, e.out.String())
+	}
+}
+
+func TestAppearanceShowsOrSwitchesTheMode(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("appearance", "iPhone 16 Pro"); code != ExitOK || strings.TrimSpace(e.out.String()) != "light" {
+		t.Errorf("read: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("appearance", "iPhone 16 Pro", "--json"); code != ExitOK || e.object(t)["appearance"] != "light" {
+		t.Errorf("read as JSON: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("appearance", "iPhone 16 Pro", "dark"); code != ExitOK || !e.fake.Called("simctl ui 00000000-0000-4000-8000-0000000000A2 appearance dark") ||
+		!strings.Contains(e.out.String(), "iPhone 16 Pro is now in dark mode") {
+		t.Errorf("set: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("appearance", "iPhone 16 Pro", "dark", "--json"); code != ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	if out := e.object(t); out["action"] != "appearance" || out["appearance"] != "dark" || out["ok"] != true {
+		t.Errorf("printed %v", out)
+	}
+	for _, args := range [][]string{{"appearance"}, {"appearance", "iPhone 16 Pro", "dark", "extra"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	if code := e.run("appearance", "iPhone 16 Pro", "sepia"); code != ExitFailure || !strings.Contains(e.errs.String(), "Use dark or light") {
+		t.Errorf("a mode that is not one: code %d, stderr %q", code, e.errs.String())
 	}
 }

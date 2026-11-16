@@ -173,6 +173,27 @@ func (m *Model) screenshot(d device.Device) tea.Cmd {
 	})
 }
 
+// toggleAppearance switches the selected device between dark and light mode. A device that
+// follows the time of day (auto) is put in dark mode.
+func (m *Model) toggleAppearance(d device.Device) tea.Cmd {
+	if problem := screenFeature(d); problem != "" {
+		m.setNote(problem, true)
+		return nil
+	}
+	backend := m.backend
+	return m.act(d, "Switching dark and light mode on", "Switched dark and light mode on", nil, func(ctx context.Context) error {
+		current, err := backend.Appearance(ctx, d)
+		if err != nil {
+			return err
+		}
+		next := "dark"
+		if current == "dark" {
+			next = "light"
+		}
+		return backend.SetAppearance(ctx, d, next)
+	})
+}
+
 // openLink asks for a web address or deep link, and opens it on the selected device.
 func (m *Model) openLink(d device.Device) tea.Cmd {
 	if problem := screenFeature(d); problem != "" {

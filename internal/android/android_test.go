@@ -773,3 +773,47 @@ func TestOpenURLAndScreenshotRefuseADeviceThatIsNotRunning(t *testing.T) {
 		t.Errorf("the device was asked: %v", fake.Calls())
 	}
 }
+
+func TestAppearanceReadsAndSetsTheNightMode(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"shell cmd uimode night yes": runtest.Out("Night mode: yes\n"),
+		"shell cmd uimode night no":  runtest.Out("Night mode: no\n"),
+		"shell cmd uimode night":     runtest.Out("Night mode: auto\n"),
+	})
+	c := New(fake, sdk(t, "adb"))
+	ctx := context.Background()
+	if mode, err := c.Appearance(ctx, runningEmulator); err != nil || mode != "auto" {
+		t.Errorf("a device that follows the time of day: %q, %v", mode, err)
+	}
+	for mode, want := range map[string]string{"dark": "night yes", "light": "night no"} {
+		if err := c.SetAppearance(ctx, runningEmulator, mode); err != nil {
+			t.Fatal(err)
+		}
+		if got := fake.Calls()[len(fake.Calls())-1]; !strings.HasSuffix(got, "-s emulator-5554 shell cmd uimode "+want) {
+			t.Errorf("%s ran %q", mode, got)
+		}
+	}
+	for text, want := range map[string]string{"Night mode: yes": "dark", "Night mode: no": "light"} {
+		one := runtest.Table(map[string]run.Result{"uimode night": runtest.Out(text + "\n")})
+		if got, _ := New(one, sdk(t, "adb")).Appearance(ctx, runningEmulator); got != want {
+			t.Errorf("%q read as %q, want %q", text, got, want)
+		}
+	}
+}
+
+func TestAppearanceOfAnAndroidWithoutTheCommandSaysWhatItNeeds(t *testing.T) {
+	old := runtest.Table(map[string]run.Result{"uimode": runtest.Out("cmd: Can't find service: uimode\n")})
+	c := New(old, sdk(t, "adb"))
+	if _, err := c.Appearance(context.Background(), runningEmulator); apperr.CodeOf(err) != apperr.ParseFailed || !strings.Contains(err.Error(), "Android 10") {
+		t.Errorf("read: %v", err)
+	}
+	if err := c.SetAppearance(context.Background(), runningEmulator, "dark"); apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), "Android 10") {
+		t.Errorf("set: %v", err)
+	}
+	offline := runningEmulator
+	offline.State = device.Offline
+	none := runtest.Table(map[string]run.Result{})
+	if err := New(none, sdk(t, "adb")).SetAppearance(context.Background(), offline, "dark"); apperr.CodeOf(err) != apperr.InvalidState || len(none.Calls()) != 0 {
+		t.Errorf("an offline device: %v, calls %v", err, none.Calls())
+	}
+}

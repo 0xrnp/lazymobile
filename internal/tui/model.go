@@ -41,6 +41,8 @@ type Backend interface {
 	Uninstall(ctx context.Context, d device.Device, id string) error
 	Launch(ctx context.Context, d device.Device, id string, opts mobile.LaunchOptions) error
 	Stop(ctx context.Context, d device.Device, id string) error
+	Appearance(ctx context.Context, d device.Device) (string, error)
+	SetAppearance(ctx context.Context, d device.Device, mode string) error
 	OpenLink(ctx context.Context, d device.Device, link string) error
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
 	OpenURL(ctx context.Context, url string) error
@@ -865,6 +867,8 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.pickUninstall(d)
 	case "o":
 		return m.pickAppAction(d)
+	case "m":
+		return m.toggleAppearance(d)
 	case "p":
 		return m.screenshot(d)
 	case "t":

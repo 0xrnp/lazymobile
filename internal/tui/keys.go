@@ -117,6 +117,8 @@ var keyTable = []keyAction{
 		when: selectedDevice(running)},
 	{id: "app", ctx: ctxDevices, keys: []string{"o"}, show: "o", desc: "Launch, restart or stop an app",
 		when: selectedDevice(running)},
+	{id: "appearance", ctx: ctxDevices, keys: []string{"m"}, show: "m", desc: "Switch between dark and light mode",
+		when: selectedDevice(screenFeature)},
 	{id: "screenshot", ctx: ctxDevices, keys: []string{"p"}, show: "p", desc: "Save a screenshot in this folder",
 		when: selectedDevice(screenFeature)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",

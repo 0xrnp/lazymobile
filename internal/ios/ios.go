@@ -505,13 +505,48 @@ func (c *Client) Stop(ctx context.Context, d device.Device, bundleID string) err
 var (
 	openURLAction    = action{verb: "open a link", hint: "Boot it first."}
 	screenshotAction = action{verb: "take a screenshot", hint: "Boot it first."}
+	appearanceAction = action{verb: "change the appearance", hint: "Boot it first."}
 )
+
+// onlySimulator refuses what Apple's tools can only do on a simulator, which is most of what
+// they do. An iPhone cannot be sent a link, shown in dark mode or photographed from here.
+func onlySimulator(d device.Device, what string) error {
+	if d.Platform == device.IOS && d.Kind == device.Simulator {
+		return nil
+	}
+	return apperr.New(apperr.Unsupported, "Cannot %s on %s: only iOS simulators are supported", what, d.Name).
+		WithHint("Apple's tools cannot do this on an iPhone.")
+}
+
+// Appearance is "light" or "dark", the mode of a booted simulator.
+func (c *Client) Appearance(ctx context.Context, d device.Device) (string, error) {
+	if err := onlySimulator(d, "read the appearance"); err != nil {
+		return "", err
+	}
+	argv := []string{"xcrun", "simctl", "ui", d.ID, "appearance"}
+	res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
+	if err := actionError(res, argv, appearanceAction); err != nil {
+		return "", err
+	}
+	if mode := strings.TrimSpace(res.Stdout); mode == "light" || mode == "dark" {
+		return mode, nil
+	}
+	return "", &apperr.Error{Code: apperr.ParseFailed, Message: "simctl did not say the appearance", Argv: argv, Stderr: res.Stdout}
+}
+
+// SetAppearance switches a booted simulator to "light" or "dark".
+func (c *Client) SetAppearance(ctx context.Context, d device.Device, mode string) error {
+	if err := onlySimulator(d, "change the appearance"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "ui", d.ID, "appearance", mode}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, appearanceAction)
+}
 
 // OpenURL opens a link on a booted simulator, in the app that handles it.
 func (c *Client) OpenURL(ctx context.Context, d device.Device, link string) error {
-	if d.Platform != device.IOS || d.Kind != device.Simulator {
-		return apperr.New(apperr.Unsupported, "Cannot open a link on %s: only iOS simulators are supported", d.Name).
-			WithHint("Apple's tools cannot send a link to an iPhone.")
+	if err := onlySimulator(d, "open a link"); err != nil {
+		return err
 	}
 	argv := []string{"xcrun", "simctl", "openurl", d.ID, link}
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
@@ -529,9 +564,8 @@ func (c *Client) OpenURL(ctx context.Context, d device.Device, link string) erro
 
 // Screenshot saves a PNG of a booted simulator's screen to path.
 func (c *Client) Screenshot(ctx context.Context, d device.Device, path string) error {
-	if d.Platform != device.IOS || d.Kind != device.Simulator {
-		return apperr.New(apperr.Unsupported, "Cannot take a screenshot of %s: only iOS simulators are supported", d.Name).
-			WithHint("Apple's tools cannot take a screenshot of an iPhone.")
+	if err := onlySimulator(d, "take a screenshot"); err != nil {
+		return err
 	}
 	argv := []string{"xcrun", "simctl", "io", d.ID, "screenshot", "--type=png", path}
 	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, screenshotAction)

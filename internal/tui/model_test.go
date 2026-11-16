@@ -63,6 +63,8 @@ func (s *fakeSession) isStopped() bool {
 
 // fakeBackend records what the dashboard asks for.
 type fakeBackend struct {
+	// mode is the appearance every device reports.
+	mode     string
 	mu       sync.Mutex
 	calls    []string
 	devices  []device.Device
@@ -159,6 +161,15 @@ func (f *fakeBackend) Launch(_ context.Context, d device.Device, id string, o mo
 }
 func (f *fakeBackend) Stop(_ context.Context, d device.Device, id string) error {
 	return f.record("stop %s %s", d.ID, id)
+}
+func (f *fakeBackend) Appearance(_ context.Context, d device.Device) (string, error) {
+	if err := f.record("appearance %s", d.ID); err != nil {
+		return "", err
+	}
+	return f.mode, nil
+}
+func (f *fakeBackend) SetAppearance(_ context.Context, d device.Device, mode string) error {
+	return f.record("set-appearance %s %s", d.ID, mode)
 }
 func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
 	return f.record("link %s %s", d.ID, link)
@@ -2030,4 +2041,35 @@ func TestScreenshotsAndLinksNeedARunningDeviceThatIsNotAnIPhone(t *testing.T) {
 	if h.m.modal != nil {
 		t.Error("a window opened for an iPhone")
 	}
+}
+
+func TestMSwitchesBetweenDarkAndLightMode(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.mode = "light"
+	h.press("m")
+	h.wantCalls("set-appearance SIM-1 dark", 1)
+	h.wantScreen("Switched dark and light mode on iPhone 17")
+
+	h.backend.mode = "dark"
+	h.press("m")
+	h.wantCalls("set-appearance SIM-1 light", 1)
+
+	// A device that follows the time of day is put in dark mode.
+	h.backend.mode = "auto"
+	h.press("m")
+	h.wantCalls("set-appearance SIM-1 dark", 2)
+
+	h.backend.fail["set-appearance"] = apperr.New(apperr.CommandFailed, "Dark mode needs Android 10 or newer.")
+	h.press("m")
+	h.wantScreen("Could not finish: switching dark and light mode on iPhone 17", "Android 10")
+}
+
+func TestMNeedsARunningDeviceThatIsNotAnIPhone(t *testing.T) {
+	h := start(t, ipad, usbPhone)
+	h.press("m")
+	h.wantScreen("iPad Air is not running")
+	h.selectDevice(usbPhone)
+	h.press("m")
+	h.wantScreen("Test iPhone is an iPhone")
+	h.wantCalls("appearance", 0)
 }

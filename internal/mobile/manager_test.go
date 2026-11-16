@@ -478,3 +478,28 @@ func TestScreenshotNeverReplacesAFileOrWritesAnywhereUnexpected(t *testing.T) {
 }
 
 func second[T any](_ T, err error) error { return err }
+
+func TestAppearanceChecksTheDeviceAndTheModeBeforeAnyTool(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	stopped := simulator
+	stopped.State = device.Shutdown
+	_, readErr := m.Appearance(ctx, stopped)
+	for name, err := range map[string]error{
+		"reading a stopped device": readErr,
+		"setting a stopped device": m.SetAppearance(ctx, stopped, "dark"),
+		"a mode that is not one":   m.SetAppearance(ctx, simulator, "sepia"),
+		"an option as a mode":      m.SetAppearance(ctx, simulator, "-h"),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+	if err := m.SetAppearance(ctx, simulator, "light"); err != nil || !fake.Called("xcrun simctl ui SIM appearance light") {
+		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
+	}
+}

@@ -255,6 +255,35 @@ func (m *Manager) OpenLink(ctx context.Context, d device.Device, link string) er
 	return m.Android.OpenURL(ctx, d, link)
 }
 
+// Appearances are the modes SetAppearance takes.
+var Appearances = []string{"dark", "light"}
+
+// Appearance is the mode of a running simulator, emulator or Android phone: "dark" or "light", or
+// "auto" on an Android device that follows the time of day.
+func (m *Manager) Appearance(ctx context.Context, d device.Device) (string, error) {
+	if !d.Ready() {
+		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.Appearance(ctx, d)
+	}
+	return m.Android.Appearance(ctx, d)
+}
+
+// SetAppearance switches a running simulator, emulator or Android phone to dark or light.
+func (m *Manager) SetAppearance(ctx context.Context, d device.Device, mode string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if !slices.Contains(Appearances, mode) {
+		return apperr.New(apperr.InvalidState, "%q is not an appearance", mode).WithHint("Use dark or light.")
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.SetAppearance(ctx, d, mode)
+	}
+	return m.Android.SetAppearance(ctx, d, mode)
+}
+
 // ScreenshotName is a file name for a screenshot of d taken at now.
 func ScreenshotName(d device.Device, now time.Time) string {
 	name := strings.Trim(strings.Map(func(r rune) rune {

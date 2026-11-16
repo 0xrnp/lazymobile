@@ -637,3 +637,25 @@ func TestScreenshotOfASimulatorAsksForAPNG(t *testing.T) {
 		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
 	}
 }
+
+func TestAppearanceOfASimulatorIsReadAndSet(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl ui " + udidBooted + " appearance dark": {}, "simctl ui " + udidBooted + " appearance": runtest.Out("light\n")})
+	c := client(fake)
+	if mode, err := c.Appearance(context.Background(), bootedSim); err != nil || mode != "light" {
+		t.Errorf("mode = %q, error = %v", mode, err)
+	}
+	if err := c.SetAppearance(context.Background(), bootedSim, "dark"); err != nil || !fake.Called("xcrun simctl ui "+udidBooted+" appearance dark") {
+		t.Errorf("set: %v, calls %v", err, fake.Calls())
+	}
+}
+
+func TestAppearanceRefusesAnIPhoneAndNoticesAnAnswerItDoesNotKnow(t *testing.T) {
+	none := runtest.Table(map[string]run.Result{})
+	if _, err := client(none).Appearance(context.Background(), iphone); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	}
+	odd := runtest.Table(map[string]run.Result{"simctl ui": runtest.Out("unsupported\n")})
+	if _, err := client(odd).Appearance(context.Background(), bootedSim); apperr.CodeOf(err) != apperr.ParseFailed {
+		t.Errorf("an unknown answer: %v", err)
+	}
+}

@@ -37,7 +37,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 ## Commands that change a device
 
-`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link` and `screenshot` print:
+`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link`, `screenshot` and `appearance` (with a mode) print:
 
 ```json
 {
@@ -54,7 +54,11 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 - `warnings` is a list of sentences, set when the action worked but left something behind, such as
   Simulator staying open after `shutdown`.
 
-`id` prints `{"device": {...}, "id": "emulator-5554"}`.
+`appearance` also has `appearance`, the mode it switched to (`dark` or `light`).
+
+`id` prints `{"device": {...}, "id": "emulator-5554"}`. `appearance` without a mode prints
+`{"device": {...}, "appearance": "dark"}`, where Android can also say `auto` for a device that
+follows the time of day.
 
 ## Commands that read
 

@@ -654,6 +654,56 @@ func (c *Client) OpenURL(ctx context.Context, d device.Device, link string) erro
 	return apperr.FromResult(res, argv, installHint["adb"])
 }
 
+var nightMode = regexp.MustCompile(`Night mode:\s*(\w+)`)
+
+// Appearance is "dark", "light", or "auto" when the device follows the time of day. It needs
+// Android 10 or newer.
+func (c *Client) Appearance(ctx context.Context, d device.Device) (string, error) {
+	adb, err := c.runningDevice(d)
+	if err != nil {
+		return "", err
+	}
+	argv := []string{adb, "-s", d.TargetID(), "shell", "cmd", "uimode", "night"}
+	res := c.run(ctx, argv, actionTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return "", err
+	}
+	m := nightMode.FindStringSubmatch(res.Stdout)
+	if m == nil {
+		return "", &apperr.Error{Code: apperr.ParseFailed, Message: "The device did not say its night mode", Hint: "Dark mode needs Android 10 or newer.", Argv: argv, Stderr: res.Stdout}
+	}
+	switch m[1] {
+	case "yes":
+		return "dark", nil
+	case "no":
+		return "light", nil
+	}
+	return "auto", nil
+}
+
+// SetAppearance switches a running emulator or phone to "dark" or "light".
+func (c *Client) SetAppearance(ctx context.Context, d device.Device, mode string) error {
+	adb, err := c.runningDevice(d)
+	if err != nil {
+		return err
+	}
+	night := "no"
+	if mode == "dark" {
+		night = "yes"
+	}
+	argv := []string{adb, "-s", d.TargetID(), "shell", "cmd", "uimode", "night", night}
+	res := c.run(ctx, argv, actionTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return err
+	}
+	// Android before 10 has no such command, and adb still exits 0.
+	if !nightMode.MatchString(res.Stdout) {
+		return &apperr.Error{Code: apperr.CommandFailed, Message: "The device did not change its night mode: " + strings.TrimSpace(res.Stdout+res.Stderr),
+			Hint: "Dark mode needs Android 10 or newer.", Argv: argv}
+	}
+	return nil
+}
+
 var pngSignature = "\x89PNG\r\n\x1a\n"
 
 // Screenshot returns a PNG of a running emulator's or phone's screen.
