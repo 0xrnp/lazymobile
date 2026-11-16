@@ -5,6 +5,9 @@ package mobile
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -225,6 +228,88 @@ func appTarget(d device.Device, id string) error {
 			WithHint("Use a package name or bundle id, such as com.example.app.")
 	}
 	return nil
+}
+
+var linkPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:[^\x00-\x20\x7f]+$`)
+
+// ValidLink reports whether link looks like a web address or a deep link: a scheme, a colon, and
+// no spaces or control characters. An Android phone hands it to its shell, so nothing odder than
+// that goes any further.
+func ValidLink(link string) bool {
+	return len(link) <= 2048 && linkPattern.MatchString(link)
+}
+
+// OpenLink opens a web address or deep link on a running simulator, emulator or Android phone, in
+// the app that handles it. No app for it is a not_found error.
+func (m *Manager) OpenLink(ctx context.Context, d device.Device, link string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if !ValidLink(link) {
+		return apperr.New(apperr.InvalidState, "That does not look like a link: %s", link).
+			WithHint("Use a whole link such as myapp://home?id=1 or https://example.com. Write a space as %%20.")
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.OpenURL(ctx, d, link)
+	}
+	return m.Android.OpenURL(ctx, d, link)
+}
+
+// ScreenshotName is a file name for a screenshot of d taken at now.
+func ScreenshotName(d device.Device, now time.Time) string {
+	name := strings.Trim(strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_':
+			return r
+		}
+		return '-'
+	}, d.Name), "-")
+	return fmt.Sprintf("lazymobile-%s-%s.png", name, now.Format("20060102-150405"))
+}
+
+// Screenshot saves a PNG of a running simulator's, emulator's or Android phone's screen, and
+// returns the full path. It never replaces a file, and only the user can read the result, since a
+// screen can show personal data.
+func (m *Manager) Screenshot(ctx context.Context, d device.Device, path string) (string, error) {
+	if !d.Ready() {
+		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", apperr.New(apperr.InvalidState, "That does not look like a file name: %v", err)
+	}
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || !info.IsDir() {
+		return "", apperr.New(apperr.InvalidState, "The folder %s does not exist", filepath.Dir(path)).WithHint("Choose a file in a folder that exists.")
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return "", apperr.New(apperr.InvalidState, "%s already exists", path).WithHint("Choose another name: a screenshot never replaces a file.")
+	}
+	if d.Platform == device.IOS {
+		if err := m.IOS.Screenshot(ctx, d, path); err != nil {
+			return "", err
+		}
+		// simctl writes the file with the default permissions.
+		if err := os.Chmod(path, 0o600); err != nil {
+			return "", apperr.New(apperr.CommandFailed, "Could not restrict %s: %v", path, err)
+		}
+		return path, nil
+	}
+	png, err := m.Android.Screenshot(ctx, d)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", apperr.New(apperr.CommandFailed, "Could not save the screenshot: %v", err)
+	}
+	if _, err := file.Write(png); err != nil {
+		file.Close()
+		return "", apperr.New(apperr.CommandFailed, "Could not save the screenshot: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", apperr.New(apperr.CommandFailed, "Could not save the screenshot: %v", err)
+	}
+	return path, nil
 }
 
 // LogDeps are the tools a log session needs.

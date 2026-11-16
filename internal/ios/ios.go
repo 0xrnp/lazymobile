@@ -502,6 +502,41 @@ func (c *Client) Stop(ctx context.Context, d device.Device, bundleID string) err
 	return apperr.New(apperr.Unsupported, "Cannot stop an app on %s: only iOS devices are supported", d.Name)
 }
 
+var (
+	openURLAction    = action{verb: "open a link", hint: "Boot it first."}
+	screenshotAction = action{verb: "take a screenshot", hint: "Boot it first."}
+)
+
+// OpenURL opens a link on a booted simulator, in the app that handles it.
+func (c *Client) OpenURL(ctx context.Context, d device.Device, link string) error {
+	if d.Platform != device.IOS || d.Kind != device.Simulator {
+		return apperr.New(apperr.Unsupported, "Cannot open a link on %s: only iOS simulators are supported", d.Name).
+			WithHint("Apple's tools cannot send a link to an iPhone.")
+	}
+	argv := []string{"xcrun", "simctl", "openurl", d.ID, link}
+	res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
+	// simctl exits 115 when no app handles the link's scheme.
+	if res.Code == 115 && strings.Contains(res.Stderr, "LSApplicationWorkspaceErrorDomain") {
+		return &apperr.Error{
+			Code:    apperr.NotFound,
+			Message: fmt.Sprintf("No app on %s opens that link", d.Name),
+			Hint:    "Check the link's scheme, and that the app is installed.",
+			Argv:    argv, ExitCode: res.Code, Stderr: res.Stderr,
+		}
+	}
+	return actionError(res, argv, openURLAction)
+}
+
+// Screenshot saves a PNG of a booted simulator's screen to path.
+func (c *Client) Screenshot(ctx context.Context, d device.Device, path string) error {
+	if d.Platform != device.IOS || d.Kind != device.Simulator {
+		return apperr.New(apperr.Unsupported, "Cannot take a screenshot of %s: only iOS simulators are supported", d.Name).
+			WithHint("Apple's tools cannot take a screenshot of an iPhone.")
+	}
+	argv := []string{"xcrun", "simctl", "io", d.ID, "screenshot", "--type=png", path}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, screenshotAction)
+}
+
 func notInstalledApp(d device.Device, bundleID string, argv []string, res run.Result) error {
 	return &apperr.Error{
 		Code:    apperr.NotFound,

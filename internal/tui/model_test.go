@@ -160,6 +160,12 @@ func (f *fakeBackend) Launch(_ context.Context, d device.Device, id string, o mo
 func (f *fakeBackend) Stop(_ context.Context, d device.Device, id string) error {
 	return f.record("stop %s %s", d.ID, id)
 }
+func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
+	return f.record("link %s %s", d.ID, link)
+}
+func (f *fakeBackend) Screenshot(_ context.Context, d device.Device, path string) (string, error) {
+	return path, f.record("screenshot %s %s", d.ID, path)
+}
 func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
 	if err := f.record("apps %s", d.ID); err != nil {
 		return nil, err
@@ -1258,7 +1264,8 @@ func TestTheDashboardStaysVisibleBehindAWindow(t *testing.T) {
 	h := start(t, iphone, pixel)
 	h.press("?")
 	screen := h.screen()
-	for _, want := range []string{"Keys", "Boot a simulator", "Devices", "Everywhere"} {
+	// The menu scrolls, so only what comes first is on screen. keys_test.go checks the sections.
+	for _, want := range []string{"Keys", "Boot a simulator", "Devices"} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen should show %q:\n%s", want, screen)
 		}
@@ -1976,5 +1983,51 @@ func TestCrashLinesAreBoldRedWhereErrorsAreNot(t *testing.T) {
 	}
 	if crash.GetForeground() != plain.GetForeground() {
 		t.Error("a crash stays red")
+	}
+}
+
+func TestPSavesAScreenshotInTheCurrentFolder(t *testing.T) {
+	h := start(t, pixel)
+	h.press("p")
+	h.wantCalls("screenshot Pixel_9a lazymobile-Pixel-9a-", 1)
+	h.wantScreen("Saved lazymobile-Pixel-9a-", ".png from Pixel 9a")
+
+	h.backend.fail["screenshot"] = apperr.New(apperr.InvalidState, "x.png already exists")
+	h.press("p")
+	h.wantScreen("Could not finish: taking a screenshot of Pixel 9a", "already exists")
+}
+
+func TestTOpensALinkAfterAskingForIt(t *testing.T) {
+	h := start(t, iphone)
+	h.press("t")
+	h.wantScreen("Open a link on iPhone 17", "myapp://home?id=1")
+	h.typeText("not a link")
+	h.press("enter")
+	h.wantScreen("Not a whole link")
+	h.wantCalls("link", 0)
+
+	h.press("ctrl+u")
+	h.typeText("myapp://home?id=1&x=2")
+	h.press("enter")
+	h.wantCalls("link SIM-1 myapp://home?id=1&x=2", 1)
+	h.wantScreen("Opened a link on iPhone 17")
+}
+
+func TestScreenshotsAndLinksNeedARunningDeviceThatIsNotAnIPhone(t *testing.T) {
+	h := start(t, ipad, usbPhone)
+	h.press("p")
+	h.wantScreen("iPad Air is not running")
+	h.press("t")
+	h.wantScreen("iPad Air is not running")
+
+	h.selectDevice(usbPhone)
+	h.press("p")
+	h.wantScreen("Test iPhone is an iPhone: Apple's tools cannot do this from here")
+	h.press("t")
+	h.wantScreen("Test iPhone is an iPhone")
+	h.wantCalls("screenshot", 0)
+	h.wantCalls("link", 0)
+	if h.m.modal != nil {
+		t.Error("a window opened for an iPhone")
 	}
 }

@@ -68,6 +68,17 @@ func running(d device.Device) string {
 	return ""
 }
 
+// screenFeature is why d cannot show a screenshot or open a link, or "" when it can.
+func screenFeature(d device.Device) string {
+	switch {
+	case !d.Ready():
+		return d.Name + " is not running"
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		return d.Name + " is an iPhone: Apple's tools cannot do this from here"
+	}
+	return ""
+}
+
 func needsLog(m *Model) string {
 	if m.logCount() == 0 {
 		return "No log is open: press l on a running device"
@@ -106,6 +117,10 @@ var keyTable = []keyAction{
 		when: selectedDevice(running)},
 	{id: "app", ctx: ctxDevices, keys: []string{"o"}, show: "o", desc: "Launch, restart or stop an app",
 		when: selectedDevice(running)},
+	{id: "screenshot", ctx: ctxDevices, keys: []string{"p"}, show: "p", desc: "Save a screenshot in this folder",
+		when: selectedDevice(screenFeature)},
+	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",
+		when: selectedDevice(screenFeature)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",
 		footer: func(m *Model) string {
 			if m.logCount() > 0 {

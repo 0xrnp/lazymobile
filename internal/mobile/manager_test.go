@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/apperr"
@@ -346,3 +348,133 @@ func TestOnlyDarwinHasIOS(t *testing.T) {
 		t.Error("Linux has no iOS")
 	}
 }
+
+func TestValidLinkNeedsASchemeAndNothingThatWouldBreakAShell(t *testing.T) {
+	for _, link := range []string{"https://example.com", "myapp://home?id=1&x=2#top", "exp+myapp://x", "tel:+1555", "mailto:a@b.c"} {
+		if !ValidLink(link) {
+			t.Errorf("%q should be a link", link)
+		}
+	}
+	for _, link := range []string{"", "example.com", "://x", "-a Calculator", "myapp://a b", "myapp://a\nb", "myapp://a\x00b", "1app://x", "https://" + strings.Repeat("a", 3000)} {
+		if ValidLink(link) {
+			t.Errorf("%q should not be a link", link)
+		}
+	}
+}
+
+func TestOpenLinkChecksTheDeviceAndTheLinkBeforeAnyTool(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	stopped := simulator
+	stopped.State = device.Shutdown
+	for name, err := range map[string]error{
+		"a stopped device":      m.OpenLink(ctx, stopped, "https://example.com"),
+		"a link with a space":   m.OpenLink(ctx, emulator, "myapp://a b"),
+		"an option as a link":   m.OpenLink(ctx, simulator, "-a Calculator"),
+		"a link with a newline": m.OpenLink(ctx, emulator, "myapp://a\nreboot"),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+	if err := m.OpenLink(ctx, emulator, "myapp://home?a=1&b=2"); err != nil || !fake.Called("adb -s emulator-5554 shell am start") {
+		t.Errorf("an emulator: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.OpenLink(ctx, simulator, "myapp://home"); err != nil || !fake.Called("xcrun simctl openurl SIM myapp://home") {
+		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
+	}
+}
+
+func TestScreenshotNameIsSafeForAFileSystem(t *testing.T) {
+	d := device.Device{Name: "iPad Pro 13-inch (M5)"}
+	got := ScreenshotName(d, time.Date(2026, 11, 16, 7, 50, 32, 0, time.UTC))
+	if got != "lazymobile-iPad-Pro-13-inch--M5-20261116-075032.png" {
+		t.Errorf("name = %q", got)
+	}
+	if got := ScreenshotName(device.Device{Name: "../etc/x"}, time.Time{}); strings.ContainsAny(got, "/\\") {
+		t.Errorf("name = %q", got)
+	}
+}
+
+// screenshotManager answers screencap with a PNG and simctl with a file, as the real tools do.
+func screenshotManager(t *testing.T) (*Manager, *runtest.Fake) {
+	t.Helper()
+	m, _ := manager(t, "darwin")
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		switch {
+		case strings.Contains(command, "exec-out screencap -p"):
+			return runtest.Out("\x89PNG\r\n\x1a\nbytes")
+		case strings.Contains(command, "simctl io"):
+			if err := os.WriteFile(argv[len(argv)-1], []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+				t.Error(err)
+			}
+		}
+		return run.Result{}
+	}}
+	m.Runner, m.IOS.Runner = fake, fake
+	opts := android.Options{
+		OS: "darwin", Home: t.TempDir(), Getenv: func(string) string { return "" },
+		LookPath:     func(string) (string, error) { return "/usr/bin/adb", nil },
+		SDKFallbacks: []string{}, JavaFallbacks: []string{},
+	}
+	m.Android = android.New(fake, opts)
+	return m, fake
+}
+
+func TestScreenshotIsSavedForTheUserAlone(t *testing.T) {
+	m, _ := screenshotManager(t)
+	dir := t.TempDir()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	for _, d := range []device.Device{emulator, simulator} {
+		path, err := m.Screenshot(context.Background(), d, filepath.Join(dir, string(d.Platform)+".png"))
+		if err != nil {
+			t.Fatalf("%s: %v", d.Name, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0o600 || info.Size() == 0 {
+			t.Errorf("%s: file %v, error %v", d.Name, info, err)
+		}
+	}
+}
+
+func TestScreenshotNeverReplacesAFileOrWritesAnywhereUnexpected(t *testing.T) {
+	m, fake := screenshotManager(t)
+	dir := t.TempDir()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	stopped := emulator
+	stopped.State = device.Shutdown
+	existing := filepath.Join(dir, "mine.png")
+	if err := os.WriteFile(existing, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, err := range map[string]error{
+		"a file that exists": second(m.Screenshot(context.Background(), emulator, existing)),
+		"a missing folder":   second(m.Screenshot(context.Background(), emulator, filepath.Join(dir, "no", "x.png"))),
+		"a stopped device":   second(m.Screenshot(context.Background(), stopped, filepath.Join(dir, "a.png"))),
+		"an iPhone":          second(m.Screenshot(context.Background(), iphone, filepath.Join(dir, "b.png"))),
+	} {
+		code := apperr.CodeOf(err)
+		if code != apperr.InvalidState && code != apperr.Unsupported {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got, _ := os.ReadFile(existing); string(got) != "precious" {
+		t.Errorf("the file was replaced: %q", got)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("files left behind: %v", entries)
+	}
+	if fake.Called("simctl io") {
+		t.Errorf("a tool ran for a refused screenshot: %v", fake.Calls())
+	}
+}
+
+func second[T any](_ T, err error) error { return err }

@@ -52,6 +52,11 @@ func newEnv(t *testing.T) *env {
 			return runtest.Out("{}")
 		case strings.HasPrefix(command, "plutil -convert json"):
 			return runtest.Out(`{"com.example.installed": {"ApplicationType": "User", "CFBundleDisplayName": "Installed"}, "com.apple.mobilesafari": {"ApplicationType": "System"}}`)
+		case strings.Contains(command, "simctl io"):
+			if err := os.WriteFile(argv[len(argv)-1], []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+				t.Error(err)
+			}
+			return run.Result{}
 		case strings.HasPrefix(command, "xcrun simctl"), strings.HasPrefix(command, "open "):
 			return run.Result{}
 		case strings.HasPrefix(command, "xcode-select"):
@@ -672,5 +677,85 @@ func TestListWithJSONKeepsItsErrorsInTheSameShape(t *testing.T) {
 		if p.(map[string]any)["code"] == nil {
 			t.Errorf("an error without a code: %v", p)
 		}
+	}
+}
+
+func TestLinkOpensAWebAddressOrADeepLink(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("link", "iPhone 16 Pro", "myapp://home?id=1&x=2"); code != ExitOK ||
+		!e.fake.Called("simctl openurl 00000000-0000-4000-8000-0000000000A2 myapp://home?id=1&x=2") ||
+		!strings.Contains(e.out.String(), "Opened myapp://home?id=1&x=2 on iPhone 16 Pro") {
+		t.Errorf("code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("link", "iPhone 16 Pro", "https://example.com", "--json"); code != ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	if out := e.object(t); out["action"] != "link" || out["url"] != "https://example.com" || out["ok"] != true {
+		t.Errorf("printed %v", out)
+	}
+}
+
+func TestLinkUsageAndRefusals(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"link"}, {"link", "iPhone 16 Pro"}, {"link", "iPhone 16 Pro", "a", "b"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	for _, args := range [][]string{
+		{"link", "iPhone 16", "https://example.com"}, // not running
+		{"link", "iPhone 16 Pro", "not a link"},      // a bad link
+	} {
+		if code := e.run(args...); code != ExitFailure {
+			t.Errorf("%v: code %d, want %d", args, code, ExitFailure)
+		}
+	}
+	// Something that looks like a flag is a typing mistake, and never reaches a device.
+	if code := e.run("link", "iPhone 16 Pro", "-a Calculator"); code != ExitUsage {
+		t.Errorf("an option as a link: code %d, want %d", code, ExitUsage)
+	}
+	if e.fake.Called("openurl") {
+		t.Errorf("a link was opened: %v", e.fake.Calls())
+	}
+}
+
+func TestScreenshotSavesAPNGAndNeverReplacesAFile(t *testing.T) {
+	e := newEnv(t)
+	path := filepath.Join(t.TempDir(), "shot.png")
+	if code := e.run("screenshot", "iPhone 16 Pro", "--out", path); code != ExitOK || !strings.Contains(e.out.String(), "Saved "+path) {
+		t.Fatalf("code %d, out %q, stderr %q", code, e.out.String(), e.errs.String())
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("file %v, error %v", info, err)
+	}
+	if code := e.run("screenshot", "iPhone 16 Pro", "--out", path, "--json"); code != ExitFailure {
+		t.Errorf("a file that exists: code %d", code)
+	}
+	if failure, _ := e.object(t)["error"].(map[string]any); failure["code"] != "invalid_state" || failure["hint"] == nil {
+		t.Errorf("printed %v", e.out.String())
+	}
+	other := filepath.Join(t.TempDir(), "other.png")
+	if code := e.run("screenshot", "iPhone 16 Pro", "--out", other, "--json"); code != ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	if out := e.object(t); out["action"] != "screenshot" || out["path"] != other {
+		t.Errorf("printed %v", out)
+	}
+	if code := e.run("screenshot"); code != ExitUsage {
+		t.Errorf("without a device: code %d", code)
+	}
+}
+
+func TestScreenshotWithoutAFileNameGoesInTheCurrentFolderUnderADatedName(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if code := e.run("screenshot", "iPhone 16 Pro"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "lazymobile-iPhone-16-Pro-*.png"))
+	if len(matches) != 1 {
+		t.Errorf("files %v, out %q", matches, e.out.String())
 	}
 }

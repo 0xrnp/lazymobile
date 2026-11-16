@@ -41,6 +41,8 @@ type Backend interface {
 	Uninstall(ctx context.Context, d device.Device, id string) error
 	Launch(ctx context.Context, d device.Device, id string, opts mobile.LaunchOptions) error
 	Stop(ctx context.Context, d device.Device, id string) error
+	OpenLink(ctx context.Context, d device.Device, link string) error
+	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
@@ -863,6 +865,10 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.pickUninstall(d)
 	case "o":
 		return m.pickAppAction(d)
+	case "p":
+		return m.screenshot(d)
+	case "t":
+		return m.openLink(d)
 	case "x":
 		if d.Platform == device.Android && d.Transport == "wifi" {
 			return m.act(d, "Disconnecting", "Disconnected", isGone, func(ctx context.Context) error {

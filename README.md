@@ -33,6 +33,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Boot, cold boot, shut down, erase, create and delete simulators and emulators.
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Launch, restart or stop an app on a running device.
+- Open a deep link, and take a screenshot, on a simulator, emulator or Android phone.
 - Connect Android phones over Wi-Fi (pairing code or address).
 - Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
   many logs as you like, side by side or stacked, to read several devices at once.
@@ -64,6 +65,7 @@ Early release. What has been run, and what has not:
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
 | Crash marking | A real crash of an Android 16 emulator's Settings app (`am crash`), streamed with `logs --json`: the report's lines were marked. The `e` keys in the dashboard, only with fake log lines. Not run: an iOS crash, a React Native error, a native signal. Their patterns come from known log formats |
+| Links and screenshots | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: a web address with `&` in it, a link no app handles, a PNG saved, and a second screenshot to the same file refused. The dashboard keys `p` and `t`, only with fake tools. Not run: an Android phone, other Xcode or Android versions |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -123,6 +125,8 @@ Devices:
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
 | `o` | Launch, restart or stop an app: pick one, then pick what to do. An iPhone's apps can be launched and restarted, not stopped |
+| `p` | Save a screenshot, a PNG, in the folder lazymobile was started in. Not for an iPhone |
+| `t` | Open a web address or deep link, such as `myapp://home?id=1`. Not for an iPhone |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
 | `n` | New simulator or emulator |
 | `y` | Copy the id for `adb -s`, `flutter -d`, `xcrun` |
@@ -237,8 +241,11 @@ only by you. Delete the file to forget it all.
 ## Safety
 
 - Erase, delete, wipe and uninstall always ask first. Real phones are never booted, shut down,
-  erased or deleted. Uninstalling an app is the one change allowed on them, and only for an app
-  you installed: the apps that come with the system are not listed and are refused.
+  erased or deleted. On them lazymobile only uninstalls an app (only one you installed: the apps
+  that come with the system are refused), launches, restarts or stops an app, and, on an Android
+  phone, opens a link or takes a screenshot.
+- A screenshot never replaces a file, and is readable only by you, since a screen can show
+  personal data. A link is checked before it reaches an Android phone's shell.
 - The builds pane does not run `eas` until you press `enter` in it. `eas` runs your project's
   own configuration code and uses your Expo login, so it is never started just by opening the
   dashboard.
@@ -262,6 +269,8 @@ lazymobile uninstall "Pixel 9a" com.example.app --yes   # the app and its data
 lazymobile install "Pixel 9a" ./app.apk
 lazymobile launch "Pixel 9a" com.example.app [--restart]
 lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
+lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
+lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
 lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS

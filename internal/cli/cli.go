@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
@@ -48,6 +49,8 @@ Usage:
   lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
+  lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
+  lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
@@ -174,6 +177,7 @@ type result struct {
 	Device   device.Device `json:"device"`
 	App      string        `json:"app,omitempty"`
 	Path     string        `json:"path,omitempty"`
+	URL      string        `json:"url,omitempty"`
 	Warnings []string      `json:"warnings,omitempty"`
 }
 
@@ -217,6 +221,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.launch(ctx, rest)
 	case "stop":
 		return a.stop(ctx, rest)
+	case "link":
+		return a.link(ctx, rest)
+	case "screenshot":
+		return a.screenshot(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":
@@ -439,6 +447,44 @@ func (a *App) launch(ctx context.Context, args []string) error {
 		action, done = "restart", "Restarted"
 	}
 	return a.done(*asJSON, result{Action: action, Device: d, App: app}, fmt.Sprintf("%s %s on %s", done, app, d.Name))
+}
+
+func (a *App) link(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("link", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 {
+		return usageError{"link needs a device and a link"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if err := a.Manager.OpenLink(ctx, d, positional[1]); err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "link", Device: d, URL: positional[1]}, fmt.Sprintf("Opened %s on %s", positional[1], d.Name))
+}
+
+func (a *App) screenshot(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("screenshot", flag.ContinueOnError)
+	out := fs.String("out", "", "")
+	asJSON := fs.Bool("json", false, "")
+	d, err := a.one(ctx, fs, args, "screenshot")
+	if err != nil {
+		return err
+	}
+	if *out == "" {
+		*out = mobile.ScreenshotName(d, time.Now())
+	}
+	path, err := a.Manager.Screenshot(ctx, d, *out)
+	if err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "screenshot", Device: d, Path: path}, "Saved "+path)
 }
 
 func (a *App) stop(ctx context.Context, args []string) error {

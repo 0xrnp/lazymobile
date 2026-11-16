@@ -37,7 +37,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 ## Commands that change a device
 
-`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch` and `stop` print:
+`boot`, `shutdown`, `erase`, `delete`, `install`, `uninstall`, `launch`, `stop`, `link` and `screenshot` print:
 
 ```json
 {
@@ -50,7 +50,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 - `action` is the command, except that `launch --restart` is `restart`.
 - `device` is the device as it was found, so its `state` is from before the action.
-- `app` is set for `uninstall`, `launch`, `restart` and `stop`. `path` is set for `install`.
+- `app` is set for `uninstall`, `launch`, `restart` and `stop`. `url` is set for `link`. `path` is set for `install` (the file given) and `screenshot` (the full path of the PNG that was saved).
 - `warnings` is a list of sentences, set when the action worked but left something behind, such as
   Simulator staying open after `shutdown`.
 

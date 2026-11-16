@@ -159,6 +159,45 @@ func (m *Model) offerAppActions(d device.Device, choices []state.AppChoice, know
 	}
 }
 
+// screenshot saves a PNG of the selected device's screen in the folder lazymobile was started in.
+func (m *Model) screenshot(d device.Device) tea.Cmd {
+	if problem := screenFeature(d); problem != "" {
+		m.setNote(problem, true)
+		return nil
+	}
+	name := mobile.ScreenshotName(d, m.now())
+	backend := m.backend
+	return m.act(d, "Taking a screenshot of", "Saved "+name+" from", nil, func(ctx context.Context) error {
+		_, err := backend.Screenshot(ctx, d, name)
+		return err
+	})
+}
+
+// openLink asks for a web address or deep link, and opens it on the selected device.
+func (m *Model) openLink(d device.Device) tea.Cmd {
+	if problem := screenFeature(d); problem != "" {
+		m.setNote(problem, true)
+		return nil
+	}
+	m.modal = &modal{
+		kind: modalPrompt, title: "Open a link on " + d.Name,
+		body: "A web address, or a deep link into an app, such as myapp://home?id=1.",
+		validate: func(value string) string {
+			if !mobile.ValidLink(value) {
+				return "Not a whole link: it needs a scheme such as https://, and no spaces."
+			}
+			return ""
+		},
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			backend := m.backend
+			return m.act(d, "Opening a link on", "Opened a link on", nil, func(ctx context.Context) error {
+				return backend.OpenLink(ctx, d, value)
+			})
+		},
+	}
+	return nil
+}
+
 // appAction is one thing that can be done to an app on a device.
 type appAction struct {
 	label, doing, done string

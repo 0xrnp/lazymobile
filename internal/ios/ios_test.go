@@ -586,3 +586,54 @@ func TestStopOnAnIPhoneIsRefusedWithoutAskingIt(t *testing.T) {
 		t.Errorf("the phone was asked: %v", calls)
 	}
 }
+
+// What simctl of Xcode 27.2 printed for a link that no app opens (exit code 115) and for a
+// screenshot.
+const (
+	simctlOpenURLUnknown = `An error was encountered processing the command (domain=LSApplicationWorkspaceErrorDomain, code=115):
+Simulator device failed to open nosuchscheme://x.
+Underlying error (domain=LSApplicationWorkspaceErrorDomain, code=115):
+	The operation couldn’t be completed. (LSApplicationWorkspaceErrorDomain error 115.)
+`
+	simctlScreenshotNote = "Note: No display specified. Defaulting to display: 2C9C7E61-DE00-4779-990F-554225539EF7 (screenID: 1, name: LCD)\nWrote screenshot to: /tmp/x.png\n"
+)
+
+func TestOpenURLOnASimulator(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl openurl": {}})
+	if err := client(fake).OpenURL(context.Background(), bootedSim, "myapp://home?id=1&x=2"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("xcrun simctl openurl " + udidBooted + " myapp://home?id=1&x=2") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+}
+
+func TestOpenURLNoAppHandlesSaysSoAndAnIPhoneIsRefused(t *testing.T) {
+	unknown := runtest.Table(map[string]run.Result{"simctl openurl": runtest.Fail(115, simctlOpenURLUnknown)})
+	err := client(unknown).OpenURL(context.Background(), bootedSim, "nosuchscheme://x")
+	if apperr.CodeOf(err) != apperr.NotFound || !strings.Contains(err.Error(), "No app on iPhone 16 opens that link") {
+		t.Errorf("an unknown scheme: %v", err)
+	}
+	shut := runtest.Table(map[string]run.Result{"simctl openurl": runtest.Fail(149, "Unable to lookup in current state: Shutdown")})
+	if err := client(shut).OpenURL(context.Background(), shutdownSim, "https://example.com"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("a shut-down simulator: %v", err)
+	}
+	fake := runtest.Table(map[string]run.Result{})
+	if err := client(fake).OpenURL(context.Background(), iphone, "https://example.com"); apperr.CodeOf(err) != apperr.Unsupported || len(fake.Calls()) != 0 {
+		t.Errorf("an iPhone: %v, calls %v", err, fake.Calls())
+	}
+}
+
+func TestScreenshotOfASimulatorAsksForAPNG(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl io": runtest.Out(simctlScreenshotNote)})
+	if err := client(fake).Screenshot(context.Background(), bootedSim, "/tmp/x.png"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("xcrun simctl io " + udidBooted + " screenshot --type=png /tmp/x.png") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+	none := runtest.Table(map[string]run.Result{})
+	if err := client(none).Screenshot(context.Background(), iphone, "/tmp/x.png"); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	}
+}

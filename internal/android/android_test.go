@@ -708,3 +708,68 @@ func TestLaunchAndStopRefuseBeforeAskingTheDevice(t *testing.T) {
 		t.Errorf("the device was asked: %v", calls)
 	}
 }
+
+// What am printed on a real Android 16 emulator for a link an app opened, and for one that no app
+// handles (exit code 1).
+const (
+	amStarted          = "Starting: Intent { act=android.intent.action.VIEW dat=https://example.com/... }\n"
+	amUnableToResolve  = "Starting: Intent { act=android.intent.action.VIEW dat=nosuchscheme://x/... }\nError: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=nosuchscheme://x/... flg=0x10000000 xflg=0x4 }\n"
+	pngBytesForTesting = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\r\n\n\r\n"
+)
+
+func TestOpenURLQuotesTheLinkForTheDevicesShell(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell am start": runtest.Out(amStarted)})
+	c := New(fake, sdk(t, "adb"))
+	for link, want := range map[string]string{
+		"https://example.com/a?b=1&c=2": `-d 'https://example.com/a?b=1&c=2'`,
+		"myapp://it's":                  `-d 'myapp://it'\''s'`,
+		"myapp://x;reboot":              `-d 'myapp://x;reboot'`,
+	} {
+		if err := c.OpenURL(context.Background(), runningEmulator, link); err != nil {
+			t.Fatal(err)
+		}
+		if got := fake.Calls()[len(fake.Calls())-1]; !strings.Contains(got, "-s emulator-5554 shell am start -a android.intent.action.VIEW "+want) {
+			t.Errorf("ran %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+func TestOpenURLNoAppHandlesSaysSo(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell am start": {Code: 1, Stdout: amUnableToResolve}})
+	err := New(fake, sdk(t, "adb")).OpenURL(context.Background(), runningEmulator, "nosuchscheme://x")
+	if apperr.CodeOf(err) != apperr.NotFound || !strings.Contains(err.Error(), "No app on Pixel 9a opens that link") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestScreenshotReturnsThePNGAsItIs(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"exec-out screencap -p": runtest.Out(pngBytesForTesting)})
+	png, err := New(fake, sdk(t, "adb")).Screenshot(context.Background(), runningEmulator)
+	if err != nil || string(png) != pngBytesForTesting {
+		t.Errorf("png = %q, error = %v", png, err)
+	}
+	if !fake.Called("adb -s emulator-5554 exec-out screencap -p") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+
+	notPNG := runtest.Table(map[string]run.Result{"exec-out screencap -p": runtest.Out("error: closed")})
+	if _, err := New(notPNG, sdk(t, "adb")).Screenshot(context.Background(), runningEmulator); apperr.CodeOf(err) != apperr.ParseFailed {
+		t.Errorf("something that is not a PNG: %v", err)
+	}
+}
+
+func TestOpenURLAndScreenshotRefuseADeviceThatIsNotRunning(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	offline := runningEmulator
+	offline.State = device.Offline
+	c := New(fake, sdk(t, "adb"))
+	_, shotErr := c.Screenshot(context.Background(), offline)
+	for name, err := range map[string]error{"link": c.OpenURL(context.Background(), offline, "https://example.com"), "screenshot": shotErr} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("the device was asked: %v", fake.Calls())
+	}
+}

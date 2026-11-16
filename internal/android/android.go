@@ -621,6 +621,59 @@ func (c *Client) forceStop(ctx context.Context, adb string, d device.Device, id 
 	return apperr.FromResult(c.run(ctx, argv, actionTimeout), argv, installHint["adb"])
 }
 
+// shellQuote makes s one word for the device's shell, which adb hands its `shell` arguments to.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// runningDevice checks that d is a running Android device, and returns the path of adb.
+func (c *Client) runningDevice(d device.Device) (string, error) {
+	if d.Platform != device.Android || !d.Ready() {
+		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name)
+	}
+	return c.Opts.tool("adb")
+}
+
+// OpenURL opens a link on a running emulator or phone, in the app that handles it.
+func (c *Client) OpenURL(ctx context.Context, d device.Device, link string) error {
+	adb, err := c.runningDevice(d)
+	if err != nil {
+		return err
+	}
+	argv := []string{adb, "-s", d.TargetID(), "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", shellQuote(link)}
+	res := c.run(ctx, argv, actionTimeout)
+	// am exits 1 and says so when no app handles the link.
+	if strings.Contains(res.Stdout+res.Stderr, "unable to resolve Intent") {
+		return &apperr.Error{
+			Code:    apperr.NotFound,
+			Message: fmt.Sprintf("No app on %s opens that link", d.Name),
+			Hint:    "Check the link's scheme, and that the app is installed.",
+			Argv:    argv, ExitCode: res.Code,
+		}
+	}
+	return apperr.FromResult(res, argv, installHint["adb"])
+}
+
+var pngSignature = "\x89PNG\r\n\x1a\n"
+
+// Screenshot returns a PNG of a running emulator's or phone's screen.
+func (c *Client) Screenshot(ctx context.Context, d device.Device) ([]byte, error) {
+	adb, err := c.runningDevice(d)
+	if err != nil {
+		return nil, err
+	}
+	// exec-out gives the bytes as they are. `shell` would turn the PNG's newlines into CR LF.
+	argv := []string{adb, "-s", d.TargetID(), "exec-out", "screencap", "-p"}
+	res := c.run(ctx, argv, actionTimeout)
+	if err := apperr.FromResult(res, argv, installHint["adb"]); err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(res.Stdout, pngSignature) {
+		return nil, &apperr.Error{Code: apperr.ParseFailed, Message: "The device did not send a screenshot", Argv: argv, Stderr: res.Stderr}
+	}
+	return []byte(res.Stdout), nil
+}
+
 // ADB is the path of adb, for callers that stream from it.
 func (c *Client) ADB() (string, error) {
 	return c.Opts.tool("adb")
