@@ -134,19 +134,50 @@ func (v *logView) scroll(delta, rows int) {
 	if len(v.shown) == 0 {
 		return
 	}
-	start := v.start(rows)
-	next := v.at() + delta
-	if next >= len(v.shown)-1 {
+	v.selectLine(max(v.at()+delta, 0), rows)
+}
+
+// selectLine selects line i and brings it into view. The newest line turns following back on.
+func (v *logView) selectLine(i, rows int) {
+	if i >= len(v.shown)-1 {
 		v.follow, v.cursor, v.top = true, len(v.shown)-1, max(len(v.shown)-rows, 0)
 		return
 	}
-	v.follow, v.cursor, v.top = false, max(next, 0), start
+	start := v.start(rows)
+	v.follow, v.cursor, v.top = false, i, start
 	switch {
-	case v.cursor < start:
-		v.top = v.cursor
-	case v.cursor >= start+rows:
-		v.top = v.cursor - rows + 1
+	case i < start:
+		v.top = i
+	case i >= start+rows:
+		v.top = i - rows + 1
 	}
+}
+
+// isProblem is whether a line is a crash, or at least an error.
+func isProblem(line logs.Line) bool {
+	return line.Crash || line.Level >= logs.Error
+}
+
+// jumpError selects the first line of the next run of problem lines after the selected line, or
+// of the previous run before it. A stack trace is one run, so it is one stop. It reports whether
+// there was one.
+func (v *logView) jumpError(forward bool, rows int) bool {
+	from := v.at()
+	if from < 0 {
+		return false
+	}
+	runStart := func(i int) bool { return isProblem(v.shown[i]) && (i == 0 || !isProblem(v.shown[i-1])) }
+	step := 1
+	if !forward {
+		step = -1
+	}
+	for i := from + step; i >= 0 && i < len(v.shown); i += step {
+		if runStart(i) {
+			v.selectLine(i, rows)
+			return true
+		}
+	}
+	return false
 }
 
 // slide scrolls sideways by delta columns, no further than the end of the widest line in view.
@@ -274,7 +305,7 @@ func (v *logView) lines(width, rows int, focused bool) []string {
 				out = append(out, chosen.Render(fit(text, width)))
 				continue
 			}
-			out = append(out, highlight(text, v.filter, levelStyle(line.Level)))
+			out = append(out, highlight(text, v.filter, lineStyle(line)))
 		}
 	}
 	for len(out) < logRows {
@@ -315,7 +346,7 @@ func (v *logView) wrapped(width, rows, selected int) []string {
 			if i == selected {
 				parts[j] = chosen.Render(fit(part, width))
 			} else {
-				parts[j] = highlight(part, v.filter, levelStyle(line.Level))
+				parts[j] = highlight(part, v.filter, lineStyle(line))
 			}
 		}
 		return parts

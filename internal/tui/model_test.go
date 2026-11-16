@@ -1923,3 +1923,58 @@ func TestAppActionsNeedARunningDeviceAndSayWhenTheyFail(t *testing.T) {
 	h.press("o", "enter", "enter")
 	h.wantScreen("Could not finish: launching com.example.app on Pixel 9a", "has nothing to launch")
 }
+
+// androidCrash is a real crash report from an Android 16 emulator (`am crash` on Settings).
+const androidCrash = `11-16 07:50:32.344 11123 11123 D AndroidRuntime: Shutting down VM
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: FATAL EXCEPTION: main
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: Process: com.android.settings, PID: 11123
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: android.app.RemoteServiceException$CrashedByAdbException: shell-induced crash
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: 	at android.app.ActivityThread.throwRemoteServiceException(ActivityThread.java:2377)
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)`
+
+func TestEAndShiftEJumpBetweenErrorsAndCrashes(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	info := func(from, to int) {
+		for i := from; i < to; i++ {
+			h.emit(logs.Line{Text: fmt.Sprintf("info %d", i), Level: logs.Info})
+		}
+	}
+	info(0, 40)
+	// A crash report: every line is an error, and it is one stop.
+	for _, text := range strings.Split(androidCrash, "\n")[1:] {
+		h.emit(logs.ParseAndroid(text))
+	}
+	info(40, 80)
+	h.emit(logs.Line{Text: "plain error elsewhere", Level: logs.Error})
+	info(80, 120)
+
+	h.press("g")
+	h.wantScreen("info 0")
+	h.press("e")
+	h.wantScreen("AndroidRuntime: FATAL")
+	h.wantNoScreen("info 0")
+
+	// The next stop is the other error, not the rest of the crash report.
+	h.press("e")
+	h.wantScreen("plain error elsewhere")
+	h.wantNoScreen("AndroidRuntime: FATAL")
+
+	h.press("e")
+	h.wantScreen("No error below this line")
+
+	h.press("E")
+	h.wantScreen("AndroidRuntime: FATAL")
+	h.press("E")
+	h.wantScreen("No error above this line")
+}
+
+func TestCrashLinesAreBoldRedWhereErrorsAreNot(t *testing.T) {
+	crash, plain := lineStyle(logs.Line{Text: "x", Level: logs.Error, Crash: true}), lineStyle(logs.Line{Text: "x", Level: logs.Error})
+	if !crash.GetBold() || plain.GetBold() {
+		t.Errorf("a crash is bold (%v) and an error is not (%v)", crash.GetBold(), plain.GetBold())
+	}
+	if crash.GetForeground() != plain.GetForeground() {
+		t.Error("a crash stays red")
+	}
+}

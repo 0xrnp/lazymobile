@@ -63,6 +63,7 @@ Early release. What has been run, and what has not:
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
+| Crash marking | A real crash of an Android 16 emulator's Settings app (`am crash`), streamed with `logs --json`: the report's lines were marked. The `e` keys in the dashboard, only with fake log lines. Not run: an iOS crash, a React Native error, a native signal. Their patterns come from known log formats |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -136,6 +137,7 @@ Logs:
 | `j` `k`, arrows | Scroll. The selected line is the one `enter` and `y` use |
 | `pgup` `pgdn`, `ctrl+u` `ctrl+d`, `space` | Half a page up or down (`space` goes down) |
 | `G` | Jump to the end and follow |
+| `e` `E` | Jump to the next or previous error. A crash, or a run of error lines such as a stack trace, is one stop |
 | `g` | First line |
 | `enter` | Show the selected line in full, with the lines under it that belong to it, such as a stack trace |
 | `y` | Copy the selected line, with the lines that belong to it |
@@ -191,6 +193,10 @@ What each device offers for logs:
 | Android emulator or phone | `logcat`, optionally only one app (package name) |
 | iOS simulator | System log, optionally one app (bundle id). Or launch the app and show its output |
 | iPhone | Launch the app and show its output. Or the system log (needs `idevicesyslog`) |
+
+A crash is drawn in bold red, apart from other errors. Android crash reports, native signals and
+React Native errors on Android, iOS uncaught exceptions and crash types, and React Native's
+"Unhandled JS Exception" and "Invariant Violation" are recognised.
 
 When you give an Android package, the log keeps following the app when it restarts and gets a
 new process id, and keeps crash reports and system messages that name it.
@@ -273,7 +279,7 @@ App ids given to `logs` and `launch` are remembered, newest first, and shared wi
 Every command takes `--json`. A failure is then printed on stdout as
 `{"error": {"code", "message", "hint"}}`, with the same exit code, so a script can tell `not_found`
 from `tool_missing`. `logs --json` prints one object per line (`text`, `level` from 1 verbose to 6
-fatal, `pid`). Every shape is in [docs/json.md](docs/json.md).
+fatal, `pid`, and `crash` on the lines of a crash). Every shape is in [docs/json.md](docs/json.md).
 
 ## Project settings
 

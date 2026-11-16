@@ -64,7 +64,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 | `apps <device>` | `{"device": "name", "apps": [{"id", "name", "version", "build", "recent", "installed"}]}` |
 | `builds` | `{"project": "name", "builds": [...]}`, the Expo (EAS) builds of the project in this folder |
 | `doctor` | `{"os", "found": [{"name", "detail"}], "problems": [{"code", "platform", "severity", "message", "hint"}]}`. `severity` is `error`, `warning` or `info`. Exit code 1 when a problem has severity `error`, and then no `error` object is printed: the report is the answer |
-| `logs <device>` | One object per line: `{"text", "level", "pid"}`. `level` goes from 1 (verbose) to 6 (fatal) and is left out for a line that has none, which belongs to the line before. A failure before or after the lines is a last line with an `error` object |
+| `logs <device>` | One object per line: `{"text", "level", "pid", "crash"}`. `level` goes from 1 (verbose) to 6 (fatal) and is left out for a line that has none, which belongs to the line before. `crash` is `true` on the lines of a crash, such as an Android `FATAL EXCEPTION` report, and left out otherwise. A failure before or after the lines is a last line with an `error` object |
 
 A device in `device` or `devices` has `id`, `name`, `platform` (`ios` or `android`), `kind`
 (`simulator`, `emulator` or `physical`), `state` (`booted`, `shutdown`, `connected`,
