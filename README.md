@@ -387,6 +387,13 @@ them.
 Changes are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Security problems go to
 [SECURITY.md](SECURITY.md).
 
+## Sponsors
+
+Maintenance of this project is made possible by its
+[contributors](https://github.com/0xrnp/lazymobile/graphs/contributors) and
+[sponsors](https://github.com/sponsors/0xrnp). If you'd like to sponsor this project,
+[click here](https://github.com/sponsors/0xrnp).
+
 ## License
 
 MIT
