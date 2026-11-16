@@ -99,7 +99,7 @@ func TestKeyTableMatchesTheHandlers(t *testing.T) {
 		files[name] = f
 	}
 	handlers := map[keyContext][]string{
-		ctxDevices:    {"deviceKey"},
+		ctxDevices:    {"deviceKey", "moveCursor", "deviceAction"},
 		ctxLogs:       {"logKey"},
 		ctxBuilds:     {"buildKey"},
 		ctxEverywhere: {"keyString"},

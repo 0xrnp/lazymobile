@@ -237,7 +237,7 @@ func (h *harness) run(cmd tea.Cmd) {
 	var msg tea.Msg
 	select {
 	case msg = <-result:
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(40 * time.Millisecond):
 		return
 	}
 	switch msg := msg.(type) {

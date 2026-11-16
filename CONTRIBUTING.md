@@ -16,7 +16,8 @@ only". If you have the hardware, say what you ran and what happened.
 You need Go 1.26.7 or newer (see `go.mod`).
 
 ```sh
-make check    # formatting, vet, and the tests with the race detector
+make check    # formatting, vet, staticcheck, and the tests with the race detector
+make vuln     # known vulnerabilities (needs the network)
 make build    # ./lazymobile
 ```
 

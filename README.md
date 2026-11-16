@@ -71,6 +71,20 @@ If something fails for you, please
 [open an issue](https://github.com/0xrnp/lazymobile/issues/new/choose) with the output of
 `lazymobile doctor`.
 
+## Supported versions
+
+lazymobile runs on macOS and Linux. Windows is not supported. iOS needs macOS with Xcode.
+
+| | Run for real | Meant to work, not run |
+| --- | --- | --- |
+| Xcode | 27.2 | 26 and earlier: the simulator window opens in Simulator.app, not DeviceHub. Tests cover both, with fake tools. iPhones need Xcode 15 or newer (`devicectl`) |
+| Android | Android 16 emulator, a real phone | Older and newer versions. Apps are listed with `pm list packages -3` and started and stopped with `monkey` and `am force-stop`, which older releases also have |
+| Linux | The dashboard, and Homebrew in a container | Every distribution |
+
+A version in the right column has not been run. If you use one, say what happened in an
+[issue](https://github.com/0xrnp/lazymobile/issues/new/choose) with the output of
+`lazymobile doctor`.
+
 ## Install
 
 With [Homebrew](https://brew.sh), on macOS or Linux:
@@ -337,7 +351,8 @@ Run `lazymobile doctor` first.
 ## Development
 
 ```sh
-make check    # formatting, vet, and the tests with the race detector
+make check    # formatting, vet, staticcheck, and the tests with the race detector
+make vuln     # known vulnerabilities (needs the network)
 make build    # ./lazymobile
 ```
 
