@@ -34,6 +34,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Launch, restart or stop an app on a running device.
 - Open a deep link, take a screenshot, and switch dark and light mode, on a simulator, emulator or Android phone.
+- Install an `.apk` or `.app` from the devices pane (`i`), offering the builds it finds in the folder and the ones you installed before. On an iPhone too.
 - Record the screen of a simulator, emulator or Android phone to a video, from the command line.
 - Put a simulator or emulator at a place, and give it the tidy status bar of a screenshot.
 - Grant or revoke an app's permission, and clear its data, on a simulator or emulator.
@@ -64,6 +65,7 @@ Early release. What has been run, and what has not:
 | iPhones | Listed over USB with a real iPhone, and so were its installed apps with their version and build, which also shows in the log heading. Its logs have only been tried with fake tools |
 | App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
 | Several logs at once | Four real system logs of an iOS simulator, in a real terminal: a grid, stacked and one at a time, the list (`a`) closing one, and quitting and coming back with the rest restored. Also a simulator's log beside a real iPhone's launch-an-app log (the launch faked). Not run: more than four logs, or Android logs in several panes. The rest is covered by tests with fake tools |
+| Installing from the devices pane | The picker and its path checks, only with fake tools, and the installs through `simctl` and `adb` as before. On a real iPhone only the failure was run, with a path that does not exist, and `devicectl` refused it. A real install on an iPhone was not run, because that needs a signed device build |
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
@@ -137,6 +139,7 @@ Devices:
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
 | `p` | Save a screenshot, a PNG, in the folder lazymobile was started in. Not for an iPhone |
 | `t` | Open a web address or deep link, such as `myapp://home?id=1`. Not for an iPhone |
+| `i` | Install an `.apk` or `.app` on a running device: pick a build found in the folder (Gradle, Flutter and Xcode build folders) or one used before, or type a path. An iPhone needs a build made and signed for devices |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
 | `n` | New simulator or emulator |
 | `y` | Copy the id for `adb -s`, `flutter -d`, `xcrun` |
@@ -252,7 +255,7 @@ only by you. Delete the file to forget it all.
 
 - Erase, delete, wipe and uninstall always ask first. Real phones are never booted, shut down,
   erased or deleted. On them lazymobile only uninstalls an app (only one you installed: the apps
-  that come with the system are refused), launches, restarts or stops an app, and, on an Android
+  that come with the system are refused), installs a build you name, launches, restarts or stops an app, and, on an Android
   phone, opens a link, takes a screenshot or switches dark mode. A location, a status bar, an app's permissions and its data are only changed on simulators and emulators.
 - A screenshot or a recording never replaces a file, and is readable only by you, since a screen can show
   personal data. A link is checked before it reaches an Android phone's shell.
@@ -276,7 +279,7 @@ lazymobile shutdown "iPhone 17" --keep-simulator-app
 lazymobile erase "iPhone 17" --yes
 lazymobile delete "iPhone 17" --yes
 lazymobile uninstall "Pixel 9a" com.example.app --yes   # the app and its data
-lazymobile install "Pixel 9a" ./app.apk
+lazymobile install "Pixel 9a" ./app.apk   # an .app folder for a simulator or an iPhone
 lazymobile launch "Pixel 9a" com.example.app [--restart]
 lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
 lazymobile appearance "Pixel 9a" [dark|light]   # no mode shows the current one (Android 10 or newer)

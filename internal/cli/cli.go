@@ -47,7 +47,7 @@ Usage:
   lazymobile erase <device> --yes [--json]   erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes [--json]
   lazymobile uninstall <device> <app-id> --yes [--json]   remove an app and its data from a running device
-  lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator
+  lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator or an iPhone
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light

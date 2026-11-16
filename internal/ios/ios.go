@@ -63,6 +63,10 @@ func (c *Client) ListSimulators(ctx context.Context) ([]device.Device, error) {
 // to a file. It holds device names, ids and app ids, so it lives in a directory only this user can
 // open and is removed at once.
 func (c *Client) devicectl(ctx context.Context, args ...string) (string, error) {
+	return c.devicectlWithin(ctx, listTimeout, args...)
+}
+
+func (c *Client) devicectlWithin(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
 	dir, err := os.MkdirTemp("", "lazymobile-")
 	if err != nil {
 		return "", apperr.New(apperr.CommandFailed, "Could not create a temporary directory: %v", err)
@@ -71,7 +75,7 @@ func (c *Client) devicectl(ctx context.Context, args ...string) (string, error) 
 	out := filepath.Join(dir, "output.json")
 
 	argv := append(append([]string{"xcrun", "devicectl"}, args...), "--json-output", out)
-	res := c.Runner.Run(ctx, argv, run.Options{Timeout: listTimeout})
+	res := c.Runner.Run(ctx, argv, run.Options{Timeout: timeout})
 	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
 		return "", err
 	}
@@ -426,10 +430,15 @@ func (c *Client) AppExecutable(ctx context.Context, d device.Device, bundleID st
 	return name, nil
 }
 
-// Install installs an .app bundle on a booted simulator.
+// Install installs an .app bundle on a booted simulator, or on a connected iPhone. An iPhone
+// needs a build made for devices and signed for it, which devicectl checks.
 func (c *Client) Install(ctx context.Context, d device.Device, appPath string) error {
-	if d.Platform != device.IOS || d.Kind != device.Simulator {
-		return apperr.New(apperr.Unsupported, "Cannot install on %s: only iOS simulators are supported", d.Name)
+	if d.Platform != device.IOS {
+		return apperr.New(apperr.Unsupported, "Cannot install on %s: it is not an iOS device", d.Name)
+	}
+	if d.Kind == device.Physical {
+		_, err := c.devicectlWithin(ctx, 5*time.Minute, "device", "install", "app", "--device", d.ID, appPath)
+		return err
 	}
 	argv := []string{"xcrun", "simctl", "install", d.ID, appPath}
 	return apperr.FromResult(c.Runner.Run(ctx, argv, run.Options{Timeout: 5 * time.Minute}), argv, notInstalled)

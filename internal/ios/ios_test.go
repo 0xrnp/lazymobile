@@ -730,3 +730,28 @@ func TestPermissionRefusesWhatSimctlHasNoServiceForAndAnIPhone(t *testing.T) {
 		t.Errorf("a tool ran: %v", calls)
 	}
 }
+
+func TestInstallGoesToASimulatorWithSimctlAndToAnIPhoneWithDevicectl(t *testing.T) {
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		if strings.HasPrefix(command, "xcrun devicectl device install app --device P1 /b/Runner.app --json-output ") {
+			if err := os.WriteFile(argv[len(argv)-1], []byte(`{"info": {"outcome": "success"}}`), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		return run.Result{}
+	}}
+	ctx := context.Background()
+	if err := client(fake).Install(ctx, bootedSim, "/b/App.app"); err != nil || !fake.Called("xcrun simctl install "+udidBooted+" /b/App.app") {
+		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
+	}
+	if err := client(fake).Install(ctx, iphone, "/b/Runner.app"); err != nil || !fake.Called("xcrun devicectl device install app --device P1 /b/Runner.app") {
+		t.Errorf("an iPhone: %v, calls %v", err, fake.Calls())
+	}
+	if err := client(fake).Install(ctx, pixel, "/b/app.apk"); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an Android device: %v", err)
+	}
+	failed := runtest.Table(map[string]run.Result{"devicectl device install": runtest.Fail(1, "The application could not be verified")})
+	if err := client(failed).Install(ctx, iphone, "/b/Runner.app"); err == nil || !strings.Contains(err.Error(), "could not be verified") {
+		t.Errorf("a refusal by the phone: %v", err)
+	}
+}

@@ -26,6 +26,8 @@ const (
 type File struct {
 	// Apps are the app ids used, newest first, per platform.
 	Apps map[device.Platform][]string `json:"apps,omitempty"`
+	// Installs are the builds installed, newest first, per platform.
+	Installs map[device.Platform][]string `json:"installs,omitempty"`
 	// Views are where the dashboard was left, by folder.
 	Views map[string]View `json:"views,omitempty"`
 }
@@ -148,8 +150,25 @@ func (f *File) RememberApp(platform device.Platform, id string) {
 	f.Apps[platform] = append([]string{id}, ids...)
 }
 
+// RememberInstall puts a build path first in the list for platform.
+func (f *File) RememberInstall(platform device.Platform, path string) {
+	if path == "" {
+		return
+	}
+	if f.Installs == nil {
+		f.Installs = map[device.Platform][]string{}
+	}
+	paths := slices.DeleteFunc(slices.Clone(f.Installs[platform]), func(old string) bool { return old == path })
+	f.Installs[platform] = append([]string{path}, paths...)
+}
+
 // prune keeps the lists short.
 func (f *File) prune() {
+	for platform, paths := range f.Installs {
+		if len(paths) > maxApps {
+			f.Installs[platform] = paths[:maxApps]
+		}
+	}
 	for platform, ids := range f.Apps {
 		if len(ids) > maxApps {
 			f.Apps[platform] = ids[:maxApps]

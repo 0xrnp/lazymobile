@@ -878,6 +878,8 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.askLocation(d)
 	case "c", "C":
 		return m.statusBar(d, key == "c")
+	case "i":
+		return m.pickBuild(d)
 	case "p":
 		return m.screenshot(d)
 	case "t":

@@ -2202,3 +2202,57 @@ func TestRealPhonesAreOfferedNoPermissionOrDataActions(t *testing.T) {
 		h.press("esc")
 	}
 }
+
+func TestInstallOffersRememberedAndFoundBuildsAndATypedPath(t *testing.T) {
+	dir := t.TempDir()
+	apk := filepath.Join(dir, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+	old := filepath.Join(t.TempDir(), "old.apk")
+	for _, path := range []string{apk, old} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memory := Memory{Store: state.Store{Path: filepath.Join(t.TempDir(), "state.json")}, Folder: dir}
+	_ = memory.Store.Update(func(f *state.File) {
+		f.RememberInstall(device.Android, old)
+		f.RememberInstall(device.Android, "/gone/missing.apk")
+	})
+	h := startWith(t, memory, pixel)
+
+	h.press("i")
+	h.wantScreen("Install on Pixel 9a", "old.apk", "app/build/outputs/apk/debug/app-debug.apk", "Type a path…")
+	h.wantNoScreen("missing.apk")
+	h.press("down", "enter")
+	h.wantCalls("install Pixel_9a "+apk, 1)
+	h.wantScreen("Installed app-debug.apk on Pixel 9a")
+	if got := memory.Store.Load().Installs[device.Android]; len(got) == 0 || got[0] != apk {
+		t.Errorf("remembered %v", got)
+	}
+
+	h.press("i", "down", "down", "enter")
+	h.wantScreen("The path of an .apk file.")
+	h.typeText("/nowhere.apk")
+	h.press("enter")
+	h.wantScreen("There is nothing at that path.")
+	h.wantCalls("nowhere", 0)
+}
+
+func TestInstallOnAnIPhoneTakesAnAppFolderAndRefusesAStoppedDevice(t *testing.T) {
+	h := start(t, usbPhone)
+	h.press("i", "enter")
+	h.wantScreen("The path of an .app folder.")
+	h.typeText("/tmp/thing.apk")
+	h.press("enter")
+	h.wantScreen("It must end in .app.")
+	h.wantCalls("install", 0)
+
+	stopped := pixel
+	stopped.State = device.Shutdown
+	g := start(t, stopped)
+	g.press("i")
+	g.wantScreen("is not running")
+	g.wantNoScreen("Install on")
+}

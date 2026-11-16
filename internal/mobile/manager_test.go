@@ -314,8 +314,15 @@ func TestInstallChecksTheDeviceAndTheKindOfFileBeforeAnyTool(t *testing.T) {
 
 	// The extension is matched whatever its case, and a trailing slash on an .app folder is fine.
 	m, fake = twoSimulators(t)
-	if err := m.Install(ctx, simulator, "/tmp/App.APP/"); err != nil || !fake.Called("simctl install SIM /tmp/App.APP/") {
+	app := filepath.Join(t.TempDir(), "App.APP")
+	if err := os.Mkdir(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Install(ctx, simulator, app+"/"); err != nil || !fake.Called("simctl install SIM "+app+"/") {
 		t.Errorf("an .app folder: %v, calls = %v", err, fake.Calls())
+	}
+	if err := m.Install(ctx, simulator, "/nowhere/App.app"); apperr.CodeOf(err) != apperr.NotFound {
+		t.Errorf("a path with nothing there: %v", err)
 	}
 }
 

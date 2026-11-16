@@ -153,7 +153,8 @@ func (m *Manager) Delete(ctx context.Context, d device.Device) error {
 	return m.Android.Delete(ctx, d)
 }
 
-// Install puts a build on a running device: an .apk on Android, an .app folder on a simulator.
+// Install puts a build on a running device: an .apk on Android, an .app folder on a simulator or
+// an iPhone. An iPhone needs a build made for devices and signed for it.
 func (m *Manager) Install(ctx context.Context, d device.Device, path string) error {
 	if !d.Ready() {
 		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
@@ -162,10 +163,14 @@ func (m *Manager) Install(ctx context.Context, d device.Device, path string) err
 		if !strings.HasSuffix(strings.ToLower(path), ".apk") {
 			return apperr.New(apperr.InvalidState, "Android devices need an .apk file").WithHint("Got: %s", path)
 		}
-		return m.Android.Install(ctx, d, path)
+	} else if !strings.HasSuffix(strings.ToLower(strings.TrimRight(path, "/")), ".app") {
+		return apperr.New(apperr.InvalidState, "iOS devices need an .app folder").WithHint("Got: %s", path)
 	}
-	if !strings.HasSuffix(strings.ToLower(strings.TrimRight(path, "/")), ".app") {
-		return apperr.New(apperr.InvalidState, "iOS simulators need an .app folder").WithHint("Got: %s", path)
+	if _, err := os.Stat(path); err != nil {
+		return apperr.New(apperr.NotFound, "There is nothing at %s", path).WithHint("Check the path of the build.")
+	}
+	if d.Platform == device.Android {
+		return m.Android.Install(ctx, d, path)
 	}
 	return m.IOS.Install(ctx, d, path)
 }

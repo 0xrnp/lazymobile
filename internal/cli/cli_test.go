@@ -269,11 +269,18 @@ func TestInstallChecksTheKindOfFile(t *testing.T) {
 	if code := e.run("install", "iPhone 16 Pro", "build.apk"); code != ExitFailure || !strings.Contains(e.errs.String(), ".app folder") {
 		t.Errorf("code %d, stderr %q", code, e.errs.String())
 	}
-	if code := e.run("install", "iPhone 16 Pro", "/builds/Homes.app/"); code != ExitOK ||
-		!e.fake.Called("simctl install 00000000-0000-4000-8000-0000000000A2 /builds/Homes.app/") {
+	app := filepath.Join(t.TempDir(), "Homes.app")
+	if err := os.Mkdir(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("install", "iPhone 16 Pro", "/builds/Homes.app/"); code != ExitFailure || !strings.Contains(e.errs.String(), "nothing at /builds/Homes.app/") {
+		t.Errorf("a path with nothing there: code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("install", "iPhone 16 Pro", app+"/"); code != ExitOK ||
+		!e.fake.Called("simctl install 00000000-0000-4000-8000-0000000000A2 "+app+"/") {
 		t.Errorf("code %d, ran %v, stderr %q", code, e.fake.Calls(), e.errs.String())
 	}
-	if code := e.run("install", "iPhone 16", "/builds/Homes.app"); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
+	if code := e.run("install", "iPhone 16", app); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
 		t.Errorf("stopped device: code %d, stderr %q", code, e.errs.String())
 	}
 }
@@ -613,6 +620,9 @@ func TestAFailureWithoutJSONStaysText(t *testing.T) {
 func TestEveryChangeWithJSONSaysWhatItDidToWhichDevice(t *testing.T) {
 	e := newEnv(t)
 	apk := filepath.Join(t.TempDir(), "App.app")
+	if err := os.Mkdir(apk, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		args   []string
 		action string

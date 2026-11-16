@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,6 +193,121 @@ func (m *Model) toggleAppearance(d device.Device) tea.Cmd {
 			next = "light"
 		}
 		return backend.SetAppearance(ctx, d, next)
+	})
+}
+
+// pickBuild offers the builds to install on d: the ones installed before, the ones found in the
+// folder, and a path to type.
+func (m *Model) pickBuild(d device.Device) tea.Cmd {
+	if !d.Ready() {
+		m.setNote(d.Name+" is not running: boot or connect it to install an app", true)
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	add := func(path string) {
+		if !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	for _, path := range m.memory.Store.Load().Installs[d.Platform] {
+		if _, err := os.Stat(path); err == nil && installable(d, path) {
+			add(path)
+		}
+	}
+	for _, path := range mobile.FindBuilds(m.memory.Folder, d) {
+		add(path)
+	}
+	items := make([]string, 0, len(paths)+1)
+	for _, path := range paths {
+		items = append(items, m.shortPath(path))
+	}
+	items = append(items, "Type a path…")
+	m.modal = &modal{
+		kind: modalChoice, title: "Install on " + d.Name, items: items, filterable: true, keep: 1,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			if index < len(paths) {
+				return m.installPath(d, paths[index])
+			}
+			m.askBuildPath(d)
+			return nil
+		},
+	}
+	return nil
+}
+
+// installable is whether path has the extension d takes.
+func installable(d device.Device, path string) bool {
+	path = strings.ToLower(strings.TrimRight(path, "/"))
+	if d.Platform == device.Android {
+		return strings.HasSuffix(path, ".apk")
+	}
+	return strings.HasSuffix(path, ".app")
+}
+
+// shortPath writes a path as short as is clear: relative to the folder lazymobile was started in,
+// or from the home folder, and with the start cut off when it is still long, since the end is what
+// tells builds apart.
+func (m *Model) shortPath(path string) string {
+	if rel, err := filepath.Rel(m.memory.Folder, path); m.memory.Folder != "" && err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home+string(filepath.Separator)) {
+		path = "~" + strings.TrimPrefix(path, home)
+	}
+	const longest = 60
+	if runes := []rune(path); len(runes) > longest {
+		return "…" + string(runes[len(runes)-longest+1:])
+	}
+	return path
+}
+
+func (m *Model) askBuildPath(d device.Device) {
+	kind := ".app folder"
+	if d.Platform == device.Android {
+		kind = ".apk file"
+	}
+	m.modal = &modal{
+		kind: modalPrompt, title: "Install on " + d.Name, body: "The path of an " + kind + ".",
+		validate: func(value string) string {
+			value = expandHome(strings.TrimSpace(value))
+			if !installable(d, value) {
+				if d.Platform == device.Android {
+					return "It must end in .apk."
+				}
+				return "It must end in .app."
+			}
+			if _, err := os.Stat(value); err != nil {
+				return "There is nothing at that path."
+			}
+			return ""
+		},
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			return m.installPath(d, expandHome(strings.TrimSpace(value)))
+		},
+	}
+}
+
+func expandHome(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(path, "~"))
+		}
+	}
+	return path
+}
+
+func (m *Model) installPath(d device.Device, path string) tea.Cmd {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		m.fail("Could not install", err)
+		return nil
+	}
+	_ = m.memory.Store.Update(func(f *state.File) { f.RememberInstall(d.Platform, path) })
+	backend := m.backend
+	return m.act(d, "Installing "+filepath.Base(path)+" on", "Installed "+filepath.Base(path)+" on", nil, func(ctx context.Context) error {
+		return backend.Install(ctx, d, path)
 	})
 }
 

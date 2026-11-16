@@ -137,6 +137,8 @@ var keyTable = []keyAction{
 		when: selectedDevice(virtualOnlyRunning)},
 	{id: "screenshot", ctx: ctxDevices, keys: []string{"p"}, show: "p", desc: "Save a screenshot in this folder",
 		when: selectedDevice(screenFeature)},
+	{id: "install", ctx: ctxDevices, keys: []string{"i"}, show: "i", desc: "Install an .apk or .app on a running device",
+		when: selectedDevice(screenFeature)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",
 		when: selectedDevice(screenFeature)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",
