@@ -448,6 +448,69 @@ func (c *Client) Uninstall(ctx context.Context, d device.Device, bundleID string
 	return apperr.New(apperr.Unsupported, "Cannot uninstall from %s: only iOS devices are supported", d.Name)
 }
 
+var launchAction = action{verb: "launch an app", hint: "Boot it first."}
+
+// Launch starts an app, by bundle id, on a booted simulator or a connected iPhone or iPad, and
+// brings it to the front. An app that is already running keeps running, unless restart stops it
+// first.
+func (c *Client) Launch(ctx context.Context, d device.Device, bundleID string, restart bool) error {
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Simulator:
+		argv := []string{"xcrun", "simctl", "launch"}
+		if restart {
+			argv = append(argv, "--terminate-running-process")
+		}
+		argv = append(argv, d.ID, bundleID)
+		res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
+		// simctl exits 4 for a bundle id the simulator does not have.
+		if res.Code == 4 && strings.Contains(res.Stderr, "FBSOpenApplicationServiceErrorDomain, code=4") {
+			return notInstalledApp(d, bundleID, argv, res)
+		}
+		return actionError(res, argv, launchAction)
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		args := []string{"device", "process", "launch", "--device", d.ID}
+		if restart {
+			args = append(args, "--terminate-existing")
+		}
+		_, err := c.devicectl(ctx, append(args, bundleID)...)
+		return err
+	}
+	return apperr.New(apperr.Unsupported, "Cannot launch an app on %s: only iOS devices are supported", d.Name)
+}
+
+// Stop ends a running app, by bundle id, on a booted simulator. An app that is not running is
+// already stopped, which is success. An iPhone's apps cannot be stopped by bundle id: devicectl
+// only ends a process by its number.
+func (c *Client) Stop(ctx context.Context, d device.Device, bundleID string) error {
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Simulator:
+		argv := []string{"xcrun", "simctl", "terminate", d.ID, bundleID}
+		res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
+		if res.Code == 0 || !strings.Contains(res.Stderr, "found nothing to terminate") {
+			return actionError(res, argv, action{verb: "stop an app", hint: "Boot it first."})
+		}
+		// simctl says the same for an app that is not running and for one that is not installed.
+		lookup := []string{"xcrun", "simctl", "get_app_container", d.ID, bundleID, "app"}
+		if found := c.Runner.Run(ctx, lookup, run.Options{Timeout: actionTimeout}); apperr.FromResult(found, lookup, notInstalled) != nil {
+			return notInstalledApp(d, bundleID, argv, res)
+		}
+		return nil
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		return apperr.New(apperr.Unsupported, "An app on %s cannot be stopped from here", d.Name).
+			WithHint("Restart it instead: that stops the running copy first.")
+	}
+	return apperr.New(apperr.Unsupported, "Cannot stop an app on %s: only iOS devices are supported", d.Name)
+}
+
+func notInstalledApp(d device.Device, bundleID string, argv []string, res run.Result) error {
+	return &apperr.Error{
+		Code:    apperr.NotFound,
+		Message: fmt.Sprintf("%s is not installed on %s", bundleID, d.Name),
+		Hint:    fmt.Sprintf("Run `lazymobile apps %q` to see what is installed.", d.Name),
+		Argv:    argv, ExitCode: res.Code, Stderr: res.Stderr,
+	}
+}
+
 // InstalledApps lists the apps a user installed on a booted simulator, or on a connected iPhone or
 // iPad, by bundle id. The apps that come with iOS are left out.
 func (c *Client) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {

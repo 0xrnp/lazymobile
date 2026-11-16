@@ -607,3 +607,104 @@ func TestUninstallRefusesBeforeAskingTheDevice(t *testing.T) {
 		t.Errorf("the device was asked: %v", calls)
 	}
 }
+
+// What monkey printed on a real Android 16 emulator, for an app it opened and for a package that
+// is not installed (exit code 252).
+const (
+	monkeyLaunched = `  bash arg: -p
+  bash arg: com.example.app
+  bash arg: -c
+  bash arg: android.intent.category.LAUNCHER
+  bash arg: 1
+args: [-p, com.example.app, -c, android.intent.category.LAUNCHER, 1]
+ arg: "-p"
+ arg: "com.example.app"
+ arg: "-c"
+ arg: "android.intent.category.LAUNCHER"
+ arg: "1"
+data="com.example.app"
+data="android.intent.category.LAUNCHER"
+Events injected: 1
+## Network stats: elapsed time=35ms (0ms mobile, 0ms wifi, 35ms not connected)
+`
+	monkeyNothingToRun = `args: [-p, com.example.nope, -c, android.intent.category.LAUNCHER, 1]
+ arg: "-p"
+ arg: "com.example.nope"
+data="com.example.nope"
+data="android.intent.category.LAUNCHER"
+** No activities found to run, monkey aborted.
+`
+)
+
+func TestLaunchOpensTheAppAndRestartStopsItFirst(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell monkey": runtest.Out(monkeyLaunched), "shell am force-stop": {}})
+	c := New(fake, sdk(t, "adb"))
+	if err := c.Launch(context.Background(), runningEmulator, "com.example.app", false); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("-s emulator-5554 shell monkey -p com.example.app -c android.intent.category.LAUNCHER 1") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+	if fake.Called("force-stop") {
+		t.Errorf("a plain launch stopped the app: %v", fake.Calls())
+	}
+
+	if err := c.Launch(context.Background(), runningEmulator, "com.example.app", true); err != nil {
+		t.Fatal(err)
+	}
+	calls := fake.Calls()
+	if n := len(calls); n != 3 || !strings.Contains(calls[1], "shell am force-stop com.example.app") || !strings.Contains(calls[2], "shell monkey") {
+		t.Errorf("a restart ran %v", calls)
+	}
+}
+
+func TestLaunchOfAPackageWithNothingToOpenSaysSo(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"shell monkey": {Code: 252, Stdout: monkeyNothingToRun}})
+	err := New(fake, sdk(t, "adb")).Launch(context.Background(), runningEmulator, "com.example.nope", false)
+	if apperr.CodeOf(err) != apperr.NotFound || !strings.Contains(err.Error(), "com.example.nope has nothing to launch on Pixel 9a") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestStopForceStopsOnlyAnInstalledApp(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"shell dumpsys package com.example.app": runtest.Out(dumpsysPackage),
+		"shell dumpsys package com.example.ap":  runtest.Out(""),
+		"shell am force-stop":                   {},
+	})
+	c := New(fake, sdk(t, "adb"))
+	// `am force-stop` succeeds for any name, so a typo must not reach it.
+	if err := c.Stop(context.Background(), runningEmulator, "com.example.ap"); apperr.CodeOf(err) != apperr.NotFound {
+		t.Errorf("a typo: %v", err)
+	}
+	if fake.Called("force-stop") {
+		t.Errorf("a typo was force-stopped: %v", fake.Calls())
+	}
+	if err := c.Stop(context.Background(), runningEmulator, "com.example.app"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("-s emulator-5554 shell am force-stop com.example.app") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+}
+
+func TestLaunchAndStopRefuseBeforeAskingTheDevice(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	c := New(fake, sdk(t, "adb"))
+	offline := runningEmulator
+	offline.State = device.Offline
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"launch on an offline device": c.Launch(ctx, offline, "com.example.app", false),
+		"stop on an offline device":   c.Stop(ctx, offline, "com.example.app"),
+		"launch of an injected id":    c.Launch(ctx, runningEmulator, "a; reboot", true),
+		"stop of an option as an id":  c.Stop(ctx, runningEmulator, "-k"),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("the device was asked: %v", calls)
+	}
+}

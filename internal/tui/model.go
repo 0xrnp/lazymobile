@@ -42,6 +42,8 @@ type Backend interface {
 	Disconnect(ctx context.Context, d device.Device) error
 	Install(ctx context.Context, d device.Device, path string) error
 	Uninstall(ctx context.Context, d device.Device, id string) error
+	Launch(ctx context.Context, d device.Device, id string, opts mobile.LaunchOptions) error
+	Stop(ctx context.Context, d device.Device, id string) error
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
@@ -854,6 +856,8 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 		}
 	case "u":
 		return m.pickUninstall(d)
+	case "o":
+		return m.pickAppAction(d)
 	case "x":
 		if d.Platform == device.Android && d.Transport == "wifi" {
 			return m.act(d, "Disconnecting", "Disconnected", isGone, func(ctx context.Context) error {
@@ -1083,6 +1087,102 @@ func (m *Model) offerUninstall(d device.Device, apps []device.App) {
 				})
 			})
 			return nil
+		},
+	}
+}
+
+// pickAppAction lists the apps used before and the ones installed on a running device, then asks
+// what to do with the chosen one: launch, restart or stop it.
+func (m *Model) pickAppAction(d device.Device) tea.Cmd {
+	if !d.Ready() {
+		m.setNote(d.Name+" is not running: boot or connect it to launch an app", true)
+		return nil
+	}
+	recent := m.memory.Store.Load().Apps[d.Platform]
+	note := "Looking for the apps on " + d.Name + "…"
+	m.setNote(note, false)
+	m.appsAsked++
+	asked := m.appsAsked
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		installed, err := backend.InstalledApps(ctx, d)
+		return applyMsg(func(m *Model) tea.Cmd {
+			if m.note == note {
+				m.setNote("", false)
+			}
+			current, ok := m.selected()
+			if asked != m.appsAsked || m.modal != nil || !ok || current.Key() != d.Key() {
+				return nil
+			}
+			// Without the installed apps, the ones used before are still offered.
+			choices := state.Choices(recent, installed)
+			switch {
+			case len(choices) == 0 && err != nil:
+				m.fail("Could not list the apps on "+d.Name, err)
+			case len(choices) == 0:
+				m.setNote("No apps of yours are installed on "+d.Name, false)
+			default:
+				m.offerAppActions(d, choices, err == nil)
+			}
+			return nil
+		})
+	}
+}
+
+func (m *Model) offerAppActions(d device.Device, choices []state.AppChoice, known bool) {
+	rows := make([]appRow, len(choices))
+	for i, c := range choices {
+		rows[i] = appRow{id: c.ID, name: c.Name, version: c.VersionLabel(), used: c.Recent, missing: known && !c.Installed}
+	}
+	items, notes := appRows(rows)
+	m.modal = &modal{
+		kind: modalChoice, title: "Which app on " + d.Name + "?", items: items, notes: notes, filterable: true,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			m.appActionModal(d, choices[index].ID)
+			return nil
+		},
+	}
+}
+
+// appAction is one thing that can be done to an app on a device.
+type appAction struct {
+	label, doing, done string
+	run                func(ctx context.Context, backend Backend, d device.Device, id string) error
+}
+
+var (
+	launchApp = appAction{"Launch", "Launching", "Launched", func(ctx context.Context, b Backend, d device.Device, id string) error {
+		return b.Launch(ctx, d, id, mobile.LaunchOptions{})
+	}}
+	restartApp = appAction{"Restart", "Restarting", "Restarted", func(ctx context.Context, b Backend, d device.Device, id string) error {
+		return b.Launch(ctx, d, id, mobile.LaunchOptions{Restart: true})
+	}}
+	stopApp = appAction{"Stop", "Stopping", "Stopped", func(ctx context.Context, b Backend, d device.Device, id string) error {
+		return b.Stop(ctx, d, id)
+	}}
+)
+
+func (m *Model) appActionModal(d device.Device, id string) {
+	actions := []appAction{launchApp, restartApp, stopApp}
+	if d.Platform == device.IOS && d.Kind == device.Physical {
+		// An iPhone's app cannot be stopped on its own. Restart stops the running copy.
+		actions = actions[:2]
+	}
+	labels := make([]string, len(actions))
+	for i, action := range actions {
+		labels[i] = action.label
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: id + " on " + d.Name, items: labels,
+		onChoose: func(m *Model, index int) tea.Cmd {
+			action := actions[index]
+			_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(d.Platform, id) })
+			backend := m.backend
+			return m.act(d, action.doing+" "+id+" on", action.done+" "+id+" on", nil, func(ctx context.Context) error {
+				return action.run(ctx, backend, d, id)
+			})
 		},
 	}
 }

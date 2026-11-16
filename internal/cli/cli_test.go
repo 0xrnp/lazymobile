@@ -510,3 +510,45 @@ func TestUninstallNeedsYesAndAnInstalledApp(t *testing.T) {
 		t.Errorf("stdout %q", e.out.String())
 	}
 }
+
+func TestLaunchAndStopAnApp(t *testing.T) {
+	e := newEnv(t)
+	const booted = "00000000-0000-4000-8000-0000000000A2"
+	if code := e.run("launch", "iPhone 16 Pro", "com.example.installed"); code != ExitOK ||
+		!e.fake.Called("simctl launch "+booted+" com.example.installed") ||
+		!strings.Contains(e.out.String(), "Launched com.example.installed on iPhone 16 Pro") {
+		t.Errorf("launch: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("launch", "--restart", "iPhone 16 Pro", "com.example.installed"); code != ExitOK ||
+		!e.fake.Called("simctl launch --terminate-running-process "+booted+" com.example.installed") ||
+		!strings.Contains(e.out.String(), "Restarted com.example.installed on iPhone 16 Pro") {
+		t.Errorf("restart: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("stop", "iPhone 16 Pro", "com.example.installed"); code != ExitOK ||
+		!e.fake.Called("simctl terminate "+booted+" com.example.installed") ||
+		!strings.Contains(e.out.String(), "Stopped com.example.installed on iPhone 16 Pro") {
+		t.Errorf("stop: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	// A launched app is offered next time, like one whose log was opened.
+	if recent := e.app.State.Load().Apps[device.IOS]; len(recent) != 1 || recent[0] != "com.example.installed" {
+		t.Errorf("remembered %v", recent)
+	}
+}
+
+func TestLaunchAndStopUsageAndDevicesThatAreNotRunning(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"launch", "iPhone 16 Pro"}, {"stop"}, {"stop", "iPhone 16 Pro", "a", "b"}, {"stop", "iPhone 16 Pro", "a", "--restart"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	if code := e.run("launch", "iPhone 16", "com.example.installed"); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
+		t.Errorf("a stopped simulator: code %d, stderr %q", code, e.errs.String())
+	}
+	if e.fake.Called("simctl launch") || e.fake.Called("simctl terminate") {
+		t.Errorf("an app was touched: %v", e.fake.Calls())
+	}
+	if recent := e.app.State.Load().Apps[device.IOS]; len(recent) != 0 {
+		t.Errorf("a failed launch was remembered: %v", recent)
+	}
+}

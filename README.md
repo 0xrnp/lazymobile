@@ -24,6 +24,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - One list for every simulator, emulator, iPhone and Android phone on the machine.
 - Boot, cold boot, shut down, erase, create and delete simulators and emulators.
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
+- Launch, restart or stop an app on a running device.
 - Connect Android phones over Wi-Fi (pairing code or address).
 - Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
   many logs as you like, side by side or stacked, to read several devices at once.
@@ -52,6 +53,7 @@ Early release. What has been run, and what has not:
 | App version in the log heading | A real Android emulator (Android 16), a real iPhone over USB and a real iOS simulator, with Xcode 27.2. Not run: Xcode 26 or older, other Android versions, Android phones, Wi-Fi iPhones |
 | Several logs at once | Four real system logs of an iOS simulator, in a real terminal: a grid, stacked and one at a time, the list (`a`) closing one, and quitting and coming back with the rest restored. Also a simulator's log beside a real iPhone's launch-an-app log (the launch faked). Not run: more than four logs, or Android logs in several panes. The rest is covered by tests with fake tools |
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
+| Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -96,6 +98,7 @@ Devices:
 | `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
+| `o` | Launch, restart or stop an app: pick one, then pick what to do. An iPhone's apps can be launched and restarted, not stopped |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
 | `n` | New simulator or emulator |
 | `y` | Copy the id for `adb -s`, `flutter -d`, `xcrun` |
@@ -228,6 +231,8 @@ lazymobile erase "iPhone 17" --yes
 lazymobile delete "iPhone 17" --yes
 lazymobile uninstall "Pixel 9a" com.example.app --yes   # the app and its data
 lazymobile install "Pixel 9a" ./app.apk
+lazymobile launch "Pixel 9a" com.example.app [--restart]
+lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
 lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS
@@ -240,7 +245,7 @@ lazymobile doctor [--json]
 A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase,
 delete or uninstall need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usage.
 
-App ids given to `logs` are remembered, newest first, and shared with the dashboard.
+App ids given to `logs` and `launch` are remembered, newest first, and shared with the dashboard.
 
 `logs --json` prints one object per line (`text`, `level` from 1 verbose to 6 fatal, `pid`), which
 is easy for a script or a coding agent to read.

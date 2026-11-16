@@ -175,3 +175,54 @@ func TestUninstallOfWhatIsNotAUserAppRunsNothing(t *testing.T) {
 		t.Errorf("an uninstall ran: %v", fake.Calls())
 	}
 }
+
+func TestLaunchAndStopGoToTheDevicesPlatform(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+
+	for name, err := range map[string]error{
+		"launch on an emulator":  m.Launch(ctx, emulator, "com.example.app", LaunchOptions{}),
+		"restart on a simulator": m.Launch(ctx, simulator, "com.example.app", LaunchOptions{Restart: true}),
+		"stop on a simulator":    m.Stop(ctx, simulator, "com.example.app"),
+	} {
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, want := range []string{
+		"adb -s emulator-5554 shell monkey -p com.example.app",
+		"xcrun simctl launch --terminate-running-process SIM com.example.app",
+		"xcrun simctl terminate SIM com.example.app",
+	} {
+		if !fake.Called(want) {
+			t.Errorf("did not run %q: %v", want, fake.Calls())
+		}
+	}
+	if err := m.Stop(ctx, iphone, "com.example.app"); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("stop on an iPhone: %v", err)
+	}
+}
+
+func TestLaunchAndStopRefuseAStoppedDeviceOrABadID(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	stopped := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Shutdown}
+	running := stopped
+	running.State = device.Booted
+	for name, err := range map[string]error{
+		"launch on a stopped device": m.Launch(ctx, stopped, "com.example.app", LaunchOptions{}),
+		"stop on a stopped device":   m.Stop(ctx, stopped, "com.example.app"),
+		"launch of an injected id":   m.Launch(ctx, running, "a; reboot", LaunchOptions{}),
+		"stop of an option as an id": m.Stop(ctx, running, "--all"),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("a tool ran: %v", calls)
+	}
+}

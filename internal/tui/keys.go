@@ -104,6 +104,8 @@ var keyTable = []keyAction{
 		footer: say("delete"), when: selectedDevice(virtualOnly)},
 	{id: "uninstall", ctx: ctxDevices, keys: []string{"u"}, show: "u", desc: "Uninstall an app (asks first)",
 		when: selectedDevice(running)},
+	{id: "app", ctx: ctxDevices, keys: []string{"o"}, show: "o", desc: "Launch, restart or stop an app",
+		when: selectedDevice(running)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",
 		footer: func(m *Model) string {
 			if m.logCount() > 0 {

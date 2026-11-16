@@ -475,3 +475,114 @@ func TestUninstallFailures(t *testing.T) {
 		t.Errorf("an iPhone that cannot be reached: %v", err)
 	}
 }
+
+// What simctl of Xcode 27.2 printed on a real simulator.
+const (
+	simctlLaunchUnknown = `An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=4):
+Simulator device failed to launch com.example.nope.
+Underlying error (domain=FBSOpenApplicationServiceErrorDomain, code=4):
+	The request to open "com.example.nope" failed.
+`
+	simctlNothingToTerminate = `An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=3):
+Simulator device failed to terminate com.example.app.
+found nothing to terminate
+Underlying error (domain=NSPOSIXErrorDomain, code=3):
+	The request to terminate "com.example.app" failed. found nothing to terminate
+	found nothing to terminate
+`
+	simctlNoContainer = `An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):
+The operation couldn’t be completed. No such file or directory
+No such file or directory
+`
+)
+
+func TestLaunchOnASimulatorOrAnIPhone(t *testing.T) {
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		if strings.HasPrefix(command, "xcrun devicectl device process launch") {
+			if err := os.WriteFile(argv[len(argv)-1], []byte(`{"result": {}}`), 0o600); err != nil {
+				t.Error(err)
+			}
+			return run.Result{}
+		}
+		return runtest.Out("com.example.app: 10223\n")
+	}}
+	ctx := context.Background()
+	c := client(fake)
+	if err := c.Launch(ctx, bootedSim, "com.example.app", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Launch(ctx, bootedSim, "com.example.app", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Launch(ctx, iphone, "com.example.app", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Launch(ctx, iphone, "com.example.app", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"xcrun simctl launch " + udidBooted + " com.example.app",
+		"xcrun simctl launch --terminate-running-process " + udidBooted + " com.example.app",
+		"xcrun devicectl device process launch --device P1 com.example.app --json-output",
+		"xcrun devicectl device process launch --device P1 --terminate-existing com.example.app --json-output",
+	} {
+		if !fake.Called(want) {
+			t.Errorf("did not run %q: %v", want, fake.Calls())
+		}
+	}
+	if err := c.Launch(ctx, pixel, "com.example.app", false); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an Android device: %v", err)
+	}
+}
+
+func TestLaunchOfAnAppThatIsNotInstalledSaysSo(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl launch": runtest.Fail(4, simctlLaunchUnknown)})
+	err := client(fake).Launch(context.Background(), bootedSim, "com.example.nope", false)
+	if apperr.CodeOf(err) != apperr.NotFound || !strings.Contains(err.Error(), "com.example.nope is not installed on iPhone 16") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestStopOnASimulator(t *testing.T) {
+	ctx := context.Background()
+	running := runtest.Table(map[string]run.Result{"simctl terminate": {}})
+	if err := client(running).Stop(ctx, bootedSim, "com.example.app"); err != nil {
+		t.Fatal(err)
+	}
+	if !running.Called("xcrun simctl terminate " + udidBooted + " com.example.app") {
+		t.Errorf("ran %v", running.Calls())
+	}
+
+	// An app that is installed and not running is already stopped.
+	idle := runtest.Table(map[string]run.Result{
+		"simctl terminate":         runtest.Fail(3, simctlNothingToTerminate),
+		"simctl get_app_container": runtest.Out("/path/to/Example.app\n"),
+	})
+	if err := client(idle).Stop(ctx, bootedSim, "com.example.app"); err != nil {
+		t.Errorf("an app that is not running: %v", err)
+	}
+
+	typo := runtest.Table(map[string]run.Result{
+		"simctl terminate":         runtest.Fail(3, simctlNothingToTerminate),
+		"simctl get_app_container": runtest.Fail(2, simctlNoContainer),
+	})
+	if err := client(typo).Stop(ctx, bootedSim, "com.example.ap"); apperr.CodeOf(err) != apperr.NotFound {
+		t.Errorf("an app that is not installed: %v", err)
+	}
+
+	shut := runtest.Table(map[string]run.Result{"simctl terminate": runtest.Fail(149, "Unable to lookup in current state: Shutdown")})
+	if err := client(shut).Stop(ctx, shutdownSim, "com.example.app"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("a simulator that is shut down: %v", err)
+	}
+}
+
+func TestStopOnAnIPhoneIsRefusedWithoutAskingIt(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	err := client(fake).Stop(context.Background(), iphone, "com.example.app")
+	if apperr.CodeOf(err) != apperr.Unsupported || !strings.Contains(err.Error(), "Restart it instead") {
+		t.Errorf("error = %v", err)
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("the phone was asked: %v", calls)
+	}
+}

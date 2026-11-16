@@ -154,6 +154,12 @@ func (f *fakeBackend) Install(_ context.Context, d device.Device, path string) e
 func (f *fakeBackend) Uninstall(_ context.Context, d device.Device, id string) error {
 	return f.record("uninstall %s %s", d.ID, id)
 }
+func (f *fakeBackend) Launch(_ context.Context, d device.Device, id string, o mobile.LaunchOptions) error {
+	return f.record("launch %s %s restart=%v", d.ID, id, o.Restart)
+}
+func (f *fakeBackend) Stop(_ context.Context, d device.Device, id string) error {
+	return f.record("stop %s %s", d.ID, id)
+}
 func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
 	if err := f.record("apps %s", d.ID); err != nil {
 		return nil, err
@@ -1864,4 +1870,56 @@ func TestAFailedUninstallIsExplained(t *testing.T) {
 	h.backend.fail["uninstall"] = apperr.New(apperr.CommandFailed, "Uninstall failed: Failure [DELETE_FAILED_DEVICE_POLICY_MANAGER]")
 	h.press("u", "enter", "y")
 	h.wantScreen("Could not finish: uninstalling com.example.app from Pixel 9a", "DELETE_FAILED_DEVICE_POLICY_MANAGER")
+}
+
+func TestAnAppIsLaunchedRestartedOrStoppedFromTheDevices(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{
+		{ID: "com.example.app", Name: "Example", Version: "1.4.2", Build: "87"},
+		{ID: "com.example.other", Name: "Other"},
+	}
+	h.press("o")
+	h.wantCalls("apps SIM-1", 1)
+	h.wantScreen("Which app on iPhone 17?", "com.example.app", "1.4.2 (87)", "com.example.other")
+
+	h.press("enter")
+	h.wantScreen("com.example.app on iPhone 17", "Launch", "Restart", "Stop")
+	h.wantCalls("launch", 0)
+	h.press("enter")
+	h.wantCalls("launch SIM-1 com.example.app restart=false", 1)
+	h.wantScreen("Launched com.example.app on iPhone 17")
+
+	h.press("o", "enter", "down", "enter")
+	h.wantCalls("launch SIM-1 com.example.app restart=true", 1)
+	h.wantScreen("Restarted com.example.app on iPhone 17")
+
+	h.press("o", "down", "enter", "down", "down", "enter")
+	h.wantCalls("stop SIM-1 com.example.other", 1)
+	h.wantScreen("Stopped com.example.other on iPhone 17")
+}
+
+func TestAnIPhoneOffersNoStop(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.press("o", "enter")
+	h.wantScreen("com.example.app on Test iPhone", "Launch", "Restart")
+	h.wantNoScreen("Stop")
+	h.press("down", "down", "enter")
+	h.wantCalls("stop", 0)
+}
+
+func TestAppActionsNeedARunningDeviceAndSayWhenTheyFail(t *testing.T) {
+	h := start(t, ipad, pixel)
+	h.press("o")
+	h.wantScreen("iPad Air is not running")
+	h.wantCalls("apps", 0)
+
+	h.selectDevice(pixel)
+	h.press("o")
+	h.wantScreen("No apps of yours are installed on Pixel 9a")
+
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.backend.fail["launch"] = apperr.New(apperr.NotFound, "com.example.app has nothing to launch on Pixel 9a")
+	h.press("o", "enter", "enter")
+	h.wantScreen("Could not finish: launching com.example.app on Pixel 9a", "has nothing to launch")
 }

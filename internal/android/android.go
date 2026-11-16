@@ -563,6 +563,64 @@ func (c *Client) Uninstall(ctx context.Context, d device.Device, id string) erro
 	return nil
 }
 
+// Launch starts an app, by package name, on a running emulator or connected phone, and brings it
+// to the front. An app that is already running keeps running, unless restart stops it first.
+func (c *Client) Launch(ctx context.Context, d device.Device, id string, restart bool) error {
+	adb, err := c.appTool(d, id)
+	if err != nil {
+		return err
+	}
+	if restart {
+		if err := c.forceStop(ctx, adb, d, id); err != nil {
+			return err
+		}
+	}
+	// monkey sends one launcher event to the package, which opens its main screen without the
+	// activity's name.
+	argv := []string{adb, "-s", d.TargetID(), "shell", "monkey", "-p", id, "-c", "android.intent.category.LAUNCHER", "1"}
+	res := c.run(ctx, argv, actionTimeout)
+	if strings.Contains(res.Stdout+res.Stderr, "No activities found to run") {
+		return &apperr.Error{
+			Code:    apperr.NotFound,
+			Message: fmt.Sprintf("%s has nothing to launch on %s", id, d.Name),
+			Hint:    fmt.Sprintf("It is not installed, or it has no screen of its own. Run `lazymobile apps %q` to see what is installed.", d.Name),
+			Argv:    argv, ExitCode: res.Code,
+		}
+	}
+	return apperr.FromResult(res, argv, installHint["adb"])
+}
+
+// Stop force-stops an app, by package name, on a running emulator or connected phone. An app that
+// is not running is already stopped, which is success. `am force-stop` also succeeds for a
+// package that does not exist, so that is checked first.
+func (c *Client) Stop(ctx context.Context, d device.Device, id string) error {
+	adb, err := c.appTool(d, id)
+	if err != nil {
+		return err
+	}
+	if _, err := c.AppInfo(ctx, d, id); err != nil {
+		return err
+	}
+	return c.forceStop(ctx, adb, d, id)
+}
+
+// appTool checks that an app on d can be acted on, and returns the path of adb.
+func (c *Client) appTool(d device.Device, id string) (string, error) {
+	if d.Platform != device.Android || !d.Ready() {
+		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name)
+	}
+	// adb joins `shell` arguments into one command line for the device's shell.
+	if !logs.ValidAppID(id) {
+		return "", apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	return c.Opts.tool("adb")
+}
+
+func (c *Client) forceStop(ctx context.Context, adb string, d device.Device, id string) error {
+	argv := []string{adb, "-s", d.TargetID(), "shell", "am", "force-stop", id}
+	return apperr.FromResult(c.run(ctx, argv, actionTimeout), argv, installHint["adb"])
+}
+
 // ADB is the path of adb, for callers that stream from it.
 func (c *Client) ADB() (string, error) {
 	return c.Opts.tool("adb")

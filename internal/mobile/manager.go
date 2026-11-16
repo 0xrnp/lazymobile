@@ -168,11 +168,8 @@ func (m *Manager) Install(ctx context.Context, d device.Device, path string) err
 // go: the id must be among InstalledApps. That check is also what tells a typo from success,
 // because simctl and devicectl both report success for an app that is not there.
 func (m *Manager) Uninstall(ctx context.Context, d device.Device, id string) error {
-	if !d.Ready() {
-		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
-	}
-	if !logs.ValidAppID(id) {
-		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	if err := appTarget(d, id); err != nil {
+		return err
 	}
 	apps, err := m.InstalledApps(ctx, d)
 	if err != nil {
@@ -186,6 +183,48 @@ func (m *Manager) Uninstall(ctx context.Context, d device.Device, id string) err
 		return m.IOS.Uninstall(ctx, d, id)
 	}
 	return m.Android.Uninstall(ctx, d, id)
+}
+
+// LaunchOptions change how an app is started.
+type LaunchOptions struct {
+	// Restart stops a running copy of the app first.
+	Restart bool
+}
+
+// Launch starts an app on a running device and brings it to the front. An app that is not
+// installed is a not_found error.
+func (m *Manager) Launch(ctx context.Context, d device.Device, id string, opts LaunchOptions) error {
+	if err := appTarget(d, id); err != nil {
+		return err
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.Launch(ctx, d, id, opts.Restart)
+	}
+	return m.Android.Launch(ctx, d, id, opts.Restart)
+}
+
+// Stop ends a running app on a simulator, emulator or Android phone. Its data is kept. An app
+// that is not running is success, and one that is not installed is a not_found error.
+func (m *Manager) Stop(ctx context.Context, d device.Device, id string) error {
+	if err := appTarget(d, id); err != nil {
+		return err
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.Stop(ctx, d, id)
+	}
+	return m.Android.Stop(ctx, d, id)
+}
+
+// appTarget checks that d is running and that id has the shape of an app id.
+func appTarget(d device.Device, id string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if !logs.ValidAppID(id) {
+		return apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id).
+			WithHint("Use a package name or bundle id, such as com.example.app.")
+	}
+	return nil
 }
 
 // LogDeps are the tools a log session needs.
