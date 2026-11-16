@@ -226,3 +226,123 @@ func TestLaunchAndStopRefuseAStoppedDeviceOrABadID(t *testing.T) {
 		t.Errorf("a tool ran: %v", calls)
 	}
 }
+
+// twoSimulators answers `simctl list` with a booted and a shut-down simulator, and nothing else.
+func twoSimulators(t *testing.T) (*Manager, *runtest.Fake) {
+	t.Helper()
+	m, _ := manager(t, "darwin")
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		switch {
+		case strings.Contains(command, "simctl list devices"):
+			return runtest.Out(`{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+  {"udid": "00000000-0000-4000-8000-0000000000A1", "name": "iPhone 16", "state": "Shutdown", "isAvailable": true},
+  {"udid": "00000000-0000-4000-8000-0000000000A2", "name": "iPhone 16 Pro", "state": "Booted", "isAvailable": true}
+]}}`)
+		case strings.Contains(command, "devicectl list devices"):
+			if err := os.WriteFile(argv[len(argv)-1], []byte(`{"result": {"devices": []}}`), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		return run.Result{}
+	}}
+	m.Runner, m.IOS.Runner = fake, fake
+	return m, fake
+}
+
+func TestFindMeansOneDeviceOrExplainsWhy(t *testing.T) {
+	m, _ := twoSimulators(t)
+	ctx := context.Background()
+
+	if d, err := m.Find(ctx, "iphone 16 pro"); err != nil || d.ID != "00000000-0000-4000-8000-0000000000A2" {
+		t.Errorf("an exact name: %+v, %v", d, err)
+	}
+	if d, err := m.Find(ctx, "00000000-0000-4000-8000-0000000000a1"); err != nil || d.Name != "iPhone 16" {
+		t.Errorf("an id in another case: %+v, %v", d, err)
+	}
+
+	if d, err := m.Find(ctx, "pro"); err != nil || d.Name != "iPhone 16 Pro" {
+		t.Errorf("a part of a name that fits one device: %+v, %v", d, err)
+	}
+
+	// There is no Android SDK here, so a miss blames the tool that failed, which is the likelier
+	// reason a device is not in the list.
+	_, err := m.Find(ctx, "pixel")
+	var e *apperr.Error
+	if !errors.As(err, &e) || e.Code != apperr.NotFound || !strings.Contains(e.Hint, "Some tools failed") {
+		t.Errorf("no match: %v", err)
+	}
+	_, err = m.Find(ctx, "iphone")
+	if !errors.As(err, &e) || e.Code != apperr.InvalidState || !strings.Contains(e.Hint, "00000000-0000-4000-8000-0000000000A1") ||
+		!strings.Contains(e.Hint, "00000000-0000-4000-8000-0000000000A2") {
+		t.Errorf("a part that matches both must list their ids: %v", err)
+	}
+}
+
+func TestBootOfASimulatorRefusesAWipe(t *testing.T) {
+	m, fake := twoSimulators(t)
+	sim := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Shutdown}
+	err := m.Boot(context.Background(), sim, BootOptions{Wipe: true})
+	if apperr.CodeOf(err) != apperr.Unsupported || fake.Called("simctl boot") {
+		t.Errorf("error = %v, calls = %v", err, fake.Calls())
+	}
+}
+
+func TestInstallChecksTheDeviceAndTheKindOfFileBeforeAnyTool(t *testing.T) {
+	m, fake := manager(t, "darwin")
+	ctx := context.Background()
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	stopped := simulator
+	stopped.State = device.Shutdown
+
+	for name, err := range map[string]error{
+		"a device that is not running": m.Install(ctx, stopped, "/tmp/App.app"),
+		"an .app on Android":           m.Install(ctx, emulator, "/tmp/App.app"),
+		"an .apk on a simulator":       m.Install(ctx, simulator, "/tmp/app.apk"),
+		"a file with no extension":     m.Install(ctx, emulator, "/tmp/app"),
+	} {
+		if apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%s: %v, want invalid_state", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+
+	// The extension is matched whatever its case, and a trailing slash on an .app folder is fine.
+	m, fake = twoSimulators(t)
+	if err := m.Install(ctx, simulator, "/tmp/App.APP/"); err != nil || !fake.Called("simctl install SIM /tmp/App.APP/") {
+		t.Errorf("an .app folder: %v, calls = %v", err, fake.Calls())
+	}
+}
+
+func TestOpenURLOnlyOpensWebAddressesWithTheSystemsOpener(t *testing.T) {
+	for goos, opener := range map[string]string{"darwin": "open", "linux": "xdg-open"} {
+		m, fake := manager(t, goos)
+		fake.Answer = func(string, []string, run.Options) run.Result { return run.Result{} }
+		if err := m.OpenURL(context.Background(), "https://expo.dev/builds/1"); err != nil {
+			t.Errorf("%s: %v", goos, err)
+		}
+		if !fake.Called(opener + " https://expo.dev/builds/1") {
+			t.Errorf("%s: ran %v, want %s", goos, fake.Calls(), opener)
+		}
+	}
+	m, fake := manager(t, "darwin")
+	for _, url := range []string{"http://expo.dev", "file:///etc/passwd", "-a Calculator", ""} {
+		if err := m.OpenURL(context.Background(), url); apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%q: %v, want invalid_state", url, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+}
+
+func TestOnlyDarwinHasIOS(t *testing.T) {
+	if m, _ := manager(t, "darwin"); !m.HasIOS() {
+		t.Error("macOS has iOS")
+	}
+	if m, _ := manager(t, "linux"); m.HasIOS() {
+		t.Error("Linux has no iOS")
+	}
+}
