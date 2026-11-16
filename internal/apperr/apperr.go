@@ -21,6 +21,8 @@ const (
 	Unsupported   Code = "unsupported"
 	NotFound      Code = "not_found"
 	InvalidState  Code = "invalid_state"
+	// Usage is a command typed wrongly, such as a missing argument or an unknown flag.
+	Usage Code = "usage"
 )
 
 // Error is a failure with enough context to show and to act on.

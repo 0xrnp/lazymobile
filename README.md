@@ -62,6 +62,7 @@ Early release. What has been run, and what has not:
 | Several logs at once | Four real system logs of an iOS simulator, in a real terminal: a grid, stacked and one at a time, the list (`a`) closing one, and quitting and coming back with the rest restored. Also a simulator's log beside a real iPhone's launch-an-app log (the launch faked). Not run: more than four logs, or Android logs in several panes. The rest is covered by tests with fake tools |
 | Uninstalling an app | A real iPhone that lazymobile listed as connected over Wi-Fi (it was first paired over USB), and Android, both run by the maintainer. The app list of a real simulator and refusing an app that is not installed were also run. Not run: a real removal on a simulator |
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
+| `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -269,8 +270,10 @@ delete or uninstall need `--yes`. Exit codes: 0 success, 1 failure, 2 wrong usag
 
 App ids given to `logs` and `launch` are remembered, newest first, and shared with the dashboard.
 
-`logs --json` prints one object per line (`text`, `level` from 1 verbose to 6 fatal, `pid`), which
-is easy for a script or a coding agent to read.
+Every command takes `--json`. A failure is then printed on stdout as
+`{"error": {"code", "message", "hint"}}`, with the same exit code, so a script can tell `not_found`
+from `tool_missing`. `logs --json` prints one object per line (`text`, `level` from 1 verbose to 6
+fatal, `pid`). Every shape is in [docs/json.md](docs/json.md).
 
 ## Project settings
 

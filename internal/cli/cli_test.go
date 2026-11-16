@@ -552,3 +552,125 @@ func TestLaunchAndStopUsageAndDevicesThatAreNotRunning(t *testing.T) {
 		t.Errorf("a failed launch was remembered: %v", recent)
 	}
 }
+
+// object is what a command printed with --json, which must be one JSON object.
+func (e *env) object(t *testing.T) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(e.out.Bytes(), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, e.out.String())
+	}
+	return out
+}
+
+func TestAFailureWithJSONIsAnErrorObjectOnStdout(t *testing.T) {
+	e := newEnv(t)
+	tests := []struct {
+		name string
+		args []string
+		exit int
+		code string
+		hint bool
+	}{
+		{"a device that does not exist", []string{"shutdown", "Galaxy", "--json"}, ExitFailure, "not_found", true},
+		{"a name that fits two devices", []string{"id", "--json", "iphone"}, ExitFailure, "invalid_state", true},
+		{"a device that is not running", []string{"launch", "iPhone 16", "com.example.installed", "--json"}, ExitFailure, "invalid_state", true},
+		{"a missing argument", []string{"boot", "--json"}, ExitUsage, "usage", false},
+		{"a flag that does not exist", []string{"list", "--json", "--bogus"}, ExitUsage, "usage", false},
+		{"a command that does not exist", []string{"fly", "--json"}, ExitUsage, "usage", false},
+		{"a destructive command without --yes", []string{"erase", "iPhone 16", "--json"}, ExitUsage, "usage", false},
+	}
+	for _, tt := range tests {
+		if code := e.run(tt.args...); code != tt.exit {
+			t.Errorf("%s: exit code %d, want %d", tt.name, code, tt.exit)
+		}
+		if e.errs.Len() != 0 {
+			t.Errorf("%s: stderr has %q, want nothing", tt.name, e.errs.String())
+		}
+		failure, _ := e.object(t)["error"].(map[string]any)
+		if failure["code"] != tt.code || failure["message"] == "" || (failure["hint"] != nil) != tt.hint {
+			t.Errorf("%s: error object = %v, want code %s (hint %v)", tt.name, failure, tt.code, tt.hint)
+		}
+	}
+}
+
+func TestAFailureWithoutJSONStaysText(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("shutdown", "Galaxy"); code != ExitFailure || e.out.Len() != 0 || !strings.Contains(e.errs.String(), "No device matches") {
+		t.Errorf("code %d, stdout %q, stderr %q", code, e.out.String(), e.errs.String())
+	}
+}
+
+func TestEveryChangeWithJSONSaysWhatItDidToWhichDevice(t *testing.T) {
+	e := newEnv(t)
+	apk := filepath.Join(t.TempDir(), "App.app")
+	tests := []struct {
+		args   []string
+		action string
+		app    string
+		path   string
+	}{
+		{[]string{"boot", "iPhone 16", "--no-window", "--json"}, "boot", "", ""},
+		{[]string{"shutdown", "iPhone 16 Pro", "--json"}, "shutdown", "", ""},
+		{[]string{"erase", "iPhone 16", "--yes", "--json"}, "erase", "", ""},
+		{[]string{"delete", "iPhone 16", "--yes", "--json"}, "delete", "", ""},
+		{[]string{"install", "iPhone 16 Pro", apk, "--json"}, "install", "", apk},
+		{[]string{"uninstall", "iPhone 16 Pro", "com.example.installed", "--yes", "--json"}, "uninstall", "com.example.installed", ""},
+		{[]string{"launch", "iPhone 16 Pro", "com.example.installed", "--json"}, "launch", "com.example.installed", ""},
+		{[]string{"launch", "iPhone 16 Pro", "com.example.installed", "--restart", "--json"}, "restart", "com.example.installed", ""},
+		{[]string{"stop", "iPhone 16 Pro", "com.example.installed", "--json"}, "stop", "com.example.installed", ""},
+	}
+	for _, tt := range tests {
+		if code := e.run(tt.args...); code != ExitOK {
+			t.Errorf("%v: exit code %d, stderr %q", tt.args, code, e.errs.String())
+			continue
+		}
+		out := e.object(t)
+		dev, _ := out["device"].(map[string]any)
+		if out["ok"] != true || out["action"] != tt.action || dev["name"] == "" || dev["id"] == "" {
+			t.Errorf("%v: printed %v", tt.args, out)
+		}
+		if got, _ := out["app"].(string); got != tt.app {
+			t.Errorf("%v: app = %q, want %q", tt.args, got, tt.app)
+		}
+		if got, _ := out["path"].(string); got != tt.path {
+			t.Errorf("%v: path = %q, want %q", tt.args, got, tt.path)
+		}
+	}
+}
+
+func TestIDWithJSONGivesTheDeviceAndItsID(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("id", "iPhone 16 Pro", "--json"); code != ExitOK {
+		t.Fatalf("exit code %d", code)
+	}
+	out := e.object(t)
+	if out["id"] != "00000000-0000-4000-8000-0000000000A2" || out["device"].(map[string]any)["name"] != "iPhone 16 Pro" {
+		t.Errorf("printed %v", out)
+	}
+}
+
+func TestDoctorWithJSONPrintsOnlyItsReportWhenSomethingIsWrong(t *testing.T) {
+	e := newEnv(t)
+	e.report = doctor.Report{OS: "darwin", Problems: []doctor.Problem{{Code: "android_sdk_invalid", Platform: "android", Severity: doctor.Wrong, Message: "ANDROID_HOME is wrong"}}}
+	if code := e.run("doctor", "--json"); code != ExitFailure {
+		t.Errorf("a wrong setting should still fail: code %d", code)
+	}
+	out := e.object(t)
+	if _, hasError := out["error"]; hasError || out["problems"] == nil {
+		t.Errorf("printed %v, want the report and no error object", out)
+	}
+}
+
+func TestListWithJSONKeepsItsErrorsInTheSameShape(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("list", "--json"); code != ExitOK {
+		t.Fatalf("exit code %d", code)
+	}
+	problems, _ := e.object(t)["errors"].([]any)
+	for _, p := range problems {
+		if p.(map[string]any)["code"] == nil {
+			t.Errorf("an error without a code: %v", p)
+		}
+	}
+}

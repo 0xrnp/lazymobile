@@ -40,17 +40,17 @@ const usage = `lazymobile: simulators, emulators, phones and their logs, from th
 Usage:
   lazymobile                       open the dashboard
   lazymobile list [--json]         list every device
-  lazymobile boot <device> [--cold] [--wipe --yes] [--wait] [--no-window]
-  lazymobile shutdown <device> [--keep-simulator-app]
-  lazymobile erase <device> --yes  erase a simulator, or wipe an emulator's data
-  lazymobile delete <device> --yes
-  lazymobile uninstall <device> <app-id> --yes   remove an app and its data from a running device
-  lazymobile install <device> <path>   an .apk, or an .app folder for a simulator
-  lazymobile launch <device> <app-id> [--restart]   open an app. --restart stops a running copy first
-  lazymobile stop <device> <app-id>    stop a running app. Its data is kept
+  lazymobile boot <device> [--cold] [--wipe --yes] [--wait] [--no-window] [--json]
+  lazymobile shutdown <device> [--keep-simulator-app] [--json]
+  lazymobile erase <device> --yes [--json]   erase a simulator, or wipe an emulator's data
+  lazymobile delete <device> --yes [--json]
+  lazymobile uninstall <device> <app-id> --yes [--json]   remove an app and its data from a running device
+  lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator
+  lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
+  lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
-  lazymobile id <device>           the id for adb -s, flutter -d and xcrun
+  lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n]   Expo (EAS) builds of the project in this folder
   lazymobile doctor [--json]       what is installed, what is missing, and how to fix it
   lazymobile version
@@ -65,6 +65,8 @@ dashboard's app list.
 <device> is an id, an adb serial, a name, or a unique part of a name.
 Commands that erase, delete or uninstall need --yes.
 Exit codes: 0 success, 1 failure, 2 wrong usage.
+With --json, a failure is printed on stdout as {"error": {"code", "message", "hint"}} and the exit
+code is the same. See docs/json.md.
 `
 
 // App is what the commands need. main fills it in; tests replace parts of it.
@@ -104,21 +106,85 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
+// reportedError is a failure whose details were already printed, such as a doctor report with
+// problems in it. With --json it is not printed a second time.
+type reportedError struct{ error }
+
+// jsonRequested reports whether the command line asks for JSON, before any command has parsed it,
+// so that even a mistake in the command line can be answered in JSON.
+func jsonRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--":
+			return false
+		case "--json", "-json", "--json=true", "-json=true":
+			return true
+		}
+	}
+	return false
+}
+
+// asError is err as the object --json prints: an apperr error as it is, a typing mistake as a
+// usage error, and anything else as a failed command.
+func asError(err error) *apperr.Error {
+	var e *apperr.Error
+	var usageErr usageError
+	switch {
+	case errors.As(err, &e):
+		return e
+	case errors.As(err, &usageErr):
+		return apperr.New(apperr.Usage, "%s", usageErr.message)
+	}
+	return apperr.New(apperr.CommandFailed, "%s", err.Error())
+}
+
 // Run executes one command and returns the exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	err := a.run(ctx, args)
-	var usageErr usageError
-	switch {
-	case err == nil:
+	if err == nil {
 		return ExitOK
-	case errors.As(err, &usageErr):
-		fmt.Fprintf(a.Stderr, "lazymobile: %s\n\nRun `lazymobile help` for usage.\n", usageErr.message)
-		return ExitUsage
-	case errors.Is(err, context.Canceled):
+	}
+	if errors.Is(err, context.Canceled) {
 		return ExitInterrupted
 	}
-	fmt.Fprintf(a.Stderr, "lazymobile: %s\n", err)
-	return ExitFailure
+	var usageErr usageError
+	code := ExitFailure
+	if errors.As(err, &usageErr) {
+		code = ExitUsage
+	}
+	var reported reportedError
+	switch {
+	case jsonRequested(args):
+		if !errors.As(err, &reported) {
+			_ = a.writeJSON(map[string]any{"error": asError(err)})
+		}
+	case code == ExitUsage:
+		fmt.Fprintf(a.Stderr, "lazymobile: %s\n\nRun `lazymobile help` for usage.\n", usageErr.message)
+	default:
+		fmt.Fprintf(a.Stderr, "lazymobile: %s\n", err)
+	}
+	return code
+}
+
+// result is what a command that changes a device prints with --json.
+type result struct {
+	OK     bool   `json:"ok"`
+	Action string `json:"action"`
+	// Device is as it was found, before the action.
+	Device   device.Device `json:"device"`
+	App      string        `json:"app,omitempty"`
+	Path     string        `json:"path,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
+}
+
+// done reports a finished action: the object with --json, the sentence otherwise.
+func (a *App) done(asJSON bool, r result, sentence string) error {
+	if asJSON {
+		r.OK = true
+		return a.writeJSON(r)
+	}
+	_, err := fmt.Fprintln(a.Stdout, sentence)
+	return err
 }
 
 func (a *App) run(ctx context.Context, args []string) error {
@@ -209,11 +275,7 @@ func (a *App) list(ctx context.Context, args []string) error {
 	if *asJSON {
 		problems := make([]*apperr.Error, 0, len(errs))
 		for _, err := range errs {
-			var e *apperr.Error
-			if !errors.As(err, &e) {
-				e = apperr.New(apperr.CommandFailed, "%s", err.Error())
-			}
-			problems = append(problems, e)
+			problems = append(problems, asError(err))
 		}
 		if devices == nil {
 			devices = []device.Device{}
@@ -242,6 +304,7 @@ func (a *App) boot(ctx context.Context, args []string) error {
 	wait := fs.Bool("wait", false, "")
 	yes := fs.Bool("yes", false, "")
 	noWindow := fs.Bool("no-window", false, "")
+	asJSON := fs.Bool("json", false, "")
 	d, err := a.one(ctx, fs, args, "boot")
 	if err != nil {
 		return err
@@ -257,13 +320,13 @@ func (a *App) boot(ctx context.Context, args []string) error {
 	if *wait {
 		state = "is ready"
 	}
-	fmt.Fprintf(a.Stdout, "%s %s\n", d.Name, state)
-	return nil
+	return a.done(*asJSON, result{Action: "boot", Device: d}, fmt.Sprintf("%s %s", d.Name, state))
 }
 
 func (a *App) shutdown(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("shutdown", flag.ContinueOnError)
 	keepApp := fs.Bool("keep-simulator-app", false, "")
+	asJSON := fs.Bool("json", false, "")
 	d, err := a.one(ctx, fs, args, "shutdown")
 	if err != nil {
 		return err
@@ -274,16 +337,20 @@ func (a *App) shutdown(ctx context.Context, args []string) error {
 	if err != nil && !errors.As(err, &notQuit) {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "Shut down %s\n", d.Name)
+	r := result{Action: "shutdown", Device: d}
 	if notQuit != nil {
-		fmt.Fprintf(a.Stderr, "warning: %s\n", notQuit)
+		r.Warnings = []string{notQuit.Error()}
+		if !*asJSON {
+			defer fmt.Fprintf(a.Stderr, "warning: %s\n", notQuit)
+		}
 	}
-	return nil
+	return a.done(*asJSON, r, "Shut down "+d.Name)
 }
 
 func (a *App) destructive(ctx context.Context, args []string, name, done string, act func(context.Context, device.Device) error) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "")
+	asJSON := fs.Bool("json", false, "")
 	d, err := a.one(ctx, fs, args, name)
 	if err != nil {
 		return err
@@ -294,12 +361,13 @@ func (a *App) destructive(ctx context.Context, args []string, name, done string,
 	if err := act(ctx, d); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "%s %s\n", done, d.Name)
-	return nil
+	return a.done(*asJSON, result{Action: name, Device: d}, done+" "+d.Name)
 }
 
 func (a *App) install(ctx context.Context, args []string) error {
-	positional, err := parse(flag.NewFlagSet("install", flag.ContinueOnError), args)
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
@@ -313,13 +381,13 @@ func (a *App) install(ctx context.Context, args []string) error {
 	if err := a.Manager.Install(ctx, d, positional[1]); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "Installed on %s\n", d.Name)
-	return nil
+	return a.done(*asJSON, result{Action: "install", Device: d, Path: positional[1]}, "Installed on "+d.Name)
 }
 
 func (a *App) uninstall(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "")
+	asJSON := fs.Bool("json", false, "")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -337,8 +405,8 @@ func (a *App) uninstall(ctx context.Context, args []string) error {
 	if err := a.Manager.Uninstall(ctx, d, positional[1]); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "Uninstalled %s from %s\n", positional[1], d.Name)
-	return nil
+	return a.done(*asJSON, result{Action: "uninstall", Device: d, App: positional[1]},
+		fmt.Sprintf("Uninstalled %s from %s", positional[1], d.Name))
 }
 
 // deviceAndApp parses a command that takes a device and an app id.
@@ -357,6 +425,7 @@ func (a *App) deviceAndApp(ctx context.Context, fs *flag.FlagSet, args []string)
 func (a *App) launch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
 	restart := fs.Bool("restart", false, "")
+	asJSON := fs.Bool("json", false, "")
 	d, app, err := a.deviceAndApp(ctx, fs, args)
 	if err != nil {
 		return err
@@ -365,30 +434,35 @@ func (a *App) launch(ctx context.Context, args []string) error {
 		return err
 	}
 	_ = a.State.Update(func(f *state.File) { f.RememberApp(d.Platform, app) })
-	done := "Launched"
+	action, done := "launch", "Launched"
 	if *restart {
-		done = "Restarted"
+		action, done = "restart", "Restarted"
 	}
-	fmt.Fprintf(a.Stdout, "%s %s on %s\n", done, app, d.Name)
-	return nil
+	return a.done(*asJSON, result{Action: action, Device: d, App: app}, fmt.Sprintf("%s %s on %s", done, app, d.Name))
 }
 
 func (a *App) stop(ctx context.Context, args []string) error {
-	d, app, err := a.deviceAndApp(ctx, flag.NewFlagSet("stop", flag.ContinueOnError), args)
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
 	if err != nil {
 		return err
 	}
 	if err := a.Manager.Stop(ctx, d, app); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "Stopped %s on %s\n", app, d.Name)
-	return nil
+	return a.done(*asJSON, result{Action: "stop", Device: d, App: app}, fmt.Sprintf("Stopped %s on %s", app, d.Name))
 }
 
 func (a *App) id(ctx context.Context, args []string) error {
-	d, err := a.one(ctx, flag.NewFlagSet("id", flag.ContinueOnError), args, "id")
+	fs := flag.NewFlagSet("id", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	d, err := a.one(ctx, fs, args, "id")
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		return a.writeJSON(map[string]any{"device": d, "id": d.TargetID()})
 	}
 	fmt.Fprintln(a.Stdout, d.TargetID())
 	return nil
@@ -554,7 +628,7 @@ func (a *App) doctor(ctx context.Context, args []string) error {
 		WriteReport(a.Stdout, report)
 	}
 	if !report.Healthy() {
-		return errors.New("some tools are set up wrongly")
+		return reportedError{errors.New("some tools are set up wrongly")}
 	}
 	return nil
 }
