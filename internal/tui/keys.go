@@ -131,6 +131,7 @@ var keyTable = []keyAction{
 	{id: "log_page", ctx: ctxLogs, keys: []string{"pgdown", "ctrl+d", "space", "pgup", "ctrl+u"}, show: "pgup pgdn", desc: "Half a page up or down", when: needsLog},
 	{id: "log_first", ctx: ctxLogs, keys: []string{"g", "home"}, show: "g", desc: "First line", when: needsLog},
 	{id: "log_follow", ctx: ctxLogs, keys: []string{"G", "end"}, show: "G", desc: "Jump to the newest line and follow", when: needsLog},
+	{id: "log_error", ctx: ctxLogs, keys: []string{"e", "E"}, show: "e E", desc: "Jump to the next or previous error or crash", when: needsLog},
 	{id: "log_slide", ctx: ctxLogs, keys: []string{"right", "l", "left", "h"}, show: "h l", desc: "Scroll sideways", when: needsLog},
 	{id: "log_reset", ctx: ctxLogs, keys: []string{"0"}, show: "0", desc: "Back to the start of the lines", when: needsLog},
 	{id: "log_line", ctx: ctxLogs, keys: []string{"enter"}, show: "enter", desc: "Show the selected line in full",

@@ -907,6 +907,15 @@ func (m *Model) logKey(key string) tea.Cmd {
 		v.first()
 	case "G", "end":
 		v.follow = true
+	case "e", "E":
+		forward := key == "e"
+		if !v.jumpError(forward, rows) {
+			if forward {
+				m.setNote("No error below this line", false)
+			} else {
+				m.setNote("No error above this line", false)
+			}
+		}
 	case "enter":
 		entry := v.entry()
 		if len(entry) == 0 {

@@ -48,6 +48,8 @@ type Line struct {
 	Text  string `json:"text"`
 	Level Level  `json:"level,omitempty"`
 	PID   string `json:"pid,omitempty"`
+	// Crash marks a line of a crash: an app that died, or an error React Native stops on.
+	Crash bool `json:"crash,omitempty"`
 }
 
 var androidRank = map[byte]Level{'V': Verbose, 'D': Debug, 'I': Info, 'W': Warning, 'E': Error, 'F': Fatal, 'A': Fatal}
@@ -57,11 +59,12 @@ var androidLine = regexp.MustCompile(`^\d\d-\d\d\s+\d\d:\d\d:\d\d\.\d+\s+(\d+)\s
 
 // ParseAndroid reads a `logcat -v threadtime` line.
 func ParseAndroid(text string) Line {
+	crash := hasCrashPhrase(text) || androidCrashTag.MatchString(text)
 	m := androidLine.FindStringSubmatch(text)
 	if m == nil {
-		return Line{Text: text}
+		return Line{Text: text, Crash: crash}
 	}
-	return Line{Text: text, PID: m[1], Level: androidRank[m[2][0]]}
+	return Line{Text: text, PID: m[1], Level: androidRank[m[2][0]], Crash: crash}
 }
 
 // os_log types in `log stream --style compact`: Db debug, I info, Df default, E error, F fault.
@@ -73,16 +76,17 @@ var iosLine = regexp.MustCompile(`^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+([A-Za-
 
 // ParseIOS reads a `log stream --style compact` line.
 func ParseIOS(text string) Line {
+	crash := hasCrashPhrase(text)
 	m := iosLine.FindStringSubmatch(text)
 	if m == nil {
-		return Line{Text: text}
+		return Line{Text: text, Crash: crash}
 	}
-	return Line{Text: text, PID: m[2], Level: iosRank[m[1]]}
+	return Line{Text: text, PID: m[2], Level: iosRank[m[1]], Crash: crash}
 }
 
 // ParsePlain is for an app's console output, which has no header.
 func ParsePlain(text string) Line {
-	return Line{Text: text}
+	return Line{Text: text, Crash: hasCrashPhrase(text)}
 }
 
 // AppFilter keeps the lines of one Android app across restarts. An app gets a new pid each time

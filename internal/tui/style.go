@@ -136,6 +136,14 @@ func stateMark(d device.Device, busy bool) string {
 	return dim.Render("○")
 }
 
+// lineStyle is how a line is drawn: a crash in bold, apart from the plain red of an error.
+func lineStyle(line logs.Line) lipgloss.Style {
+	if line.Crash {
+		return red.Bold(true)
+	}
+	return levelStyle(line.Level)
+}
+
 func levelStyle(level logs.Level) lipgloss.Style {
 	switch level {
 	case logs.Fatal, logs.Error:

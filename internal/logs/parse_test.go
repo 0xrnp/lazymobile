@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/device"
@@ -127,5 +128,60 @@ func TestParseLevel(t *testing.T) {
 	}
 	if Error.String() != "error" || NoLevel.String() != "all" {
 		t.Errorf("names: %s, %s", Error, NoLevel)
+	}
+}
+
+// A real crash on an Android 16 emulator, from `am crash` on the Settings app. Every line of the
+// report has the error level and the AndroidRuntime tag, and the line before it is not an error.
+const androidCrash = `11-16 07:50:32.344 11123 11123 D AndroidRuntime: Shutting down VM
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: FATAL EXCEPTION: main
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: Process: com.android.settings, PID: 11123
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: android.app.RemoteServiceException$CrashedByAdbException: shell-induced crash
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: 	at android.app.ActivityThread.throwRemoteServiceException(ActivityThread.java:2377)
+11-16 07:50:32.344 11123 11123 E AndroidRuntime: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)`
+
+func TestEveryLineOfAnAndroidCrashReportIsMarked(t *testing.T) {
+	for i, text := range strings.Split(androidCrash, "\n") {
+		line := ParseAndroid(text)
+		if want := i > 0; line.Crash != want {
+			t.Errorf("line %d: Crash = %v, want %v: %s", i, line.Crash, want, text)
+		}
+	}
+}
+
+func TestLinesThatAreNotCrashesAreNotMarked(t *testing.T) {
+	for _, text := range []string{
+		"11-13 20:49:44.298   917  1126 E Tag: a plain error",
+		"11-13 20:49:44.298   917  1126 W AndroidRuntime: a warning with the tag",
+		"11-13 20:49:44.298   917  1126 I ReactNativeJS: Running \"main\"",
+		"11-13 20:49:44.298   917  1126 D Tag: msg",
+		"",
+	} {
+		if ParseAndroid(text).Crash {
+			t.Errorf("marked as a crash: %q", text)
+		}
+	}
+	if ParseIOS("2026-11-13 20:56:36.411 E  Runner[30348:6e9c9] a plain error").Crash {
+		t.Error("an iOS error is not a crash")
+	}
+}
+
+func TestCrashesAreMarkedOnEveryStream(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func(string) Line
+		text  string
+	}{
+		{"an Android native crash", ParseAndroid, "01-02 03:04:05.678     1     1 F libc    : Fatal signal 11 (SIGSEGV), code 1"},
+		{"a React Native error on Android", ParseAndroid, "01-02 03:04:05.678  4000  4100 E ReactNativeJS: Error: boom"},
+		{"an iOS uncaught exception", ParseIOS, "2026-11-13 20:56:36.411 E  Runner[30348:6e9c9] *** Terminating app due to uncaught exception 'NSInvalidArgumentException'"},
+		{"an iOS crash type", ParseIOS, "2026-11-13 20:56:36.411 Df ReportCrash[88:1] Exception Type: EXC_BAD_ACCESS (SIGSEGV)"},
+		{"an app's console output", ParsePlain, "Unhandled JS Exception: undefined is not a function"},
+		{"a React Native invariant", ParsePlain, "Invariant Violation: requireNativeComponent: \"RNSScreen\" was not found"},
+	}
+	for _, tt := range tests {
+		if got := tt.parse(tt.text); !got.Crash || got.Text != tt.text {
+			t.Errorf("%s: %+v", tt.name, got)
+		}
 	}
 }
