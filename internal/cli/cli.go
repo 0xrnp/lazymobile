@@ -46,6 +46,8 @@ Usage:
   lazymobile delete <device> --yes
   lazymobile uninstall <device> <app-id> --yes   remove an app and its data from a running device
   lazymobile install <device> <path>   an .apk, or an .app folder for a simulator
+  lazymobile launch <device> <app-id> [--restart]   open an app. --restart stops a running copy first
+  lazymobile stop <device> <app-id>    stop a running app. Its data is kept
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device>           the id for adb -s, flutter -d and xcrun
@@ -57,7 +59,7 @@ Once no simulator is running, Simulator or DeviceHub is quit, which closes the w
 open for a simulator that shut down. --keep-simulator-app leaves it open. The dashboard takes
 --no-window and --keep-simulator-app too.
 
-App ids given to logs are remembered, newest first, for --last-app, for apps and for the
+App ids given to logs and launch are remembered, newest first, for --last-app, for apps and for the
 dashboard's app list.
 
 <device> is an id, an adb serial, a name, or a unique part of a name.
@@ -145,6 +147,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.install(ctx, rest)
 	case "uninstall":
 		return a.uninstall(ctx, rest)
+	case "launch":
+		return a.launch(ctx, rest)
+	case "stop":
+		return a.stop(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":
@@ -332,6 +338,50 @@ func (a *App) uninstall(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(a.Stdout, "Uninstalled %s from %s\n", positional[1], d.Name)
+	return nil
+}
+
+// deviceAndApp parses a command that takes a device and an app id.
+func (a *App) deviceAndApp(ctx context.Context, fs *flag.FlagSet, args []string) (device.Device, string, error) {
+	positional, err := parse(fs, args)
+	if err != nil {
+		return device.Device{}, "", err
+	}
+	if len(positional) != 2 {
+		return device.Device{}, "", usageError{fs.Name() + " needs a device and an app id"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	return d, positional[1], err
+}
+
+func (a *App) launch(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
+	restart := fs.Bool("restart", false, "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
+	if err != nil {
+		return err
+	}
+	if err := a.Manager.Launch(ctx, d, app, mobile.LaunchOptions{Restart: *restart}); err != nil {
+		return err
+	}
+	_ = a.State.Update(func(f *state.File) { f.RememberApp(d.Platform, app) })
+	done := "Launched"
+	if *restart {
+		done = "Restarted"
+	}
+	fmt.Fprintf(a.Stdout, "%s %s on %s\n", done, app, d.Name)
+	return nil
+}
+
+func (a *App) stop(ctx context.Context, args []string) error {
+	d, app, err := a.deviceAndApp(ctx, flag.NewFlagSet("stop", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if err := a.Manager.Stop(ctx, d, app); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Stdout, "Stopped %s on %s\n", app, d.Name)
 	return nil
 }
 
