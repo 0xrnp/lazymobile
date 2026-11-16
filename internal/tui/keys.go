@@ -79,6 +79,18 @@ func screenFeature(d device.Device) string {
 	return ""
 }
 
+// virtualOnlyRunning is why d cannot be moved or have its status bar tidied, or "" when it can:
+// only a running simulator or emulator can.
+func virtualOnlyRunning(d device.Device) string {
+	switch {
+	case !d.Ready():
+		return d.Name + " is not running"
+	case d.Kind == device.Physical:
+		return d.Name + " is a real device: its location and status bar are left alone"
+	}
+	return ""
+}
+
 func needsLog(m *Model) string {
 	if m.logCount() == 0 {
 		return "No log is open: press l on a running device"
@@ -119,6 +131,10 @@ var keyTable = []keyAction{
 		when: selectedDevice(running)},
 	{id: "appearance", ctx: ctxDevices, keys: []string{"m"}, show: "m", desc: "Switch between dark and light mode",
 		when: selectedDevice(screenFeature)},
+	{id: "location", ctx: ctxDevices, keys: []string{"f"}, show: "f", desc: "Put a simulator or emulator at a place",
+		when: selectedDevice(virtualOnlyRunning)},
+	{id: "statusbar", ctx: ctxDevices, keys: []string{"c", "C"}, show: "c C", desc: "Tidy the status bar for a screenshot, or restore it",
+		when: selectedDevice(virtualOnlyRunning)},
 	{id: "screenshot", ctx: ctxDevices, keys: []string{"p"}, show: "p", desc: "Save a screenshot in this folder",
 		when: selectedDevice(screenFeature)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",

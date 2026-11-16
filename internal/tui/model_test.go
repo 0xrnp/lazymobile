@@ -171,6 +171,15 @@ func (f *fakeBackend) Appearance(_ context.Context, d device.Device) (string, er
 func (f *fakeBackend) SetAppearance(_ context.Context, d device.Device, mode string) error {
 	return f.record("set-appearance %s %s", d.ID, mode)
 }
+func (f *fakeBackend) SetLocation(_ context.Context, d device.Device, lat, lon float64) error {
+	return f.record("location %s %v,%v", d.ID, lat, lon)
+}
+func (f *fakeBackend) ClearLocation(_ context.Context, d device.Device) error {
+	return f.record("clear-location %s", d.ID)
+}
+func (f *fakeBackend) SetStatusBar(_ context.Context, d device.Device, clean bool) error {
+	return f.record("statusbar %s clean=%v", d.ID, clean)
+}
 func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
 	return f.record("link %s %s", d.ID, link)
 }
@@ -2072,4 +2081,63 @@ func TestMNeedsARunningDeviceThatIsNotAnIPhone(t *testing.T) {
 	h.press("m")
 	h.wantScreen("Test iPhone is an iPhone")
 	h.wantCalls("appearance", 0)
+}
+
+func TestFAsksWhereAndPutsTheDeviceThere(t *testing.T) {
+	h := start(t, iphone, pixel)
+	h.press("f")
+	h.wantScreen("Where is iPhone 17?", "Type clear to take the fake location off")
+	h.typeText("nowhere")
+	h.press("enter")
+	h.wantScreen("Write latitude,longitude")
+	h.wantCalls("location", 0)
+
+	h.press("ctrl+u")
+	h.typeText("37.7749,-122.4194")
+	h.press("enter")
+	h.wantCalls("location SIM-1 37.7749,-122.4194", 1)
+	h.wantScreen("Set the location of iPhone 17")
+
+	h.press("f", "ctrl+u")
+	h.typeText("clear")
+	h.press("enter")
+	h.wantCalls("clear-location SIM-1", 1)
+
+	// An emulator cannot forget a location, so it is not offered clear.
+	h.selectDevice(pixel)
+	h.press("f")
+	h.wantScreen("Where is Pixel 9a?")
+	h.wantNoScreen("Type clear")
+	h.typeText("clear")
+	h.press("enter")
+	h.wantScreen("Write latitude,longitude")
+	h.wantCalls("clear-location Pixel_9a", 0)
+}
+
+func TestCAndShiftCTidyAndRestoreTheStatusBar(t *testing.T) {
+	h := start(t, iphone)
+	h.press("c")
+	h.wantCalls("statusbar SIM-1 clean=true", 1)
+	h.wantScreen("Tidied the status bar of iPhone 17")
+	h.press("C")
+	h.wantCalls("statusbar SIM-1 clean=false", 1)
+	h.wantScreen("Restored the status bar of iPhone 17")
+}
+
+func TestLocationAndStatusBarKeysLeaveRealPhonesAloneAndNeedARunningDevice(t *testing.T) {
+	h := start(t, ipad, usbPhone, wifiPhon)
+	h.press("f")
+	h.wantScreen("iPad Air is not running")
+	for _, d := range []device.Device{usbPhone, wifiPhon} {
+		h.selectDevice(d)
+		h.press("f")
+		h.wantScreen(d.Name + " is a real device: its location and status bar are left alone")
+		h.press("c")
+		h.wantScreen(d.Name + " is a real device")
+	}
+	h.wantCalls("location", 0)
+	h.wantCalls("statusbar", 0)
+	if h.m.modal != nil {
+		t.Error("a window opened for a real device")
+	}
 }

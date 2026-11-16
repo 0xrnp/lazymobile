@@ -4,11 +4,14 @@ package mobile
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -282,6 +285,91 @@ func (m *Manager) SetAppearance(ctx context.Context, d device.Device, mode strin
 		return m.IOS.SetAppearance(ctx, d, mode)
 	}
 	return m.Android.SetAppearance(ctx, d, mode)
+}
+
+// ParseLocation reads "latitude,longitude", such as "37.7749,-122.4194".
+func ParseLocation(text string) (lat, lon float64, err error) {
+	parts := strings.Split(text, ",")
+	if len(parts) == 2 {
+		lat, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		if err == nil {
+			lon, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		}
+	} else {
+		err = errors.New("not two numbers")
+	}
+	if err != nil || !validPlace(lat, lon) {
+		return 0, 0, notAPlace(text)
+	}
+	return lat, lon, nil
+}
+
+// validPlace is whether lat and lon are on the globe. ParseFloat reads "NaN" and "Inf", and simctl
+// accepts a latitude of 999, so this is checked here.
+func validPlace(lat, lon float64) bool {
+	return !math.IsNaN(lat) && !math.IsNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+}
+
+func notAPlace(text string) error {
+	return apperr.New(apperr.InvalidState, "That does not look like a place: %q", text).
+		WithHint("Write latitude,longitude, such as 37.7749,-122.4194. Latitude is from -90 to 90, longitude from -180 to 180.")
+}
+
+// virtualDevice checks that d is a running simulator or emulator. A real phone is not told where
+// it is, and its status bar is left alone.
+func virtualDevice(d device.Device, what string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot it first.")
+	}
+	if d.Kind == device.Physical {
+		return apperr.New(apperr.Unsupported, "%s is a real device, and %s is left alone", d.Name, what)
+	}
+	return nil
+}
+
+// SetLocation puts a running simulator or emulator at a place. Use ParseLocation for the text a
+// person types.
+func (m *Manager) SetLocation(ctx context.Context, d device.Device, lat, lon float64) error {
+	if err := virtualDevice(d, "its location"); err != nil {
+		return err
+	}
+	if !validPlace(lat, lon) {
+		return notAPlace(fmt.Sprintf("%v,%v", lat, lon))
+	}
+	if d.Platform == device.IOS {
+		return m.IOS.SetLocation(ctx, d, lat, lon)
+	}
+	return m.Android.SetLocation(ctx, d, lat, lon)
+}
+
+// ClearLocation takes the fake location off a running simulator. An emulator has no way to forget
+// one, short of being restarted.
+func (m *Manager) ClearLocation(ctx context.Context, d device.Device) error {
+	if err := virtualDevice(d, "its location"); err != nil {
+		return err
+	}
+	if d.Platform == device.Android {
+		return apperr.New(apperr.Unsupported, "An emulator cannot forget its location").
+			WithHint("Set another place, or restart the emulator.")
+	}
+	return m.IOS.ClearLocation(ctx, d)
+}
+
+// SetStatusBar gives a running simulator or emulator the tidy status bar of a screenshot (clean),
+// or takes it off again.
+func (m *Manager) SetStatusBar(ctx context.Context, d device.Device, clean bool) error {
+	if err := virtualDevice(d, "its status bar"); err != nil {
+		return err
+	}
+	switch {
+	case d.Platform == device.IOS && clean:
+		return m.IOS.CleanStatusBar(ctx, d)
+	case d.Platform == device.IOS:
+		return m.IOS.ResetStatusBar(ctx, d)
+	case clean:
+		return m.Android.CleanStatusBar(ctx, d)
+	}
+	return m.Android.ResetStatusBar(ctx, d)
 }
 
 // ScreenshotName is a file name for a screenshot of d taken at now.

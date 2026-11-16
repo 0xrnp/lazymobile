@@ -659,3 +659,36 @@ func TestAppearanceRefusesAnIPhoneAndNoticesAnAnswerItDoesNotKnow(t *testing.T) 
 		t.Errorf("an unknown answer: %v", err)
 	}
 }
+
+func TestLocationOfASimulatorIsSetAndCleared(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl location": {}})
+	c := client(fake)
+	if err := c.SetLocation(context.Background(), bootedSim, 37.7749, -122.4194); err != nil || !fake.Called("xcrun simctl location "+udidBooted+" set 37.7749,-122.4194") {
+		t.Errorf("set: %v, calls %v", err, fake.Calls())
+	}
+	if err := c.ClearLocation(context.Background(), bootedSim); err != nil || !fake.Called("xcrun simctl location "+udidBooted+" clear") {
+		t.Errorf("clear: %v, calls %v", err, fake.Calls())
+	}
+	none := runtest.Table(map[string]run.Result{})
+	if err := client(none).SetLocation(context.Background(), iphone, 1, 2); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	}
+}
+
+func TestStatusBarOfASimulatorIsTidiedAndRestored(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"simctl status_bar": {}})
+	c := client(fake)
+	if err := c.CleanStatusBar(context.Background(), bootedSim); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.Calls()[0]; !strings.Contains(got, "status_bar "+udidBooted+" override --time 9:41 --batteryState charged --batteryLevel 100") {
+		t.Errorf("ran %q", got)
+	}
+	if err := c.ResetStatusBar(context.Background(), bootedSim); err != nil || !fake.Called("xcrun simctl status_bar "+udidBooted+" clear") {
+		t.Errorf("reset: %v, calls %v", err, fake.Calls())
+	}
+	shut := runtest.Table(map[string]run.Result{"status_bar": runtest.Fail(149, "Unable to lookup in current state: Shutdown")})
+	if err := client(shut).CleanStatusBar(context.Background(), shutdownSim); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("a shut-down simulator: %v", err)
+	}
+}

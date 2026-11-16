@@ -194,6 +194,60 @@ func (m *Model) toggleAppearance(d device.Device) tea.Cmd {
 	})
 }
 
+// askLocation asks where to put the selected simulator or emulator.
+func (m *Model) askLocation(d device.Device) tea.Cmd {
+	if problem := virtualOnlyRunning(d); problem != "" {
+		m.setNote(problem, true)
+		return nil
+	}
+	body := "Latitude,longitude, such as 37.7749,-122.4194."
+	if d.Platform == device.IOS {
+		body += " Type clear to take the fake location off."
+	}
+	m.modal = &modal{
+		kind: modalPrompt, title: "Where is " + d.Name + "?", body: body,
+		validate: func(value string) string {
+			if value == "clear" && d.Platform == device.IOS {
+				return ""
+			}
+			if _, _, err := mobile.ParseLocation(value); err != nil {
+				return "Write latitude,longitude, such as 37.7749,-122.4194."
+			}
+			return ""
+		},
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			backend := m.backend
+			if value == "clear" {
+				return m.act(d, "Clearing the location of", "Cleared the location of", nil, func(ctx context.Context) error {
+					return backend.ClearLocation(ctx, d)
+				})
+			}
+			lat, lon, _ := mobile.ParseLocation(value)
+			return m.act(d, "Setting the location of", "Set the location of", nil, func(ctx context.Context) error {
+				return backend.SetLocation(ctx, d, lat, lon)
+			})
+		},
+	}
+	return nil
+}
+
+// statusBar tidies the selected simulator's or emulator's status bar for a screenshot, or puts it
+// back.
+func (m *Model) statusBar(d device.Device, clean bool) tea.Cmd {
+	if problem := virtualOnlyRunning(d); problem != "" {
+		m.setNote(problem, true)
+		return nil
+	}
+	doing, done := "Tidying the status bar of", "Tidied the status bar of"
+	if !clean {
+		doing, done = "Restoring the status bar of", "Restored the status bar of"
+	}
+	backend := m.backend
+	return m.act(d, doing, done, nil, func(ctx context.Context) error {
+		return backend.SetStatusBar(ctx, d, clean)
+	})
+}
+
 // openLink asks for a web address or deep link, and opens it on the selected device.
 func (m *Model) openLink(d device.Device) tea.Cmd {
 	if problem := screenFeature(d); problem != "" {

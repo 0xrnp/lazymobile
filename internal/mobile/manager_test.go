@@ -503,3 +503,59 @@ func TestAppearanceChecksTheDeviceAndTheModeBeforeAnyTool(t *testing.T) {
 		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
 	}
 }
+
+func TestParseLocationAcceptsOnlyPlacesOnTheGlobe(t *testing.T) {
+	for text, want := range map[string][2]float64{
+		"37.7749,-122.4194":  {37.7749, -122.4194},
+		" 37.7749 , -122.4 ": {37.7749, -122.4},
+		"-90,180":            {-90, 180},
+		"0,0":                {0, 0},
+	} {
+		if lat, lon, err := ParseLocation(text); err != nil || lat != want[0] || lon != want[1] {
+			t.Errorf("%q = %v, %v, %v", text, lat, lon, err)
+		}
+	}
+	for _, text := range []string{"", "37.7", "a,b", "1,2,3", "91,0", "0,181", "-91,0", "NaN,0", "0,Inf", "37.7749 -122.4194"} {
+		if _, _, err := ParseLocation(text); apperr.CodeOf(err) != apperr.InvalidState {
+			t.Errorf("%q: %v, want invalid_state", text, err)
+		}
+	}
+}
+
+func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testing.T) {
+	m, fake := uninstallManager(t)
+	ctx := context.Background()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
+	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	phone := device.Device{ID: "R58M", Name: "My Galaxy", Platform: device.Android, Kind: device.Physical, State: device.Connected, Serial: "R58M"}
+	stopped := simulator
+	stopped.State = device.Shutdown
+
+	for name, err := range map[string]error{
+		"location of an iPhone":     m.SetLocation(ctx, iphone, 1, 2),
+		"location of a phone":       m.SetLocation(ctx, phone, 1, 2),
+		"clear of a phone":          m.ClearLocation(ctx, phone),
+		"status bar of an iPhone":   m.SetStatusBar(ctx, iphone, true),
+		"status bar of a phone":     m.SetStatusBar(ctx, phone, false),
+		"location of a stopped sim": m.SetLocation(ctx, stopped, 1, 2),
+		"a latitude off the globe":  m.SetLocation(ctx, simulator, 999, 2),
+		"clearing an emulator":      m.ClearLocation(ctx, emulator),
+	} {
+		if code := apperr.CodeOf(err); code != apperr.Unsupported && code != apperr.InvalidState {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+	if err := m.SetLocation(ctx, simulator, 37.7, -122.4); err != nil || !fake.Called("simctl location SIM set 37.7,-122.4") {
+		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.SetLocation(ctx, emulator, 37.7, -122.4); err != nil || !fake.Called("emu geo fix -122.4 37.7") {
+		t.Errorf("an emulator: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.SetStatusBar(ctx, simulator, false); err != nil || !fake.Called("simctl status_bar SIM clear") {
+		t.Errorf("status bar: %v, calls %v", err, fake.Calls())
+	}
+}

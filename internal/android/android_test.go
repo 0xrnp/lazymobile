@@ -817,3 +817,67 @@ func TestAppearanceOfAnAndroidWithoutTheCommandSaysWhatItNeeds(t *testing.T) {
 		t.Errorf("an offline device: %v, calls %v", err, none.Calls())
 	}
 }
+
+func TestLocationOfAnEmulatorTakesTheLongitudeFirstAndNoticesRefusal(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{"emu geo fix": runtest.Out("OK\n")})
+	c := New(fake, sdk(t, "adb"))
+	if err := c.SetLocation(context.Background(), runningEmulator, 37.7749, -122.4194); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.Called("-s emulator-5554 emu geo fix -122.4194 37.7749") {
+		t.Errorf("ran %v", fake.Calls())
+	}
+	// The console says KO and adb still exits 0.
+	refused := runtest.Table(map[string]run.Result{"emu geo fix": runtest.Out("KO: invalid longitude value. Should be in [-180,+180] range\n")})
+	err := New(refused, sdk(t, "adb")).SetLocation(context.Background(), runningEmulator, 1, 999)
+	if apperr.CodeOf(err) != apperr.CommandFailed || !strings.Contains(err.Error(), "invalid longitude") {
+		t.Errorf("a refusal: %v", err)
+	}
+}
+
+func TestLocationAndStatusBarAreOnlyForEmulators(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{})
+	phone := runningEmulator
+	phone.Kind = device.Physical
+	c := New(fake, sdk(t, "adb"))
+	for name, err := range map[string]error{
+		"location":  c.SetLocation(context.Background(), phone, 1, 2),
+		"clean":     c.CleanStatusBar(context.Background(), phone),
+		"reset":     c.ResetStatusBar(context.Background(), phone),
+		"emulator?": c.CleanStatusBar(context.Background(), device.Device{Platform: device.Android, Kind: device.Emulator, State: device.Offline, Name: "x"}),
+	} {
+		if code := apperr.CodeOf(err); code != apperr.Unsupported && code != apperr.InvalidState {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("the device was asked: %v", fake.Calls())
+	}
+}
+
+func TestStatusBarGoesThroughDemoMode(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"settings put global sysui_demo_allowed 1":  {},
+		"am broadcast -a com.android.systemui.demo": runtest.Out("Broadcast completed: result=0\n"),
+	})
+	c := New(fake, sdk(t, "adb"))
+	if err := c.CleanStatusBar(context.Background(), runningEmulator); err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Join(fake.Calls(), "\n")
+	for _, want := range []string{
+		"settings put global sysui_demo_allowed 1",
+		"-e command enter",
+		"-e command clock -e hhmm 1200",
+		"-e command battery -e level 100 -e plugged false",
+		"-e command network -e wifi show -e level 4 -e fully true",
+		"-e command notifications -e visible false",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Errorf("did not run %q:\n%s", want, calls)
+		}
+	}
+	if err := c.ResetStatusBar(context.Background(), runningEmulator); err != nil || !fake.Called("-e command exit") {
+		t.Errorf("reset: %v, calls %v", err, fake.Calls())
+	}
+}

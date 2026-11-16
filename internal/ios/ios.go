@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -541,6 +542,52 @@ func (c *Client) SetAppearance(ctx context.Context, d device.Device, mode string
 	}
 	argv := []string{"xcrun", "simctl", "ui", d.ID, "appearance", mode}
 	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, appearanceAction)
+}
+
+var (
+	locationAction  = action{verb: "set the location", hint: "Boot it first."}
+	statusBarAction = action{verb: "change the status bar", hint: "Boot it first."}
+)
+
+func formatCoordinate(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+// SetLocation puts a booted simulator at a place, which its apps see until ClearLocation.
+func (c *Client) SetLocation(ctx context.Context, d device.Device, lat, lon float64) error {
+	if err := onlySimulator(d, "set the location"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "location", d.ID, "set", formatCoordinate(lat) + "," + formatCoordinate(lon)}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, locationAction)
+}
+
+// ClearLocation takes the fake location off a booted simulator.
+func (c *Client) ClearLocation(ctx context.Context, d device.Device) error {
+	if err := onlySimulator(d, "clear the location"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "location", d.ID, "clear"}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, locationAction)
+}
+
+// CleanStatusBar gives a booted simulator the tidy status bar of a screenshot: 9:41, a full
+// battery, full signal, and no carrier name.
+func (c *Client) CleanStatusBar(ctx context.Context, d device.Device) error {
+	if err := onlySimulator(d, "change the status bar"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "status_bar", d.ID, "override", "--time", "9:41",
+		"--batteryState", "charged", "--batteryLevel", "100", "--wifiBars", "3",
+		"--cellularBars", "4", "--cellularMode", "active", "--operatorName", ""}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, statusBarAction)
+}
+
+// ResetStatusBar takes the overrides off a booted simulator's status bar.
+func (c *Client) ResetStatusBar(ctx context.Context, d device.Device) error {
+	if err := onlySimulator(d, "change the status bar"); err != nil {
+		return err
+	}
+	argv := []string{"xcrun", "simctl", "status_bar", d.ID, "clear"}
+	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, statusBarAction)
 }
 
 // OpenURL opens a link on a booted simulator, in the app that handles it.

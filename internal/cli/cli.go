@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,6 +51,8 @@ Usage:
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light
+  lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
+  lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
@@ -180,8 +183,10 @@ type result struct {
 	Path   string        `json:"path,omitempty"`
 	URL    string        `json:"url,omitempty"`
 	// Appearance is the mode a device was switched to.
-	Appearance string   `json:"appearance,omitempty"`
-	Warnings   []string `json:"warnings,omitempty"`
+	Appearance string `json:"appearance,omitempty"`
+	// Location is "latitude,longitude", or "cleared".
+	Location string   `json:"location,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // done reports a finished action: the object with --json, the sentence otherwise.
@@ -226,6 +231,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.stop(ctx, rest)
 	case "appearance":
 		return a.appearance(ctx, rest)
+	case "location":
+		return a.location(ctx, rest)
+	case "statusbar":
+		return a.statusBar(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
 	case "screenshot":
@@ -484,6 +493,61 @@ func (a *App) appearance(ctx context.Context, args []string) error {
 	}
 	return a.done(*asJSON, result{Action: "appearance", Device: d, Appearance: positional[1]},
 		fmt.Sprintf("%s is now in %s mode", d.Name, positional[1]))
+}
+
+func (a *App) location(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("location", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 {
+		return usageError{"location needs a device, and latitude,longitude or clear"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	if positional[1] == "clear" {
+		if err := a.Manager.ClearLocation(ctx, d); err != nil {
+			return err
+		}
+		return a.done(*asJSON, result{Action: "location", Device: d, Location: "cleared"}, "Cleared the location of "+d.Name)
+	}
+	lat, lon, err := mobile.ParseLocation(positional[1])
+	if err != nil {
+		return err
+	}
+	if err := a.Manager.SetLocation(ctx, d, lat, lon); err != nil {
+		return err
+	}
+	place := strconv.FormatFloat(lat, 'f', -1, 64) + "," + strconv.FormatFloat(lon, 'f', -1, 64)
+	return a.done(*asJSON, result{Action: "location", Device: d, Location: place}, fmt.Sprintf("%s is now at %s", d.Name, place))
+}
+
+func (a *App) statusBar(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("statusbar", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 || (positional[1] != "clean" && positional[1] != "reset") {
+		return usageError{"statusbar needs a device, and clean or reset"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	clean := positional[1] == "clean"
+	if err := a.Manager.SetStatusBar(ctx, d, clean); err != nil {
+		return err
+	}
+	if clean {
+		return a.done(*asJSON, result{Action: "statusbar_clean", Device: d}, "The status bar of "+d.Name+" is tidy for a screenshot")
+	}
+	return a.done(*asJSON, result{Action: "statusbar_reset", Device: d}, "The status bar of "+d.Name+" is back to normal")
 }
 
 func (a *App) link(ctx context.Context, args []string) error {

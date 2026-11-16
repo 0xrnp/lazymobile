@@ -43,6 +43,9 @@ type Backend interface {
 	Stop(ctx context.Context, d device.Device, id string) error
 	Appearance(ctx context.Context, d device.Device) (string, error)
 	SetAppearance(ctx context.Context, d device.Device, mode string) error
+	SetLocation(ctx context.Context, d device.Device, lat, lon float64) error
+	ClearLocation(ctx context.Context, d device.Device) error
+	SetStatusBar(ctx context.Context, d device.Device, clean bool) error
 	OpenLink(ctx context.Context, d device.Device, link string) error
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
 	OpenURL(ctx context.Context, url string) error
@@ -869,6 +872,10 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.pickAppAction(d)
 	case "m":
 		return m.toggleAppearance(d)
+	case "f":
+		return m.askLocation(d)
+	case "c", "C":
+		return m.statusBar(d, key == "c")
 	case "p":
 		return m.screenshot(d)
 	case "t":

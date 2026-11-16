@@ -789,3 +789,49 @@ func TestAppearanceShowsOrSwitchesTheMode(t *testing.T) {
 		t.Errorf("a mode that is not one: code %d, stderr %q", code, e.errs.String())
 	}
 }
+
+func TestLocationAndStatusBarOnASimulator(t *testing.T) {
+	e := newEnv(t)
+	const booted = "00000000-0000-4000-8000-0000000000A2"
+	if code := e.run("location", "iPhone 16 Pro", "37.7749,-122.4194"); code != ExitOK ||
+		!e.fake.Called("simctl location "+booted+" set 37.7749,-122.4194") ||
+		!strings.Contains(e.out.String(), "iPhone 16 Pro is now at 37.7749,-122.4194") {
+		t.Errorf("set: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	if code := e.run("location", "iPhone 16 Pro", "clear", "--json"); code != ExitOK || e.object(t)["location"] != "cleared" {
+		t.Errorf("clear: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("location", "iPhone 16 Pro", "12.5,-3", "--json"); code != ExitOK || e.object(t)["location"] != "12.5,-3" {
+		t.Errorf("set as JSON: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("statusbar", "iPhone 16 Pro", "clean", "--json"); code != ExitOK || e.object(t)["action"] != "statusbar_clean" ||
+		!e.fake.Called("simctl status_bar "+booted+" override --time 9:41") {
+		t.Errorf("clean: code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("statusbar", "iPhone 16 Pro", "reset"); code != ExitOK || !e.fake.Called("simctl status_bar "+booted+" clear") ||
+		!strings.Contains(e.out.String(), "back to normal") {
+		t.Errorf("reset: code %d, out %q", code, e.out.String())
+	}
+}
+
+func TestLocationAndStatusBarUsageAndRefusals(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"location"}, {"location", "iPhone 16 Pro"}, {"statusbar", "iPhone 16 Pro"}, {"statusbar", "iPhone 16 Pro", "shiny"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	for _, args := range [][]string{
+		{"location", "iPhone 16 Pro", "999,2"},
+		{"location", "iPhone 16 Pro", "somewhere"},
+		{"location", "iPhone 16", "1,2"}, // not running
+		{"statusbar", "iPhone 16", "clean"},
+	} {
+		if code := e.run(args...); code != ExitFailure {
+			t.Errorf("%v: code %d, want %d", args, code, ExitFailure)
+		}
+	}
+	if e.fake.Called("simctl location") || e.fake.Called("status_bar") {
+		t.Errorf("a tool ran: %v", e.fake.Calls())
+	}
+}
