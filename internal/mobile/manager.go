@@ -459,9 +459,10 @@ func checkNewFile(path string) (string, error) {
 // Record films a running simulator's, emulator's or Android phone's screen until ctx ends, or
 // until limit has passed when it is not zero. Ending ctx is how a recording is stopped, so it is
 // not an error: the video that was made is saved. An Android device records at most three minutes
-// (android.MaxRecording). It returns the full path. It never replaces a file, and only the user
+// (android.MaxRecording). started, if set, is called once the file name is accepted and just
+// before the screen is filmed. It returns the full path. It never replaces a file, and only the user
 // can read the video, since a screen can show personal data.
-func (m *Manager) Record(ctx context.Context, d device.Device, path string, limit time.Duration) (string, error) {
+func (m *Manager) Record(ctx context.Context, d device.Device, path string, limit time.Duration, started func()) (string, error) {
 	if !d.Ready() {
 		return "", apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
 	}
@@ -471,6 +472,9 @@ func (m *Manager) Record(ctx context.Context, d device.Device, path string, limi
 	path, err := checkNewFile(path)
 	if err != nil {
 		return "", err
+	}
+	if started != nil {
+		started()
 	}
 	if d.Platform == device.IOS {
 		err = m.IOS.Record(ctx, d, path, limit)

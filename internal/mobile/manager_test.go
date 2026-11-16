@@ -629,7 +629,7 @@ func TestRecordingIsSavedForTheUserAloneAndNeverReplacesAFile(t *testing.T) {
 	stopped.State = device.Shutdown
 	ctx := context.Background()
 
-	path, err := m.Record(ctx, simulator, filepath.Join(dir, "a.mov"), time.Second)
+	path, err := m.Record(ctx, simulator, filepath.Join(dir, "a.mov"), time.Second, nil)
 	if err != nil || !fake.Called("simctl io SIM recordVideo "+path) {
 		t.Fatalf("record: %v, calls %v", err, fake.Calls())
 	}
@@ -639,14 +639,17 @@ func TestRecordingIsSavedForTheUserAloneAndNeverReplacesAFile(t *testing.T) {
 
 	before := len(fake.Calls())
 	for name, err := range map[string]error{
-		"a file that is there":       func() error { _, err := m.Record(ctx, simulator, path, 0); return err }(),
-		"a folder that is not there": func() error { _, err := m.Record(ctx, simulator, filepath.Join(dir, "no", "a.mov"), 0); return err }(),
-		"a stopped device":           func() error { _, err := m.Record(ctx, stopped, filepath.Join(dir, "b.mov"), 0); return err }(),
-		"a negative duration": func() error {
-			_, err := m.Record(ctx, simulator, filepath.Join(dir, "c.mov"), -time.Second)
+		"a file that is there": func() error { _, err := m.Record(ctx, simulator, path, 0, nil); return err }(),
+		"a folder that is not there": func() error {
+			_, err := m.Record(ctx, simulator, filepath.Join(dir, "no", "a.mov"), 0, nil)
 			return err
 		}(),
-		"an iPhone": func() error { _, err := m.Record(ctx, iphone, filepath.Join(dir, "d.mov"), 0); return err }(),
+		"a stopped device": func() error { _, err := m.Record(ctx, stopped, filepath.Join(dir, "b.mov"), 0, nil); return err }(),
+		"a negative duration": func() error {
+			_, err := m.Record(ctx, simulator, filepath.Join(dir, "c.mov"), -time.Second, nil)
+			return err
+		}(),
+		"an iPhone": func() error { _, err := m.Record(ctx, iphone, filepath.Join(dir, "d.mov"), 0, nil); return err }(),
 	} {
 		if code := apperr.CodeOf(err); code != apperr.InvalidState && code != apperr.Unsupported {
 			t.Errorf("%s: %v", name, err)
@@ -654,5 +657,18 @@ func TestRecordingIsSavedForTheUserAloneAndNeverReplacesAFile(t *testing.T) {
 	}
 	if len(fake.Calls()) != before {
 		t.Errorf("a tool ran: %v", fake.Calls()[before:])
+	}
+}
+
+func TestRecordingAnnouncesItselfOnlyOnceTheFileNameIsAccepted(t *testing.T) {
+	m, _ := screenshotManager(t)
+	dir := t.TempDir()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	started := 0
+	if _, err := m.Record(context.Background(), simulator, filepath.Join(dir, "no", "a.mov"), 0, func() { started++ }); err == nil || started != 0 {
+		t.Errorf("a bad folder: %v, announced %d times", err, started)
+	}
+	if _, err := m.Record(context.Background(), simulator, filepath.Join(dir, "a.mov"), time.Second, func() { started++ }); err != nil || started != 1 {
+		t.Errorf("a good file: %v, announced %d times", err, started)
 	}
 }

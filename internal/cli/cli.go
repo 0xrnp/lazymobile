@@ -659,10 +659,12 @@ func (a *App) record(ctx context.Context, args []string) error {
 	// Ctrl-C ends the recording and keeps the video, so it must not end the command.
 	recording, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if !*asJSON {
-		fmt.Fprintf(a.Stderr, "Recording %s. Press Ctrl-C to stop.\n", d.Name)
+	started := func() {
+		if !*asJSON {
+			fmt.Fprintf(a.Stderr, "Recording %s. Press Ctrl-C to stop.\n", d.Name)
+		}
 	}
-	path, err := a.Manager.Record(recording, d, *out, *duration)
+	path, err := a.Manager.Record(recording, d, *out, *duration, started)
 	if err != nil {
 		return err
 	}
