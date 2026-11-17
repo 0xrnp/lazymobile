@@ -27,6 +27,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/eas"
 	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
+	"github.com/0xrnp/lazymobile/internal/mcpserver"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/state"
 )
@@ -72,6 +73,7 @@ Usage:
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
   lazymobile doctor [--fix [--yes]] [--json]       what is installed, what is missing, and how to fix it
+  lazymobile mcp                   serve the device commands to an agent over MCP (stdio). Nothing that erases data
   lazymobile version
 
 Once no simulator is running, Simulator or DeviceHub is quit, which closes the window it keeps
@@ -291,6 +293,12 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.doctor(ctx, rest)
 	case "builds":
 		return a.builds(ctx, rest)
+	case "mcp":
+		if len(rest) > 0 {
+			return usageError{"mcp takes no arguments"}
+		}
+		server := mcpserver.Server{Manager: a.Manager, Doctor: a.Doctor, State: a.State, Version: a.Version}
+		return server.Run(ctx)
 	}
 	if strings.HasPrefix(command, "-") {
 		// Flags without a command belong to the dashboard.

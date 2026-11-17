@@ -437,6 +437,20 @@ there.
 If you map `<Esc>` in terminal mode, lazymobile does not receive it. Its windows also close with
 `ctrl+c`.
 
+## For agents (MCP)
+
+`lazymobile mcp` serves the device commands as MCP tools over stdio. With Claude Code:
+
+```sh
+claude mcp add lazymobile -- lazymobile mcp
+```
+
+The tools are `list_devices`, `list_apps`, `doctor`, `boot`, `shutdown`, `install`, `launch`,
+`stop`, `open_link`, `screenshot` (returned as an image), `read_logs`, `set_appearance`,
+`set_location` and `set_permission`. `read_logs` reads what is already logged and returns the last
+lines (200 by default), filtered by app, level, text or crashes. Nothing that erases data is
+served: erase, delete, uninstall and clear data stay on the command line, behind `--yes`.
+
 ## Troubleshooting
 
 Run `lazymobile doctor` first.
