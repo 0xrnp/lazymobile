@@ -35,6 +35,9 @@ type Client struct {
 	Runner run.Runner
 	// Exists reports whether a path exists. Tests replace it.
 	Exists func(path string) bool
+	// CrashDir is where the Mac keeps crash reports, simulators' included. Empty means
+	// ~/Library/Logs/DiagnosticReports. Tests replace it.
+	CrashDir string
 }
 
 // New returns a client that runs the real tools.

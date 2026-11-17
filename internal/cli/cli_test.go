@@ -966,3 +966,70 @@ func TestLogsTailAndSinceTakeOnlyPositiveValues(t *testing.T) {
 		}
 	}
 }
+
+// simulatorCrash is a crash report of com.example.app on the "iPhone 16 Pro" simulator, shortened.
+const simulatorCrash = `{"app_name":"Example","app_version":"1.0","build_version":"7","bundleID":"com.example.app","bug_type":"309"}
+{"captureTime": "2026-11-17 18:31:34.24 +0530", "coalitionName": "com.apple.CoreSimulator.SimDevice.00000000-0000-4000-8000-0000000000A2",
+ "exception": {"type": "EXC_BAD_ACCESS", "signal": "SIGSEGV"}, "faultingThread": 0,
+ "threads": [{"frames": [{"imageIndex": 0, "imageOffset": 16, "symbol": "main", "symbolLocation": 4}]}],
+ "usedImages": [{"name": "Example"}]}
+`
+
+func TestCrashPrintsAndSavesTheLatestReport(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	report := filepath.Join(dir, "Example-2026-11-17-183134.ips")
+	if err := os.WriteFile(report, []byte(simulatorCrash), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.Manager.IOS.CrashDir = dir
+	if code := e.run("crash", "iPhone 16 Pro", "com.example.app"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	out := e.out.String()
+	for _, want := range []string{"Example 1.0 (7), com.example.app", "EXC_BAD_ACCESS (SIGSEGV)", "0   Example  main + 4", "Full report: " + report} {
+		if !strings.Contains(out, want) {
+			t.Errorf("printed %q, want %q in it", out, want)
+		}
+	}
+
+	saved := filepath.Join(t.TempDir(), "crash.txt")
+	e.out.Reset()
+	if code := e.run("crash", "iPhone 16 Pro", "com.example.app", "--save", saved, "--json"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	var r struct {
+		OK    bool   `json:"ok"`
+		Path  string `json:"path"`
+		Crash struct {
+			App, When, Text, Path string
+		} `json:"crash"`
+	}
+	if err := json.Unmarshal(e.out.Bytes(), &r); err != nil {
+		t.Fatalf("%v: %s", err, e.out.String())
+	}
+	if !r.OK || r.Path != saved || r.Crash.Path != report || !strings.Contains(r.Crash.Text, "EXC_BAD_ACCESS") {
+		t.Errorf("json = %+v", r)
+	}
+	if data, err := os.ReadFile(saved); err != nil || !strings.Contains(string(data), "EXC_BAD_ACCESS") {
+		t.Errorf("saved %q, %v", data, err)
+	}
+	// The saved file is never replaced.
+	if code := e.run("crash", "iPhone 16 Pro", "com.example.app", "--save", saved); code != ExitFailure {
+		t.Errorf("saving over a file: code %d, want %d", code, ExitFailure)
+	}
+}
+
+func TestCrashUsage(t *testing.T) {
+	e := newEnv(t)
+	e.app.Manager.IOS.CrashDir = t.TempDir()
+	for _, args := range [][]string{{"crash"}, {"crash", "iPhone 16 Pro"}, {"crash", "iPhone 16 Pro", "com.example.app", "extra"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	// No report is a failure, with a message that says so.
+	if code := e.run("crash", "iPhone 16 Pro", "com.example.app"); code != ExitFailure || !strings.Contains(e.errs.String(), "No crash of com.example.app") {
+		t.Errorf("code %d, stderr %q", code, e.errs.String())
+	}
+}

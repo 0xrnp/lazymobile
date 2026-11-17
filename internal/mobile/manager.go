@@ -441,7 +441,7 @@ func mediaName(d device.Device, now time.Time, extension string) string {
 }
 
 // checkNewFile makes path absolute, and checks that its folder exists and that nothing is there
-// yet. Pictures and videos of a screen never replace a file.
+// yet. Screenshots, recordings and saved crash reports never replace a file.
 func checkNewFile(path string) (string, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -451,7 +451,7 @@ func checkNewFile(path string) (string, error) {
 		return "", apperr.New(apperr.InvalidState, "The folder %s does not exist", filepath.Dir(path)).WithHint("Choose a file in a folder that exists.")
 	}
 	if _, err := os.Lstat(path); err == nil {
-		return "", apperr.New(apperr.InvalidState, "%s already exists", path).WithHint("Choose another name: a screenshot or recording never replaces a file.")
+		return "", apperr.New(apperr.InvalidState, "%s already exists", path).WithHint("Choose another name: lazymobile never replaces a file.")
 	}
 	return path, nil
 }
@@ -630,6 +630,43 @@ func (m *Manager) AppInfo(ctx context.Context, d device.Device, id string) (devi
 		}
 	}
 	return device.App{}, apperr.New(apperr.NotFound, "%s is not installed on %s", id, d.Name)
+}
+
+// Crash returns the latest crash report of an app. An iOS simulator's reports are files on the
+// Mac, so it need not be running. An Android device must be, and an iPhone is not supported.
+func (m *Manager) Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error) {
+	if d.Platform == device.IOS {
+		if !logs.ValidAppID(id) {
+			return device.CrashReport{}, apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id).
+				WithHint("Use a bundle id, such as com.example.app.")
+		}
+		return m.IOS.LatestCrash(ctx, d, id)
+	}
+	if err := appTarget(d, id); err != nil {
+		return device.CrashReport{}, err
+	}
+	return m.Android.LatestCrash(ctx, d, id)
+}
+
+// SaveText writes text to a new file that only the user can read, since a crash report can hold
+// personal data. Like a screenshot, it never replaces a file. It returns the full path.
+func SaveText(path, text string) (string, error) {
+	path, err := checkNewFile(path)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", apperr.New(apperr.CommandFailed, "Could not save %s: %v", path, err)
+	}
+	if _, err := file.WriteString(strings.TrimRight(text, "\n") + "\n"); err != nil {
+		file.Close()
+		return "", apperr.New(apperr.CommandFailed, "Could not save %s: %v", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return "", apperr.New(apperr.CommandFailed, "Could not save %s: %v", path, err)
+	}
+	return path, nil
 }
 
 // DefaultDevPort is where Metro and most other dev servers listen.

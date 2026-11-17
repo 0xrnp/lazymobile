@@ -66,6 +66,7 @@ Usage:
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
+  lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator or an Android device. --save never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
@@ -210,6 +211,8 @@ type result struct {
 	Permission string `json:"permission,omitempty"`
 	// Location is "latitude,longitude", or "cleared".
 	Location string `json:"location,omitempty"`
+	// Crash is the report a "crash" found. Path is then the file it was saved to, if any.
+	Crash *device.CrashReport `json:"crash,omitempty"`
 	// Name and Command are the project action that ran, with the device filled in.
 	Name     string   `json:"name,omitempty"`
 	Command  []string `json:"command,omitempty"`
@@ -276,6 +279,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.record(ctx, rest)
 	case "screenshot":
 		return a.screenshot(ctx, rest)
+	case "crash":
+		return a.crash(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":
@@ -726,6 +731,38 @@ func (a *App) screenshot(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.done(*asJSON, result{Action: "screenshot", Device: d, Path: path}, "Saved "+path)
+}
+
+func (a *App) crash(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("crash", flag.ContinueOnError)
+	save := fs.String("save", "", "")
+	asJSON := fs.Bool("json", false, "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
+	if err != nil {
+		return err
+	}
+	report, err := a.Manager.Crash(ctx, d, app)
+	if err != nil {
+		return err
+	}
+	saved := ""
+	if *save != "" {
+		if saved, err = mobile.SaveText(*save, report.Text); err != nil {
+			return err
+		}
+	}
+	r := result{Action: "crash", Device: d, App: app, Path: saved, Crash: &report}
+	switch {
+	case *asJSON:
+		return a.done(true, r, "")
+	case saved != "":
+		return a.done(false, r, "Saved "+saved)
+	}
+	text := report.Text
+	if report.Path != "" {
+		text += "\n\nFull report: " + report.Path
+	}
+	return a.done(false, r, text)
 }
 
 func (a *App) record(ctx context.Context, args []string) error {

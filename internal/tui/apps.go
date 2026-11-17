@@ -395,8 +395,8 @@ func (m *Model) openLink(d device.Device) tea.Cmd {
 type appAction struct {
 	label, doing, done string
 	run                func(ctx context.Context, backend Backend, d device.Device, id string) error
-	// next, when set, replaces run: it opens the next question.
-	next func(m *Model, d device.Device, id string)
+	// next, when set, replaces run: it opens the next question, or starts work of its own.
+	next func(m *Model, d device.Device, id string) tea.Cmd
 }
 
 var (
@@ -409,13 +409,18 @@ var (
 	stopApp = appAction{label: "Stop", doing: "Stopping", done: "Stopped", run: func(ctx context.Context, b Backend, d device.Device, id string) error {
 		return b.Stop(ctx, d, id)
 	}}
-	grantPermission = appAction{label: "Grant a permission…", next: func(m *Model, d device.Device, id string) {
+	grantPermission = appAction{label: "Grant a permission…", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		m.permissionModal(d, id, true)
+		return nil
 	}}
-	revokePermission = appAction{label: "Revoke a permission…", next: func(m *Model, d device.Device, id string) {
+	revokePermission = appAction{label: "Revoke a permission…", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		m.permissionModal(d, id, false)
+		return nil
 	}}
-	clearData = appAction{label: "Clear its data…", next: func(m *Model, d device.Device, id string) {
+	showCrash = appAction{label: "Show its latest crash report", next: func(m *Model, d device.Device, id string) tea.Cmd {
+		return m.showCrash(d, id)
+	}}
+	clearData = appAction{label: "Clear its data…", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		m.confirm("Clear the data of "+id+"?", "This erases everything "+id+" saved on "+d.Name+", as if it had just been installed. It cannot be undone.",
 			func(m *Model) tea.Cmd {
 				backend := m.backend
@@ -423,25 +428,26 @@ var (
 					return backend.ClearData(ctx, d, id)
 				})
 			})
+		return nil
 	}}
 )
 
 // appActionsFor is what can be done to an app on d. An iPhone's app cannot be stopped on its own,
-// and its permissions are left alone with the rest of the phone. An iOS simulator has no way to
-// clear an app's data.
+// its permissions are left alone with the rest of the phone, and its crash reports stay on it. An
+// iOS simulator has no way to clear an app's data.
 func appActionsFor(d device.Device) []appAction {
 	actions := []appAction{launchApp, restartApp, stopApp}
 	switch {
 	case d.Platform == device.IOS && d.Kind == device.Physical:
 		return actions[:2]
 	case d.Kind == device.Physical:
-		return actions
+		return append(actions, showCrash)
 	}
 	actions = append(actions, grantPermission, revokePermission)
 	if d.Platform == device.Android {
 		actions = append(actions, clearData)
 	}
-	return actions
+	return append(actions, showCrash)
 }
 
 func (m *Model) appActionModal(d device.Device, id string) {
@@ -456,14 +462,48 @@ func (m *Model) appActionModal(d device.Device, id string) {
 			action := actions[index]
 			_ = m.memory.Store.Update(func(f *state.File) { f.RememberApp(d.Platform, id) })
 			if action.next != nil {
-				action.next(m, d, id)
-				return nil
+				return action.next(m, d, id)
 			}
 			backend := m.backend
 			return m.act(d, action.doing+" "+id+" on", action.done+" "+id+" on", nil, func(ctx context.Context) error {
 				return action.run(ctx, backend, d, id)
 			})
 		},
+	}
+}
+
+// showCrash finds the latest crash report of an app and shows it in a window that scrolls.
+func (m *Model) showCrash(d device.Device, id string) tea.Cmd {
+	note := "Looking for the latest crash of " + id + " on " + d.Name + "…"
+	m.setNote(note, false)
+	ctx, backend := m.ctx, m.backend
+	return func() tea.Msg {
+		// Each adb call has its own time limit, and Android may need several.
+		report, err := backend.Crash(ctx, d, id)
+		return applyMsg(func(m *Model) tea.Cmd {
+			if m.note == note {
+				m.setNote("", false)
+			}
+			// Another window was opened meanwhile: it is not replaced, and the note says what came.
+			if m.modal != nil {
+				if err != nil {
+					m.setNote(firstLine(err.Error()), true)
+				} else {
+					m.setNote("The crash report of "+id+" is ready: choose it in the o menu again to read it", false)
+				}
+				return nil
+			}
+			if err != nil {
+				m.fail("No crash report of "+id, err)
+				return nil
+			}
+			body := report.Text
+			if report.Path != "" {
+				body += "\n\nFull report: " + report.Path
+			}
+			m.message("Latest crash of "+id+" on "+d.Name, body)
+			return nil
+		})
 	}
 }
 

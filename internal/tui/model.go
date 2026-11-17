@@ -50,6 +50,7 @@ type Backend interface {
 	SetStatusBar(ctx context.Context, d device.Device, clean bool) error
 	OpenLink(ctx context.Context, d device.Device, link string) error
 	Dev(ctx context.Context, d device.Device, action string, port int) error
+	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession

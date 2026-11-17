@@ -45,6 +45,8 @@ Every key, with `?`:
 - Put a simulator or emulator at a place, and give it the tidy status bar of a screenshot.
 - Grant or revoke an app's permission, and clear its data, on a simulator or emulator.
 - Connect Android phones over Wi-Fi (pairing code or address).
+- The latest crash report of an app, on a simulator or an Android emulator or phone, readable in the
+  dashboard (`o`, then the app) or with `lazymobile crash`, and saved to a file with `--save`.
 - Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
   many logs as you like, side by side or stacked, to read several devices at once.
 - Inside an Expo project: list EAS builds, install a finished build on a running simulator or
@@ -77,6 +79,7 @@ Early release. What has been run, and what has not:
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
 | `logs --tail` and `--since` | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a): the last lines, a time window, one app and a level, with the command ending by itself. An iPhone is refused (it keeps no history). Not run: an Android phone, an app crash in the window |
+| Crash reports (`crash`) | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a), from the command: a Safari crash on the simulator (from the Mac's crash reports, matched to that simulator), and on the emulator a Java crash of the Clock app and a native crash of the Bluetooth app from the crash buffer. `--save`, `--json`, a file that exists refused, an app with no crash, and an iPhone refused. The dashboard menu (`o`, then the app) on the emulator in a real terminal. The fallback to Android's dropbox, only with saved real output. Not run: an Android phone, a React Native or Flutter app's crash, a crash older than a restart |
 | Crash marking | A real crash of an Android 16 emulator's Settings app (`am crash`), streamed with `logs --json`: the report's lines were marked. The `e` keys in the dashboard, only with fake log lines. Not run: an iOS crash, a React Native error, a native signal. Their patterns come from known log formats |
 | Links and screenshots | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: a web address with `&` in it, a link no app handles, a PNG saved, and a second screenshot to the same file refused. The dashboard keys `p` and `t`, only with fake tools. Not run: an Android phone, other Xcode or Android versions |
 | Dark and light mode | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands: read, switch both ways, and a bad mode refused. The dashboard key `m`, only with fake tools. Not run: an Android phone, Android before 10 (expected to say it needs Android 10), other Xcode versions |
@@ -147,7 +150,7 @@ Devices:
 | `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
-| `o` | Pick an app, then what to do with it: launch, restart or stop it. On a simulator or emulator also grant or revoke a permission, and on an emulator clear its data (asks first). An iPhone's apps can be launched and restarted, not stopped |
+| `o` | Pick an app, then what to do with it: launch, restart or stop it, or show its latest crash report. On a simulator or emulator also grant or revoke a permission, and on an emulator clear its data (asks first). An iPhone's apps can be launched and restarted, not stopped, and its crash reports stay on the phone |
 | `f` | Put a simulator or emulator at a place (latitude,longitude). On a simulator, `clear` takes it off. Not for real phones |
 | `c` `C` | Tidy the status bar of a simulator or emulator for a screenshot (9:41, full battery and signal), or restore it. Not for real phones |
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
@@ -312,6 +315,7 @@ lazymobile action "Pixel 9a" "Flutter run" --yes            # without --yes it o
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
 lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: reach Metro, open the dev menu, reload
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
+lazymobile crash "Pixel 9a" com.example.app [--save crash.txt]   # the app's latest crash report
 lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json

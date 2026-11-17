@@ -192,6 +192,12 @@ func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) 
 func (f *fakeBackend) Dev(_ context.Context, d device.Device, action string, port int) error {
 	return f.record("dev %s %s %d", d.ID, action, port)
 }
+func (f *fakeBackend) Crash(_ context.Context, d device.Device, id string) (device.CrashReport, error) {
+	if err := f.record("crash %s %s", d.ID, id); err != nil {
+		return device.CrashReport{}, err
+	}
+	return device.CrashReport{App: id, Text: "FATAL EXCEPTION: main\nProcess: " + id, Path: "/reports/" + id + ".ips"}, nil
+}
 func (f *fakeBackend) Screenshot(_ context.Context, d device.Device, path string) (string, error) {
 	return path, f.record("screenshot %s %s", d.ID, path)
 }
@@ -1944,6 +1950,29 @@ func TestAnIPhoneOffersNoStop(t *testing.T) {
 	h.wantCalls("stop", 0)
 }
 
+func TestTheLatestCrashOfAnAppIsShownFromTheAppMenu(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	// Launch, Restart, Stop, Grant, Revoke, then the crash report.
+	h.press("o", "enter", "down", "down", "down", "down", "down")
+	h.wantScreen("Show its latest crash report")
+	h.press("enter")
+	h.wantCalls("crash SIM-1 com.example.app", 1)
+	h.wantScreen("Latest crash of com.example.app on iPhone 17", "FATAL EXCEPTION: main", "Full report: /reports/com.example.app.ips")
+
+	h.press("esc")
+	h.backend.fail = map[string]error{"crash": apperr.New(apperr.NotFound, "No crash of com.example.app found for iPhone 17")}
+	h.press("o", "enter", "down", "down", "down", "down", "down", "enter")
+	h.wantScreen("No crash of com.example.app found for iPhone 17")
+}
+
+func TestAnIPhoneOffersNoCrashReport(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.press("o", "enter")
+	h.wantNoScreen("crash report")
+}
+
 func TestAppActionsNeedARunningDeviceAndSayWhenTheyFail(t *testing.T) {
 	h := start(t, ipad, pixel)
 	h.press("o")
@@ -2279,5 +2308,22 @@ func TestDRefusesASimulatorAndAStoppedDevice(t *testing.T) {
 	h.wantCalls("dev", 0)
 	if h.m.modal != nil {
 		t.Error("a window opened")
+	}
+}
+
+func TestAMessageBreaksALongWordRatherThanCuttingIt(t *testing.T) {
+	md := &modal{kind: modalMessage, body: "\tat android.app.ActivityThread.throwRemoteServiceException(ActivityThread.java:2377)"}
+	lines := md.bodyLines(40)
+	joined := strings.ReplaceAll(strings.Join(lines, ""), " ", "")
+	if !strings.Contains(joined, "(ActivityThread.java:2377)") {
+		t.Errorf("lines = %q, want all of the frame", lines)
+	}
+	if !strings.HasPrefix(lines[0], "     at") {
+		t.Errorf("first line = %q, want the tab as an indent", lines[0])
+	}
+	for _, line := range lines {
+		if ansi.StringWidth(line) > 39 {
+			t.Errorf("line %q is wider than the window", line)
+		}
 	}
 }

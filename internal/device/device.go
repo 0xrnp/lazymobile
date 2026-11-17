@@ -183,6 +183,17 @@ type App struct {
 	Build   string `json:"build,omitempty"`
 }
 
+// CrashReport is the latest crash of an app, as text a person can read.
+type CrashReport struct {
+	App string `json:"app"`
+	// When is when the crash happened, as the device wrote it.
+	When string `json:"when,omitempty"`
+	Text string `json:"text"`
+	// Path is the full report on this computer, when there is one: an iOS simulator's crash
+	// reports are files on the Mac.
+	Path string `json:"path,omitempty"`
+}
+
 // VersionLabel is "1.4.2 (87)", or whichever of the two is known, or "".
 func (a App) VersionLabel() string {
 	switch {

@@ -699,3 +699,45 @@ func TestDevHelpersRefuseWhatTheyCannotDo(t *testing.T) {
 		t.Errorf("a tool ran: %v", fake.Calls())
 	}
 }
+
+func TestCrashRefusesWhatItCannotRead(t *testing.T) {
+	m, fake := manager(t, "darwin")
+	ctx := context.Background()
+	phone := device.Device{ID: "00008150-0001", Name: "iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Booted}
+	stopped := device.Device{ID: "emulator-5554", Name: "Pixel", Platform: device.Android, Kind: device.Emulator, State: device.Shutdown}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Shutdown}
+	for name, tc := range map[string]struct {
+		d    device.Device
+		app  string
+		code apperr.Code
+	}{
+		"an iPhone":                 {phone, "com.example.app", apperr.Unsupported},
+		"a stopped Android device":  {stopped, "com.example.app", apperr.InvalidState},
+		"a simulator with a bad id": {simulator, "not an id; rm -rf", apperr.InvalidState},
+	} {
+		if _, err := m.Crash(ctx, tc.d, tc.app); apperr.CodeOf(err) != tc.code {
+			t.Errorf("%s: error = %v, want %s", name, err, tc.code)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+}
+
+func TestSaveTextNeverReplacesAFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crash.txt")
+	saved, err := SaveText(path, "FATAL EXCEPTION: main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(saved)
+	if err != nil || string(data) != "FATAL EXCEPTION: main\n" {
+		t.Errorf("file = %q, %v", data, err)
+	}
+	if info, err := os.Stat(saved); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, %v; want 0600", info.Mode().Perm(), err)
+	}
+	if _, err := SaveText(path, "again"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("error = %v, want invalid_state for a file that exists", err)
+	}
+}

@@ -97,7 +97,10 @@ func (md *modal) bodyLines(inner int) []string {
 	}
 	var lines []string
 	for _, paragraph := range strings.Split(md.body, "\n") {
-		for _, line := range strings.Split(ansi.Wordwrap(paragraph, inner-2, " "), "\n") {
+		// A word longer than the line, such as a frame of a stack trace, is broken rather than cut,
+		// so none of it is lost. A tab, which starts each frame of a Java trace, is a fixed indent.
+		paragraph = strings.ReplaceAll(paragraph, "\t", "    ")
+		for _, line := range strings.Split(ansi.Wrap(paragraph, inner-2, " "), "\n") {
 			lines = append(lines, " "+line)
 		}
 	}
