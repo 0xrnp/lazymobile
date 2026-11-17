@@ -64,6 +64,26 @@ func highlight(text, find string, base lipgloss.Style) string {
 	return b.String()
 }
 
+// highlightSpans draws text in base, with the byte ranges in spans marked as matches.
+func highlightSpans(text string, spans [][2]int, base lipgloss.Style) string {
+	if len(spans) == 0 {
+		return base.Render(text)
+	}
+	var b strings.Builder
+	at := 0
+	for _, s := range spans {
+		if s[0] > at {
+			b.WriteString(base.Render(text[at:s[0]]))
+		}
+		b.WriteString(match.Render(text[s[0]:s[1]]))
+		at = s[1]
+	}
+	if at < len(text) {
+		b.WriteString(base.Render(text[at:]))
+	}
+	return b.String()
+}
+
 // clean makes device output safe to draw. Logs come from apps and devices, so they can hold
 // tabs and terminal escape sequences, which must never reach the user's terminal as commands.
 func clean(text string) string {

@@ -31,7 +31,9 @@ type logView struct {
 	keptLast bool
 
 	filter string
-	level  logs.Level
+	// q is filter, read. Use query, which keeps it in step with filter.
+	q     logs.Query
+	level logs.Level
 	// levelChosen is set once the level is changed by hand. Until then each stream starts at its
 	// own default.
 	levelChosen bool
@@ -64,7 +66,20 @@ func (v *logView) passes(line logs.Line) bool {
 			return false
 		}
 	}
-	return v.filter == "" || strings.Contains(strings.ToLower(line.Text), strings.ToLower(v.filter))
+	return v.query().Match(line.Text)
+}
+
+// query is the filter as a query. A filter that does not parse (a saved one, edited by hand) is
+// taken as plain text.
+func (v *logView) query() logs.Query {
+	if v.q.Source() != v.filter {
+		q, err := logs.ParseQuery(v.filter)
+		if err != nil {
+			q = logs.PlainQuery(v.filter)
+		}
+		v.q = q
+	}
+	return v.q
 }
 
 func trim(lines []logs.Line) ([]logs.Line, int) {
@@ -305,7 +320,7 @@ func (v *logView) lines(width, rows int, focused bool) []string {
 				out = append(out, chosen.Render(fit(text, width)))
 				continue
 			}
-			out = append(out, highlight(text, v.filter, lineStyle(line)))
+			out = append(out, highlightSpans(text, v.query().Spans(text), lineStyle(line)))
 		}
 	}
 	for len(out) < logRows {
@@ -346,7 +361,7 @@ func (v *logView) wrapped(width, rows, selected int) []string {
 			if i == selected {
 				parts[j] = chosen.Render(fit(part, width))
 			} else {
-				parts[j] = highlight(part, v.filter, lineStyle(line))
+				parts[j] = highlightSpans(part, v.query().Spans(part), lineStyle(line))
 			}
 		}
 		return parts

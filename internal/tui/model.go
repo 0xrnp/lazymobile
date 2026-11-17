@@ -974,7 +974,13 @@ func (m *Model) logKey(key string) tea.Cmd {
 	case "/", "f":
 		m.modal = &modal{
 			kind: modalPrompt, title: "Filter the log", value: v.filter,
-			body: "Show only lines that contain this text. Leave empty to show everything.",
+			body: "Show lines that contain every word, ignoring case. -word leaves out lines with it, /regex/ is a\nregular expression, and \"two words\" keeps a space. Leave empty to show everything.",
+			validate: func(value string) string {
+				if _, err := logs.ParseQuery(value); err != nil {
+					return err.Error()
+				}
+				return ""
+			},
 			onSubmit: func(m *Model, value string) tea.Cmd {
 				v.filter = value
 				v.rebuild()

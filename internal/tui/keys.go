@@ -175,7 +175,7 @@ var keyTable = []keyAction{
 		footer: say("line"), when: needsLog},
 	{id: "log_copy", ctx: ctxLogs, keys: []string{"y"}, show: "y", desc: "Copy the selected line", footer: say("copy"), when: needsLog},
 	{id: "log_wrap", ctx: ctxLogs, keys: []string{"w"}, show: "w", desc: "Wrap long lines", footer: say("wrap"), when: needsLog},
-	{id: "log_filter", ctx: ctxLogs, keys: []string{"/", "f"}, show: "/", desc: "Filter by text", footer: say("filter"), when: needsLog},
+	{id: "log_filter", ctx: ctxLogs, keys: []string{"/", "f"}, show: "/", desc: "Filter: words, -leave out, /regex/", footer: say("filter"), when: needsLog},
 	{id: "log_level", ctx: ctxLogs, keys: []string{"L"}, show: "L", desc: "Minimum level", footer: say("level"), when: needsLog},
 	{id: "log_pause", ctx: ctxLogs, keys: []string{"p"}, show: "p", desc: "Pause or resume, losing nothing", footer: say("pause"), when: needsLog},
 	{id: "log_clear", ctx: ctxLogs, keys: []string{"c"}, show: "c", desc: "Clear", footer: say("clear"), when: needsLog},

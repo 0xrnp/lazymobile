@@ -650,3 +650,48 @@ func TestRandomUseKeepsTheLogsConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterLeavesOutAndMatchesRegularExpressions(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(
+		logs.Line{Text: "net request id=41 ok"},
+		logs.Line{Text: "net request id=42 failed"},
+		logs.Line{Text: "net heartbeat id=43"},
+		logs.Line{Text: "ui draw"},
+	)
+
+	h.press("/")
+	h.typeText("net -heartbeat")
+	h.press("enter")
+	h.wantScreen("id=41 ok", "id=42 failed", "2 shown, 2 hidden")
+	h.wantNoScreen("id=43", "ui draw")
+
+	h.press("/", "ctrl+u")
+	h.typeText(`/id=4[12]/ -ok`)
+	h.press("enter")
+	h.wantScreen("id=42 failed", "1 shown, 3 hidden")
+	h.wantNoScreen("id=41 ok")
+}
+
+func TestFilterWithABadExpressionIsNotAccepted(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(logs.Line{Text: "one"}, logs.Line{Text: "two"})
+	h.press("/")
+	h.typeText("/(/")
+	h.press("enter")
+	h.wantScreen("not valid")
+	if h.m.logPanes[0].filter != "" {
+		t.Errorf("a filter that does not parse was applied: %q", h.m.logPanes[0].filter)
+	}
+	h.wantScreen("one", "two")
+}
+
+func TestASavedFilterThatDoesNotParseIsTakenAsText(t *testing.T) {
+	v := &logView{follow: true, filter: "/open"}
+	v.add([]logs.Line{{Text: "see /open here"}, {Text: "other"}})
+	if len(v.shown) != 1 || v.shown[0].Text != "see /open here" {
+		t.Errorf("shown = %v", v.shown)
+	}
+}

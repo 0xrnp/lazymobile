@@ -77,6 +77,7 @@ Early release. What has been run, and what has not:
 | Location and status bar | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands. The status bar was checked in real screenshots (9:41 and 12:00, full battery and signal). The location was accepted by both tools, and a latitude off the globe is refused here before it reaches them. Not checked: that an app inside the device sees the new place. The dashboard keys `f`, `c` and `C`, only with fake tools |
 | Permissions and clear data | A real iOS 27.2 simulator and a real Android 16 emulator (API 36), from the commands. On Android a grant and a revoke were checked in the package manager (`granted=true`, then `false`). Refusals were run too: an app that is not installed, a permission the app does not ask for, a made-up name, and clear data without `--yes`. The dashboard menu, only with fake tools. Not run: other Android versions (photos and notifications use different permissions before Android 13), real phones, which are left alone |
 | Project actions (`.lazymobile.json`) | The `action` command with the real program on macOS and a real iOS 27.2 simulator: the list, the command shown without `--yes`, and a command run with the device filled in. The loader and its checks, and the dashboard key `R` with its confirm window, only with fake tools. Not run: the hand-over of the terminal to a long command such as `flutter run` in the real dashboard, and an Android device |
+| Log filter words, exclusions and regular expressions | The parser with many cases, and the dashboard with fake log lines only. Not run against a real device's log |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -163,7 +164,7 @@ Logs:
 | `y` | Copy the selected line, with the lines that belong to it |
 | `h` `l`, `0` | Scroll sideways, reset |
 | `w` | Wrap long lines, to read them in full |
-| `/` | Filter by text (empty clears) |
+| `/` | Filter the log (empty clears). Every word must match, ignoring case. `-word` leaves out lines with it, `/regex/` is a regular expression (Go syntax), `-/regex/` leaves out matches, and `"two words"` keeps a space. For example `network -heartbeat /id=\d+/`. A mistake in the expression is shown and the filter is not applied |
 | `L` | Minimum level |
 | `p` | Pause or resume (nothing is lost) |
 | `c` | Clear |
