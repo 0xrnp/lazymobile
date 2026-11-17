@@ -19,17 +19,17 @@ another editor's terminal.
 <details>
 <summary>More screenshots</summary>
 
-A log of a running Android emulator:
-
-![The dashboard following the log of a running Android emulator](docs/logs.png)
-
 The device list:
 
 ![Simulators, emulators and a connected iPhone in one list](docs/devices.png)
 
-The apps installed on the device, and the ones used before, offered when a log is opened with `l`:
+The log of one app on an Android emulator, with its crash in red:
 
-![The apps used before, with version and build, offered before a log opens](docs/app-picker.png)
+![The dashboard following an app's log on an Android emulator through a crash](docs/logs.png)
+
+Every key, with `?`:
+
+![The key list, with what each key does](docs/help.png)
 
 </details>
 
