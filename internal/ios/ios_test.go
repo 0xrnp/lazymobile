@@ -755,3 +755,43 @@ func TestInstallGoesToASimulatorWithSimctlAndToAnIPhoneWithDevicectl(t *testing.
 		t.Errorf("a refusal by the phone: %v", err)
 	}
 }
+
+func TestPhoneAppProcessIsFoundByItsFolder(t *testing.T) {
+	apps := `{"result":{"apps":[
+	  {"bundleIdentifier":"com.example.test","url":"file:///private/var/containers/Bundle/Application/AAA/Example%20-%20Test.app/"},
+	  {"bundleIdentifier":"com.example.other","url":"file:///private/var/containers/Bundle/Application/BBB/Other.app/"}]}}`
+	procs := `{"result":{"runningProcesses":[
+	  {"executable":"file:///private/var/containers/Bundle/Application/AAA/Example - Test.app/PlugIns/Chat.appex/Chat","processIdentifier":1},
+	  {"executable":"file:///private/var/containers/Bundle/Application/AAA/Example - Test.app/Example - Test","processIdentifier":2}]}}`
+	folder, err := ParseAppFolder(apps, "com.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, ok := ParseRunningExecutable(procs, folder); !ok || name != "Example - Test" {
+		t.Errorf("name = %q, %v; want the app, not its extension", name, ok)
+	}
+	other, _ := ParseAppFolder(apps, "com.example.other")
+	if name, ok := ParseRunningExecutable(procs, other); ok {
+		t.Errorf("found %q for an app that is not running", name)
+	}
+	if _, err := ParseAppFolder(apps, "com.missing"); apperr.CodeOf(err) != apperr.NotFound {
+		t.Errorf("error = %v, want NotFound", err)
+	}
+}
+
+func TestPhoneAppThatIsNotRunningSaysSo(t *testing.T) {
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		out := `{"result":{"apps":[{"bundleIdentifier":"com.example.app","url":"file:///x/App.app/"}]}}`
+		if strings.Contains(command, "info processes") {
+			out = `{"result":{"runningProcesses":[]}}`
+		}
+		if err := os.WriteFile(argv[len(argv)-1], []byte(out), 0o600); err != nil {
+			t.Error(err)
+		}
+		return run.Result{}
+	}}
+	_, err := client(fake).AppExecutable(context.Background(), iphone, "com.example.app")
+	if apperr.CodeOf(err) != apperr.InvalidState || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("error = %v", err)
+	}
+}

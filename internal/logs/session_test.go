@@ -322,3 +322,12 @@ func TestVeryLongLinesAreCut(t *testing.T) {
 		t.Errorf("line lengths = %v, want [%d 5]", lengths, maxLineBytes)
 	}
 }
+
+func TestPhoneSystemLogOfAnAppNeedsItRunning(t *testing.T) {
+	deps := Deps{Runner: run.Exec{}, LookPath: func(string) (string, error) { return "idevicesyslog", nil },
+		IOS: fakeApps{err: apperr.New(apperr.InvalidState, "not running")}}
+	err := Start(context.Background(), deps, Spec{Device: iphone, Mode: System, App: "com.example.app"}, Handlers{}).Wait()
+	if apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("error = %v", err)
+	}
+}

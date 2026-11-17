@@ -29,7 +29,7 @@ const (
 	maxLineBytes = 64 * 1024
 )
 
-// IOSApps finds an app's process name on a simulator.
+// IOSApps finds an app's process name on a simulator, or on an iPhone while the app runs.
 type IOSApps interface {
 	AppExecutable(ctx context.Context, d device.Device, bundleID string) (string, error)
 }
@@ -156,7 +156,19 @@ func start(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 					"For your own app, the app console needs nothing extra. "+
 					"To save past logs instead: sudo log collect --device-udid %s --last 10m", d.ID)
 		}
-		return stream(ctx, []string{"idevicesyslog", "-u", d.ID}, ParsePlain, nil, h)
+		argv := []string{"idevicesyslog", "-u", d.ID}
+		if spec.App != "" {
+			name, err := deps.IOS.AppExecutable(ctx, d, spec.App)
+			if err != nil {
+				return err
+			}
+			if !safeProcessName.MatchString(name) {
+				return apperr.New(apperr.Unsupported, "Unusual app executable name: %s", name)
+			}
+			h.Status(fmt.Sprintf("Showing process %q (%s)", name, spec.App))
+			argv = append(argv, "-p", name)
+		}
+		return stream(ctx, argv, ParsePlain, nil, h)
 	}
 
 	// Simulator system log. Without an app it is very busy, so debug messages only come with one.

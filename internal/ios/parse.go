@@ -2,6 +2,7 @@ package ios
 
 import (
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -341,4 +342,56 @@ func compareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// ParseAppFolder returns the folder of an installed app (its .app bundle) from
+// `devicectl device info apps --json-output`.
+func ParseAppFolder(text, bundleID string) (string, error) {
+	var data struct {
+		Result struct {
+			Apps []struct {
+				BundleIdentifier string `json:"bundleIdentifier"`
+				URL              string `json:"url"`
+			} `json:"apps"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		return "", apperr.New(apperr.ParseFailed, "Could not read the app list from devicectl")
+	}
+	for _, a := range data.Result.Apps {
+		if a.BundleIdentifier == bundleID && a.URL != "" {
+			return a.URL, nil
+		}
+	}
+	return "", apperr.New(apperr.NotFound, "%s is not installed on this device", bundleID)
+}
+
+// ParseRunningExecutable finds the running process that is the app itself, not one of its
+// extensions, in `devicectl device info processes --json-output`, and returns its name.
+func ParseRunningExecutable(text, appFolder string) (string, bool) {
+	var data struct {
+		Result struct {
+			Processes []struct {
+				Executable string `json:"executable"`
+			} `json:"runningProcesses"`
+		} `json:"result"`
+	}
+	if json.Unmarshal([]byte(text), &data) != nil {
+		return "", false
+	}
+	// The app list escapes spaces in a folder name ("%20"), the process list does not.
+	unescape := func(s string) string {
+		if u, err := url.PathUnescape(s); err == nil {
+			return u
+		}
+		return s
+	}
+	folder := unescape(strings.TrimSuffix(appFolder, "/")) + "/"
+	for _, p := range data.Result.Processes {
+		rest, ok := strings.CutPrefix(unescape(p.Executable), folder)
+		if ok && rest != "" && !strings.Contains(rest, "/") {
+			return rest, true
+		}
+	}
+	return "", false
 }

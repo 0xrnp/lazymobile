@@ -83,7 +83,7 @@ Early release. What has been run, and what has not:
 | Boot and install on several devices | `boot --all` with the real program and real iOS 27.2 simulators: two booted together with `--wait`, a real iPhone left alone, a second run skipping both. `install --all`, sets and Android emulators only with fake tools |
 | `doctor --fix` and the new checks | The real program on macOS with Xcode 27.2: the checks on a healthy machine, `idevicesyslog` found with a real iPhone connected, and with it hidden from PATH the fix `brew install libimobiledevice` was offered and, without a terminal, only printed. Not run: a fix command itself, the Expo login check against a real Expo project, the Xcode license and Android SDK fixes (fake tools only) |
 | Android phones | A real Android phone |
-| `idevicesyslog` (an iPhone's system log) | Fake tools only |
+| `idevicesyslog` (an iPhone's system log) | An iPhone's system log for one app (`logs --mode system --app <id>`), matched to the running process through `devicectl`: only that app's lines came through, on a real iPhone 17 Pro (iOS 27). An app that is not running gives a clear error (tests). Not run: Android, the dashboard key path |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
 | Mouse and trackpad scrolling | A real terminal on macOS |
 
@@ -218,7 +218,7 @@ What each device offers for logs:
 | --- | --- |
 | Android emulator or phone | `logcat`, optionally only one app (package name) |
 | iOS simulator | System log, optionally one app (bundle id). Or launch the app and show its output |
-| iPhone | Launch the app and show its output. Or the system log (needs `idevicesyslog`) |
+| iPhone | Launch the app and show its output. Or the system log (needs `idevicesyslog`), optionally one app (bundle id), which must be running on the phone |
 
 A crash is drawn in bold red, apart from other errors. Android crash reports, native signals and
 React Native errors on Android, iOS uncaught exceptions and crash types, and React Native's

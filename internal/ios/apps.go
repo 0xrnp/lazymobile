@@ -17,6 +17,9 @@ import (
 // AppExecutable is the executable name of an installed app ("Runner" for most Flutter apps),
 // which is the process name its logs carry. The simulator must be booted.
 func (c *Client) AppExecutable(ctx context.Context, d device.Device, bundleID string) (string, error) {
+	if d.Kind == device.Physical {
+		return c.phoneExecutable(ctx, d, bundleID)
+	}
 	argv := []string{"xcrun", "simctl", "get_app_container", d.ID, bundleID, "app"}
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout})
 	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
@@ -197,4 +200,31 @@ func (c *Client) simulatorApps(ctx context.Context, d device.Device) ([]device.A
 	}
 	slices.SortFunc(apps, func(a, b device.App) int { return strings.Compare(a.ID, b.ID) })
 	return apps, nil
+}
+
+// phoneExecutable finds the process name of an app on an iPhone. devicectl does not say what an
+// app's executable is called, so it matches the app's folder against the running processes. That
+// only works while the app is running.
+func (c *Client) phoneExecutable(ctx context.Context, d device.Device, bundleID string) (string, error) {
+	apps, err := c.devicectl(ctx, "device", "info", "apps", "--device", d.ID)
+	if err != nil {
+		return "", err
+	}
+	folder, err := ParseAppFolder(apps, bundleID)
+	if err != nil {
+		return "", err
+	}
+	procs, err := c.devicectl(ctx, "device", "info", "processes", "--device", d.ID)
+	if err != nil {
+		return "", err
+	}
+	name, ok := ParseRunningExecutable(procs, folder)
+	if !ok {
+		return "", &apperr.Error{
+			Code:    apperr.InvalidState,
+			Message: fmt.Sprintf("%s is not running on %s", bundleID, d.Name),
+			Hint:    "Unlock the phone and open the app, then start the log again.",
+		}
+	}
+	return name, nil
 }
