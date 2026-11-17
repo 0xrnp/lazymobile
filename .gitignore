@@ -3,3 +3,6 @@
 *.test
 *.out
 .DS_Store
+/lazymobile-*.png
+/lazymobile-*.mov
+/lazymobile-*.mp4
