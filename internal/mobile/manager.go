@@ -631,3 +631,34 @@ func (m *Manager) AppInfo(ctx context.Context, d device.Device, id string) (devi
 	}
 	return device.App{}, apperr.New(apperr.NotFound, "%s is not installed on %s", id, d.Name)
 }
+
+// DefaultDevPort is where Metro and most other dev servers listen.
+const DefaultDevPort = 8081
+
+// DevActions are the actions Dev takes.
+var DevActions = []string{"reverse", "menu", "reload"}
+
+// Dev helps an app in development reach its dev server and answer it: reverse forwards port from
+// the device to this computer, menu opens the app's developer menu, and reload reloads it. They
+// need a running Android emulator or phone, because iOS has no way to send a key to a simulator.
+func (m *Manager) Dev(ctx context.Context, d device.Device, action string, port int) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
+	}
+	if d.Platform != device.Android {
+		return apperr.New(apperr.Unsupported, "%s is not an Android device", d.Name).
+			WithHint("Shake the phone, or press Cmd+D in the simulator, for the developer menu. A simulator reaches Metro on its own.")
+	}
+	switch action {
+	case "reverse":
+		if port < 1 || port > 65535 {
+			return apperr.New(apperr.Usage, "That is not a port: %d", port)
+		}
+		return m.Android.ReversePort(ctx, d, port)
+	case "menu":
+		return m.Android.OpenDevMenu(ctx, d)
+	case "reload":
+		return m.Android.Reload(ctx, d)
+	}
+	return apperr.New(apperr.Usage, "Unknown dev action: %s", action).WithHint("Use reverse, menu or reload.")
+}

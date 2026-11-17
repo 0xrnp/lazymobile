@@ -672,3 +672,30 @@ func TestRecordingAnnouncesItselfOnlyOnceTheFileNameIsAccepted(t *testing.T) {
 		t.Errorf("a good file: %v, announced %d times", err, started)
 	}
 }
+
+func TestDevHelpersRefuseWhatTheyCannotDo(t *testing.T) {
+	m, fake := manager(t, "darwin")
+	ctx := context.Background()
+	simulator := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
+	stopped := device.Device{ID: "emulator-5554", Name: "Pixel", Platform: device.Android, Kind: device.Emulator, State: device.Shutdown}
+	running := device.Device{ID: "emulator-5554", Name: "Pixel", Platform: device.Android, Kind: device.Emulator, State: device.Booted}
+	for name, tc := range map[string]struct {
+		d      device.Device
+		action string
+		port   int
+		code   apperr.Code
+	}{
+		"a simulator":       {simulator, "reload", 8081, apperr.Unsupported},
+		"a stopped device":  {stopped, "reload", 8081, apperr.InvalidState},
+		"an unknown action": {running, "explode", 8081, apperr.Usage},
+		"port zero":         {running, "reverse", 0, apperr.Usage},
+		"port too big":      {running, "reverse", 70000, apperr.Usage},
+	} {
+		if err := m.Dev(ctx, tc.d, tc.action, tc.port); apperr.CodeOf(err) != tc.code {
+			t.Errorf("%s: error = %v, want %s", name, err, tc.code)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+}

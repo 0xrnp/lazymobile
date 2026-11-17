@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,6 +63,7 @@ Usage:
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
+  lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
@@ -200,6 +202,8 @@ type result struct {
 	App    string        `json:"app,omitempty"`
 	Path   string        `json:"path,omitempty"`
 	URL    string        `json:"url,omitempty"`
+	// Port is the port a "dev_reverse" forwarded.
+	Port int `json:"port,omitempty"`
 	// Appearance is the mode a device was switched to.
 	Appearance string `json:"appearance,omitempty"`
 	// Permission is the permission that was granted or revoked.
@@ -266,6 +270,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.action(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
+	case "dev":
+		return a.dev(ctx, rest)
 	case "record":
 		return a.record(ctx, rest)
 	case "screenshot":
@@ -668,6 +674,37 @@ func (a *App) link(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.done(*asJSON, result{Action: "link", Device: d, URL: positional[1]}, fmt.Sprintf("Opened %s on %s", positional[1], d.Name))
+}
+
+func (a *App) dev(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("dev", flag.ContinueOnError)
+	port := fs.Int("port", mobile.DefaultDevPort, "")
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 || !slices.Contains(mobile.DevActions, positional[1]) {
+		return usageError{"dev needs a device and one of: " + strings.Join(mobile.DevActions, ", ")}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	action := positional[1]
+	if err := a.Manager.Dev(ctx, d, action, *port); err != nil {
+		return err
+	}
+	sentence := map[string]string{
+		"reverse": fmt.Sprintf("%s can reach port %d on this computer", d.Name, *port),
+		"menu":    "Opened the developer menu on " + d.Name,
+		"reload":  "Reloaded the app on " + d.Name,
+	}[action]
+	r := result{Action: "dev_" + action, Device: d}
+	if action == "reverse" {
+		r.Port = *port
+	}
+	return a.done(*asJSON, r, sentence)
 }
 
 func (a *App) screenshot(ctx context.Context, args []string) error {

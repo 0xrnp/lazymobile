@@ -924,3 +924,16 @@ func TestBuildsShowACommandFromTheSettingsFileAndNeedYes(t *testing.T) {
 		t.Errorf("with --yes: code %d, ran %v, stderr %q", code, fake.Calls(), e.errs.String())
 	}
 }
+
+func TestDevUsageAndRefusals(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"dev"}, {"dev", "iPhone 16 Pro"}, {"dev", "iPhone 16 Pro", "explode"}, {"dev", "iPhone 16 Pro", "reload", "extra"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	// A simulator cannot be sent a key, so it is refused before any tool runs.
+	if code := e.run("dev", "iPhone 16 Pro", "menu"); code != ExitFailure || e.fake.Called("input") {
+		t.Errorf("code %d, calls %v", code, e.fake.Calls())
+	}
+}

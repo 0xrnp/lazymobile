@@ -34,6 +34,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Uninstall an app, with its data, from a simulator, emulator, iPhone or Android phone.
 - Launch, restart or stop an app on a running device.
 - Open a deep link, take a screenshot, and switch dark and light mode, on a simulator, emulator or Android phone.
+- For an app in development on an Android emulator or phone: forward a port to this computer (Metro's 8081), open the app's developer menu and reload it, with `lazymobile dev`.
 - Install an `.apk` or `.app` from the devices pane (`i`), offering the builds it finds in the folder and the ones you installed before. On an iPhone too.
 - Run your project's own commands (`flutter run`, a Gradle task, anything) on the selected device, from `.lazymobile.json`. The dashboard shows the exact command and asks first.
 - Record the screen of a simulator, emulator or Android phone to a video, from the command line.
@@ -57,6 +58,7 @@ Early release. What has been run, and what has not:
 
 | | Tested |
 | --- | --- |
+| `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a): `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
 | Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
@@ -302,6 +304,7 @@ lazymobile boot --set matrix                                # a named set from .
 lazymobile action --list                                    # the commands in .lazymobile.json
 lazymobile action "Pixel 9a" "Flutter run" --yes            # without --yes it only shows the command
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
+lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: reach Metro, open the dev menu, reload
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
