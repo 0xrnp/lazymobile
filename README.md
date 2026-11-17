@@ -79,6 +79,7 @@ Early release. What has been run, and what has not:
 | Project actions (`.lazymobile.json`) | The `action` command with the real program on macOS and a real iOS 27.2 simulator: the list, the command shown without `--yes`, and a command run with the device filled in. The loader and its checks, and the dashboard key `R` with its confirm window, only with fake tools. Not run: the hand-over of the terminal to a long command such as `flutter run` in the real dashboard, and an Android device |
 | Log filter words, exclusions and regular expressions | The parser with many cases, and the dashboard with fake log lines only. Not run against a real device's log |
 | Saving a log as JSON | The file written from fake log lines in the tests. Not run in a real dashboard |
+| Saved filters (`P`) | The saved file and the dashboard keys, with fake log lines only |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -167,6 +168,7 @@ Logs:
 | `w` | Wrap long lines, to read them in full |
 | `/` | Filter the log (empty clears). Every word must match, ignoring case. `-word` leaves out lines with it, `/regex/` is a regular expression (Go syntax), `-/regex/` leaves out matches, and `"two words"` keeps a space. For example `network -heartbeat /id=\d+/`. A mistake in the expression is shown and the filter is not applied |
 | `L` | Minimum level |
+| `P` | Filters saved for this app (up to 10 per app and platform). Enter applies one, `x` forgets it, and the last row saves the filter and level the log has now |
 | `p` | Pause or resume (nothing is lost) |
 | `c` | Clear |
 | `S` | Save what is shown to a file. A name ending in `.json` saves a JSON list with the fields of `logs --json` |
@@ -252,7 +254,7 @@ next start in that folder puts them back, and opens the log again if its device 
 A log that launches an app comes back too, marked "not started", and `r` launches the app:
 starting it on its own would launch the app again. The lines themselves are not kept.
 
-Everything remembered, including the recent app ids, is in
+Everything remembered, including the recent app ids and the saved filters, is in
 `~/.local/state/lazymobile/state.json` (or `$XDG_STATE_HOME/lazymobile/state.json`), readable
 only by you. Delete the file to forget it all.
 

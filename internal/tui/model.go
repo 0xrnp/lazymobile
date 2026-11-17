@@ -987,6 +987,8 @@ func (m *Model) logKey(key string) tea.Cmd {
 				return nil
 			},
 		}
+	case "P":
+		m.presetsModal(v)
 	case "S":
 		return m.saveLog(v)
 	case "x":

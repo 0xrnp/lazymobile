@@ -740,3 +740,46 @@ func TestSavingNoLinesAsJSONWritesAnEmptyList(t *testing.T) {
 		t.Errorf("text file = %q", text)
 	}
 }
+
+func TestFilterPresetsAreSavedAppliedAndForgottenPerApp(t *testing.T) {
+	h := startWith(t, memoryIn(t), pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.emit(logs.Line{Text: "net ok"}, logs.Line{Text: "ui draw"})
+
+	h.press("P", "enter")
+	h.wantScreen("Nothing to save")
+	h.press("esc")
+
+	h.press("/")
+	h.typeText("net -heartbeat")
+	h.press("enter", "P", "enter")
+	h.wantScreen("Saved the filter for com.example.app")
+
+	h.press("/", "ctrl+u", "enter")
+	h.wantScreen("net ok", "ui draw")
+	h.press("P")
+	h.wantScreen("Filters for com.example.app", "net -heartbeat", "Save the current filter")
+	h.press("enter")
+	h.wantScreen("1 shown, 1 hidden")
+	if got := h.m.logPanes[0].filter; got != "net -heartbeat" {
+		t.Errorf("filter = %q", got)
+	}
+
+	// Another app has none of them.
+	h.m.logPanes[0].spec.App = "com.example.other"
+	h.press("P")
+	h.wantScreen("Filters for com.example.other")
+	if items := h.m.modal.items; len(items) != 1 || items[0] != "Save the current filter" {
+		t.Errorf("another app's rows = %v, want only the save row", items)
+	}
+	h.press("esc")
+
+	h.m.logPanes[0].spec.App = "com.example.app"
+	h.press("P", "x")
+	if items := h.m.modal.items; len(items) != 1 {
+		t.Errorf("rows after forgetting = %v", items)
+	}
+	if got := h.m.memory.Store.Load().Presets; len(got) != 0 {
+		t.Errorf("presets after forgetting = %v", got)
+	}
+}

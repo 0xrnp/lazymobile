@@ -18,6 +18,8 @@ import (
 const (
 	// maxApps is how many app ids are kept per platform.
 	maxApps = 10
+	// maxPresets is how many filters are kept per app.
+	maxPresets = 10
 	// maxViews is how many folders keep a dashboard view. The oldest go first.
 	maxViews = 30
 )
@@ -28,6 +30,8 @@ type File struct {
 	Apps map[device.Platform][]string `json:"apps,omitempty"`
 	// Installs are the builds installed, newest first, per platform.
 	Installs map[device.Platform][]string `json:"installs,omitempty"`
+	// Presets are saved log filters, newest first, per platform and app id (see PresetKey).
+	Presets map[string][]Preset `json:"presets,omitempty"`
 	// Views are where the dashboard was left, by folder.
 	Views map[string]View `json:"views,omitempty"`
 }
@@ -167,6 +171,11 @@ func (f *File) prune() {
 	for platform, paths := range f.Installs {
 		if len(paths) > maxApps {
 			f.Installs[platform] = paths[:maxApps]
+		}
+	}
+	for key, list := range f.Presets {
+		if len(list) > maxPresets {
+			f.Presets[key] = list[:maxPresets]
 		}
 	}
 	for platform, ids := range f.Apps {
