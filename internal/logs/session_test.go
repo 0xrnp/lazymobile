@@ -331,3 +331,63 @@ func TestPhoneSystemLogOfAnAppNeedsItRunning(t *testing.T) {
 		t.Errorf("error = %v", err)
 	}
 }
+
+func TestAndroidDumpReadsTheBufferAndEnds(t *testing.T) {
+	dir := t.TempDir()
+	adb := script(t, dir, "adb", `case "$*" in
+  *"shell date"*) echo "11-13 20:44:44.000" ;;
+  *logcat*)
+    echo "$@" > "$(dirname "$0")/logcat-args"
+    echo "11-13 20:49:44.298   100   100 I App: first"
+    echo "11-13 20:49:45.100   300   300 E App: second" ;;
+esac`)
+	var c collector
+	spec := Spec{Device: emulator, Mode: Logcat, Dump: true, Since: 5 * time.Minute}
+	if err := Start(context.Background(), adbDeps(adb), spec, c.handlers()).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.texts(); len(got) != 2 {
+		t.Errorf("lines = %v, want both and then the end", got)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "logcat-args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "-v threadtime -d -T 11-13 20:44:44.000"; !strings.Contains(string(args), want) {
+		t.Errorf("logcat arguments = %q, want them to contain %q", args, want)
+	}
+}
+
+func TestAndroidDumpRefusesATimeItCannotRead(t *testing.T) {
+	adb := script(t, t.TempDir(), "adb", `echo "date: bad"`)
+	spec := Spec{Device: emulator, Mode: Logcat, Dump: true, Since: time.Minute}
+	err := Start(context.Background(), adbDeps(adb), spec, Handlers{}).Wait()
+	if apperr.CodeOf(err) != apperr.ParseFailed {
+		t.Errorf("error = %v, want parse_failed", err)
+	}
+}
+
+func TestSimulatorDumpUsesLogShow(t *testing.T) {
+	argsFile := fakeXcrun(t)
+	var c collector
+	session := Start(context.Background(), Deps{Runner: run.Exec{}}, Spec{Device: simulator, Mode: System, Dump: true, Since: 2 * time.Minute}, c.handlers())
+	c.waitFor(t, 1)
+	session.Stop()
+	_ = session.Wait()
+	want := "simctl|spawn|SIM-UDID|log|show|--style|compact|--last|120s"
+	if got := strings.Join(readArgs(t, argsFile), "|"); got != want {
+		t.Errorf("arguments = %q, want %q", got, want)
+	}
+}
+
+func TestDumpIsRefusedWhereThereIsNoHistory(t *testing.T) {
+	deps := Deps{Runner: run.Exec{}, LookPath: func(string) (string, error) { return "idevicesyslog", nil }}
+	for name, spec := range map[string]Spec{
+		"an iPhone log":   {Device: iphone, Mode: System, Dump: true},
+		"the app console": {Device: simulator, Mode: Console, App: "com.example.app", Dump: true},
+	} {
+		if err := Start(context.Background(), deps, spec, Handlers{}).Wait(); apperr.CodeOf(err) != apperr.Unsupported {
+			t.Errorf("%s: error = %v, want unsupported", name, err)
+		}
+	}
+}

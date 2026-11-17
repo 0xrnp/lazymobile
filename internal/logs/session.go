@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +53,10 @@ type Spec struct {
 	App string
 	// Tail is how many earlier Android lines to show first. Default 1000.
 	Tail int
+	// Dump reads what the device has already logged, then ends, instead of following the log.
+	// Since limits that to the last stretch of time, and is only used with Dump.
+	Dump  bool
+	Since time.Duration
 }
 
 // Handlers receive the stream. They are called from the session's goroutine, one at a time.
@@ -135,6 +140,9 @@ func start(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 		return startAndroid(ctx, deps, spec, h)
 	}
 
+	if spec.Dump && spec.Mode == Console {
+		return apperr.New(apperr.Unsupported, "The app console cannot be read and stopped: it is the app's live output")
+	}
 	if spec.Mode == Console {
 		argv := []string{"xcrun", "devicectl", "device", "process", "launch", "--device", d.ID, "--console", "--terminate-existing", spec.App}
 		if d.Kind == device.Simulator {
@@ -146,6 +154,10 @@ func start(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 	}
 
 	if d.Kind == device.Physical {
+		if spec.Dump {
+			return apperr.New(apperr.Unsupported, "%s only has a live log: an iPhone keeps no history to read", d.Name).WithHint(
+				"Follow it without --tail or --since, or save past logs with: sudo log collect --device-udid %s --last 10m", d.ID)
+		}
 		look := deps.LookPath
 		if look == nil {
 			look = exec.LookPath
@@ -173,8 +185,15 @@ func start(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 
 	// Simulator system log. Without an app it is very busy, so debug messages only come with one.
 	argv := []string{"xcrun", "simctl", "spawn", d.ID, "log", "stream", "--style", "compact"}
+	if spec.Dump {
+		argv = []string{"xcrun", "simctl", "spawn", d.ID, "log", "show", "--style", "compact", "--last", sinceArg(spec.Since)}
+	}
+	read := stream
+	if spec.Dump {
+		read = dump
+	}
 	if spec.App == "" {
-		return stream(ctx, argv, ParseIOS, nil, h)
+		return read(ctx, argv, ParseIOS, nil, h)
 	}
 	name, err := deps.IOS.AppExecutable(ctx, d, spec.App)
 	if err != nil {
@@ -184,8 +203,13 @@ func start(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 		return apperr.New(apperr.Unsupported, "Unusual app executable name: %s", name)
 	}
 	h.Status(fmt.Sprintf("Showing process %q (%s), including debug messages", name, spec.App))
-	argv = append(argv, "--level", "debug", "--predicate", fmt.Sprintf(`process == "%s"`, name))
-	return stream(ctx, argv, ParseIOS, nil, h)
+	level := []string{"--level", "debug"}
+	if spec.Dump {
+		level = []string{"--info", "--debug"}
+	}
+	argv = append(argv, level...)
+	argv = append(argv, "--predicate", fmt.Sprintf(`process == "%s"`, name))
+	return read(ctx, argv, ParseIOS, nil, h)
 }
 
 func startAndroid(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
@@ -199,7 +223,20 @@ func startAndroid(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 		tail = 1000
 	}
 	argv := []string{adb, "-s", serial, "logcat", "-v", "threadtime", "-T", strconv.Itoa(tail)}
+	if spec.Dump {
+		argv = []string{adb, "-s", serial, "logcat", "-v", "threadtime", "-d"}
+		if spec.Since > 0 {
+			from, err := androidTimeAgo(ctx, deps.Runner, adb, serial, spec.Since)
+			if err != nil {
+				return err
+			}
+			argv = append(argv, "-T", from)
+		}
+	}
 	if spec.App == "" {
+		if spec.Dump {
+			return dump(ctx, argv, ParseAndroid, nil, h)
+		}
 		return stream(ctx, argv, ParseAndroid, nil, h)
 	}
 
@@ -215,6 +252,10 @@ func startAndroid(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 	pidof()
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+
+	if spec.Dump {
+		return dump(ctx, argv, ParseAndroid, filter, h)
 	}
 
 	pollCtx, stopPoll := context.WithCancel(ctx)
@@ -239,13 +280,50 @@ func startAndroid(ctx context.Context, deps Deps, spec Spec, h Handlers) error {
 	return err
 }
 
+// sinceArg is a duration as `log show --last` wants it. Without one, five minutes.
+func sinceArg(d time.Duration) string {
+	if d <= 0 {
+		d = 5 * time.Minute
+	}
+	return strconv.Itoa(int(d.Round(time.Second).Seconds())) + "s"
+}
+
+// androidTimeAgo is the time d ago on the device's own clock, as logcat -T wants it. The device
+// says it, because its clock and time zone need not match this computer's.
+func androidTimeAgo(ctx context.Context, r run.Runner, adb, serial string, d time.Duration) (string, error) {
+	secs := int(d.Round(time.Second).Seconds())
+	script := fmt.Sprintf(`date -d @$(( $(date +%%s) - %d )) "+%%m-%%d %%H:%%M:%%S.000"`, secs)
+	argv := []string{adb, "-s", serial, "shell", script}
+	res := r.Run(ctx, argv, run.Options{Timeout: 10 * time.Second})
+	if err := apperr.FromResult(res, argv, ""); err != nil {
+		return "", err
+	}
+	from := strings.TrimSpace(res.Stdout)
+	if !androidTime.MatchString(from) {
+		return "", &apperr.Error{Code: apperr.ParseFailed, Message: "Could not read the time on the device", Argv: argv}
+	}
+	return from, nil
+}
+
+var androidTime = regexp.MustCompile(`^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$`)
+
 type rawLine struct {
 	text   string
 	stderr bool
 }
 
-// stream runs argv until it ends or ctx is cancelled, and hands its lines to h in batches.
+// stream runs argv until it ends or ctx is cancelled, and hands its lines to h in batches. A
+// stream that ends by itself is an error: a log is meant to go on.
 func stream(ctx context.Context, argv []string, parse func(string) Line, filter *AppFilter, h Handlers) error {
+	return readLog(ctx, argv, parse, filter, h, true)
+}
+
+// dump is like stream for a command that prints what was logged and ends, which is a success.
+func dump(ctx context.Context, argv []string, parse func(string) Line, filter *AppFilter, h Handlers) error {
+	return readLog(ctx, argv, parse, filter, h, false)
+}
+
+func readLog(ctx context.Context, argv []string, parse func(string) Line, filter *AppFilter, h Handlers, follow bool) error {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	run.Group(cmd)
 	stdout, err := cmd.StdoutPipe()
@@ -343,6 +421,9 @@ func stream(ctx context.Context, argv []string, parse func(string) Line, filter 
 	}
 	if err := apperr.FromResult(res, argv, ""); err != nil {
 		return err
+	}
+	if !follow {
+		return nil
 	}
 	return &apperr.Error{Code: apperr.CommandFailed, Message: "The log stream ended", Argv: argv}
 }

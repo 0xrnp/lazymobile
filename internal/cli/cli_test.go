@@ -937,3 +937,29 @@ func TestDevUsageAndRefusals(t *testing.T) {
 		t.Errorf("code %d, calls %v", code, e.fake.Calls())
 	}
 }
+
+func TestLogsTailPrintsTheLastLinesAndEnds(t *testing.T) {
+	dir := t.TempDir()
+	body := "#!/bin/sh\nfor i in 1 2 3 4 5; do echo \"2026-11-13 20:56:3$i.411 Df Runner[30348:6e9c9] line$i\"; done\n"
+	if err := os.WriteFile(filepath.Join(dir, "xcrun"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	e := newEnv(t)
+	if code := e.run("logs", "iPhone 16 Pro", "--tail", "2"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	out := e.out.String()
+	if strings.Contains(out, "line3") || !strings.Contains(out, "line4") || !strings.Contains(out, "line5") {
+		t.Errorf("printed %q, want only the last two lines", out)
+	}
+}
+
+func TestLogsTailAndSinceTakeOnlyPositiveValues(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"logs", "iPhone 16 Pro", "--tail", "-1"}, {"logs", "iPhone 16 Pro", "--since", "-5m"}, {"logs", "iPhone 16 Pro", "--since", "soon"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+}

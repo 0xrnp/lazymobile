@@ -66,7 +66,7 @@ Usage:
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
-  lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
+  lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
@@ -788,11 +788,18 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	lastApp := fs.Bool("last-app", false, "")
 	mode := fs.String("mode", "", "")
 	levelName := fs.String("level", "", "")
+	tail := fs.Int("tail", 0, "")
+	since := fs.Duration("since", 0, "")
 	asJSON := fs.Bool("json", false, "")
 	d, err := a.one(ctx, fs, args, "logs")
 	if err != nil {
 		return err
 	}
+	if *tail < 0 || *since < 0 {
+		return usageError{"--tail and --since cannot be negative"}
+	}
+	// With either, the log is read and the command ends, instead of following it.
+	dump := *tail > 0 || *since > 0
 	if *lastApp {
 		if *app != "" {
 			return usageError{"give --app or --last-app, not both"}
@@ -836,7 +843,15 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	defer stop()
 	encoder := json.NewEncoder(a.Stdout)
 	var remember sync.Once
-	session := logs.Start(ctx, a.Manager.LogDeps(), logs.Spec{Device: d, Mode: chosen, App: *app}, logs.Handlers{
+	var last []logs.Line
+	emit := func(line logs.Line) {
+		if *asJSON {
+			_ = encoder.Encode(line)
+		} else {
+			fmt.Fprintln(a.Stdout, line.Text)
+		}
+	}
+	session := logs.Start(ctx, a.Manager.LogDeps(), logs.Spec{Device: d, Mode: chosen, App: *app, Dump: dump, Since: *since}, logs.Handlers{
 		Lines: func(lines []logs.Line) {
 			// The app id is remembered once the log works, so a mistyped one is not offered again.
 			// Remembering is a convenience: a state file that cannot be written does not stop the log.
@@ -848,17 +863,23 @@ func (a *App) logs(ctx context.Context, args []string) error {
 				if line.Level != logs.NoLevel && line.Level < minimum {
 					continue
 				}
-				if *asJSON {
-					_ = encoder.Encode(line)
-				} else {
-					fmt.Fprintln(a.Stdout, line.Text)
+				if *tail > 0 {
+					last = append(last, line)
+					if len(last) > *tail {
+						last = last[1:]
+					}
+					continue
 				}
+				emit(line)
 			}
 		},
 		Status: func(message string) { fmt.Fprintln(a.Stderr, message) },
 	})
 	if err := session.Wait(); err != nil {
 		return err
+	}
+	for _, line := range last {
+		emit(line)
 	}
 	return ctx.Err()
 }
