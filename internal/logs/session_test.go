@@ -391,3 +391,26 @@ func TestDumpIsRefusedWhereThereIsNoHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestWhatTheLogToolsSayAboutThemselvesIsLeftOut(t *testing.T) {
+	for _, text := range []string{
+		"[connected:00008150-001C35400C6A401C]",
+		"[disconnected:00008150-001C35400C6A401C]",
+		"Exiting...",
+		"Timestamp               Ty Process[PID:TID]",
+		"getpwuid_r did not find a match for uid 502",
+	} {
+		if !isToolNoise(text) {
+			t.Errorf("%q was kept", text)
+		}
+	}
+	for _, text := range []string{
+		"Nov 17 14:16:37.304917 HomesTest(React)[26322] <Info>: [connected:socket]",
+		"2026-11-13 20:56:36.411 Df Runner[30348:6e9c9] Exiting...",
+		"11-13 20:49:44.298   100   100 I App: Timestamp Ty Process[PID:TID]",
+	} {
+		if isToolNoise(text) {
+			t.Errorf("a device line %q was left out", text)
+		}
+	}
+}

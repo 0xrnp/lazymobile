@@ -932,6 +932,9 @@ func TestDevUsageAndRefusals(t *testing.T) {
 			t.Errorf("%v: code %d, want %d", args, code, ExitUsage)
 		}
 	}
+	if code := e.run("dev", "iPhone 16 Pro", "reverse", "--port", "99999"); code != ExitUsage {
+		t.Errorf("a port that cannot be: code %d, want %d", code, ExitUsage)
+	}
 	// A simulator cannot be sent a key, so it is refused before any tool runs.
 	if code := e.run("dev", "iPhone 16 Pro", "menu"); code != ExitFailure || e.fake.Called("input") {
 		t.Errorf("code %d, calls %v", code, e.fake.Calls())

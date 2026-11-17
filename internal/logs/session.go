@@ -307,6 +307,15 @@ func androidTimeAgo(ctx context.Context, r run.Runner, adb, serial string, d tim
 
 var androidTime = regexp.MustCompile(`^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$`)
 
+// toolNoise matches what the log tools print about themselves, not what the device logged:
+// idevicesyslog's connection notes, the column heading of Apple's log command, and a warning
+// simctl prints when the simulator does not know this computer's user.
+var toolNoise = regexp.MustCompile(`^(\[(connected|disconnected):[^\]]*\]|Exiting\.\.\.|Timestamp\s+Ty\s+Process\[PID:TID\]|getpwuid_r did not find a match for uid \d+)$`)
+
+func isToolNoise(text string) bool {
+	return toolNoise.MatchString(strings.TrimSpace(text))
+}
+
 type rawLine struct {
 	text   string
 	stderr bool
@@ -393,6 +402,9 @@ func readLog(ctx context.Context, argv []string, parse func(string) Line, filter
 				if len(recentErrors) > 20 {
 					recentErrors = recentErrors[len(recentErrors)-20:]
 				}
+			}
+			if isToolNoise(raw.text) {
+				continue
 			}
 			if line := parse(raw.text); filter == nil || filter.Accept(line) {
 				batch = append(batch, line)

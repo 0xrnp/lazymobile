@@ -687,6 +687,9 @@ func (a *App) dev(ctx context.Context, args []string) error {
 	if len(positional) != 2 || !slices.Contains(mobile.DevActions, positional[1]) {
 		return usageError{"dev needs a device and one of: " + strings.Join(mobile.DevActions, ", ")}
 	}
+	if *port < 1 || *port > 65535 {
+		return usageError{fmt.Sprintf("--port must be from 1 to 65535, not %d", *port)}
+	}
 	d, err := a.Manager.Find(ctx, positional[0])
 	if err != nil {
 		return err
