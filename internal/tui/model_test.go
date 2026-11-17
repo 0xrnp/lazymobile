@@ -1432,7 +1432,7 @@ func TestAnAppUsedOnAnotherDeviceStaysListedWhileItIsNotInstalledHere(t *testing
 	h.backend.installed = []device.App{{ID: "com.other.app"}}
 	h.selectDevice(pixel)
 	h.press("l")
-	h.wantScreen("● com.new.build", "not found on this device")
+	h.wantScreen("● com.new.build", "not in the installed list")
 
 	// It can still be chosen, for the log of an app that is about to be installed.
 	h.press("enter")
@@ -1449,7 +1449,7 @@ func TestAppsUsedBeforeAreNotMarkedMissingWhenTheDeviceListFailed(t *testing.T) 
 	h.selectDevice(pixel)
 	h.press("l")
 	h.wantScreen("com.new.build", "Every app")
-	h.wantNoScreen("not found on this device")
+	h.wantNoScreen("not in the installed list")
 }
 
 func TestTheAppListIsFilteredByTyping(t *testing.T) {

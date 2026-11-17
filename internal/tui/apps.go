@@ -517,7 +517,7 @@ func appRows(rows []appRow) (items, notes []string) {
 		}
 		name := r.name
 		if r.missing {
-			name = "not found on this device"
+			name = "not in the installed list"
 		}
 		note := strings.TrimRight(fit(r.version, versionWidth)+"  "+name, " ")
 		items, notes = append(items, item), append(notes, note)
