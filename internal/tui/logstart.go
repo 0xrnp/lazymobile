@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,7 +124,7 @@ func (m *Model) saveLog(v *logView) tea.Cmd {
 	suggested := fmt.Sprintf("lazymobile-%s-%s.log", name, m.now().Format("20060102-150405"))
 	m.modal = &modal{
 		kind: modalPrompt, title: "Save the log", value: suggested,
-		body: "Saves the lines that are shown now. A name without a folder goes in the current folder.",
+		body: "Saves the lines that are shown now. A name without a folder goes in the current folder.\nA name ending in .json saves them as JSON, with the same fields as logs --json.",
 		validate: func(value string) string {
 			if value == "" {
 				return "A file name is needed."
@@ -134,13 +135,13 @@ func (m *Model) saveLog(v *logView) tea.Cmd {
 			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(value, "~/") {
 				value = filepath.Join(home, value[2:])
 			}
-			var b strings.Builder
-			for _, line := range v.shown {
-				b.WriteString(line.Text)
-				b.WriteByte('\n')
+			content, err := logFile(value, v.shown)
+			if err != nil {
+				m.fail("Could not save the log", err)
+				return nil
 			}
 			// Logs can hold tokens and personal data, so only the user may read the file.
-			if err := os.WriteFile(value, []byte(b.String()), 0o600); err != nil {
+			if err := os.WriteFile(value, content, 0o600); err != nil {
 				m.fail("Could not save the log", err)
 				return nil
 			}
@@ -149,4 +150,21 @@ func (m *Model) saveLog(v *logView) tea.Cmd {
 		},
 	}
 	return nil
+}
+
+// logFile is what to write for the lines: a JSON list when the name ends in .json, and the text of
+// each line otherwise.
+func logFile(name string, lines []logs.Line) ([]byte, error) {
+	if strings.EqualFold(filepath.Ext(name), ".json") {
+		if lines == nil {
+			lines = []logs.Line{}
+		}
+		return json.MarshalIndent(lines, "", "  ")
+	}
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(line.Text)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String()), nil
 }

@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -693,5 +697,46 @@ func TestASavedFilterThatDoesNotParseIsTakenAsText(t *testing.T) {
 	v.add([]logs.Line{{Text: "see /open here"}, {Text: "other"}})
 	if len(v.shown) != 1 || v.shown[0].Text != "see /open here" {
 		t.Errorf("shown = %v", v.shown)
+	}
+}
+
+func TestSaveAsJSONWritesTheShownLinesWithTheLogsJSONFields(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.emit(
+		logs.Line{Text: "I hello", Level: logs.Info, PID: "42"},
+		logs.Line{Text: "E boom", Level: logs.Error, Crash: true},
+		logs.Line{Text: "I hidden by the filter", Level: logs.Info},
+	)
+	h.press("/")
+	h.typeText("-hidden")
+	h.press("enter")
+
+	path := filepath.Join(t.TempDir(), "saved.json")
+	h.press("S", "ctrl+u")
+	h.typeText(path)
+	h.press("enter")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []logs.Line
+	if err := json.Unmarshal(content, &got); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, content)
+	}
+	want := []logs.Line{{Text: "I hello", Level: logs.Info, PID: "42"}, {Text: "E boom", Level: logs.Error, Crash: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("saved %+v, want %+v", got, want)
+	}
+	h.wantScreen("Saved 2 lines")
+}
+
+func TestSavingNoLinesAsJSONWritesAnEmptyList(t *testing.T) {
+	content, err := logFile("x.JSON", nil)
+	if err != nil || string(content) != "[]" {
+		t.Errorf("got %q, %v", content, err)
+	}
+	if text, _ := logFile("x.log", []logs.Line{{Text: "a"}, {Text: "b"}}); string(text) != "a\nb\n" {
+		t.Errorf("text file = %q", text)
 	}
 }

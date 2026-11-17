@@ -78,6 +78,7 @@ Early release. What has been run, and what has not:
 | Permissions and clear data | A real iOS 27.2 simulator and a real Android 16 emulator (API 36), from the commands. On Android a grant and a revoke were checked in the package manager (`granted=true`, then `false`). Refusals were run too: an app that is not installed, a permission the app does not ask for, a made-up name, and clear data without `--yes`. The dashboard menu, only with fake tools. Not run: other Android versions (photos and notifications use different permissions before Android 13), real phones, which are left alone |
 | Project actions (`.lazymobile.json`) | The `action` command with the real program on macOS and a real iOS 27.2 simulator: the list, the command shown without `--yes`, and a command run with the device filled in. The loader and its checks, and the dashboard key `R` with its confirm window, only with fake tools. Not run: the hand-over of the terminal to a long command such as `flutter run` in the real dashboard, and an Android device |
 | Log filter words, exclusions and regular expressions | The parser with many cases, and the dashboard with fake log lines only. Not run against a real device's log |
+| Saving a log as JSON | The file written from fake log lines in the tests. Not run in a real dashboard |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -168,7 +169,7 @@ Logs:
 | `L` | Minimum level |
 | `p` | Pause or resume (nothing is lost) |
 | `c` | Clear |
-| `S` | Save what is shown to a file |
+| `S` | Save what is shown to a file. A name ending in `.json` saves a JSON list with the fields of `logs --json` |
 | `x` | Stop the stream |
 | `X` | Close this log. The next one takes its place |
 | `r` | Restart the stream |
