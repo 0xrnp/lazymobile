@@ -35,6 +35,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Launch, restart or stop an app on a running device.
 - Open a deep link, take a screenshot, and switch dark and light mode, on a simulator, emulator or Android phone.
 - Install an `.apk` or `.app` from the devices pane (`i`), offering the builds it finds in the folder and the ones you installed before. On an iPhone too.
+- Run your project's own commands (`flutter run`, a Gradle task, anything) on the selected device, from `.lazymobile.json`. The dashboard shows the exact command and asks first.
 - Record the screen of a simulator, emulator or Android phone to a video, from the command line.
 - Put a simulator or emulator at a place, and give it the tidy status bar of a screenshot.
 - Grant or revoke an app's permission, and clear its data, on a simulator or emulator.
@@ -75,6 +76,7 @@ Early release. What has been run, and what has not:
 | Screen recording | A real iOS 27.2 simulator and a real Android 16 emulator, from `record`: a video of valid format saved with `--duration` and with Ctrl-C, a second recording to the same file refused, Android's 3 minute limit refused, and the copy on the device removed. No dashboard key yet. Not run: an Android phone, an iPhone (Apple's tools cannot record one), videos longer than a few seconds |
 | Location and status bar | A real iOS 27.2 simulator and a real Android 16 emulator, from the commands. The status bar was checked in real screenshots (9:41 and 12:00, full battery and signal). The location was accepted by both tools, and a latitude off the globe is refused here before it reaches them. Not checked: that an app inside the device sees the new place. The dashboard keys `f`, `c` and `C`, only with fake tools |
 | Permissions and clear data | A real iOS 27.2 simulator and a real Android 16 emulator (API 36), from the commands. On Android a grant and a revoke were checked in the package manager (`granted=true`, then `false`). Refusals were run too: an app that is not installed, a permission the app does not ask for, a made-up name, and clear data without `--yes`. The dashboard menu, only with fake tools. Not run: other Android versions (photos and notifications use different permissions before Android 13), real phones, which are left alone |
+| Project actions (`.lazymobile.json`) | The `action` command with the real program on macOS and a real iOS 27.2 simulator: the list, the command shown without `--yes`, and a command run with the device filled in. The loader and its checks, and the dashboard key `R` with its confirm window, only with fake tools. Not run: the hand-over of the terminal to a long command such as `flutter run` in the real dashboard, and an Android device |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -139,6 +141,7 @@ Devices:
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
 | `p` | Save a screenshot, a PNG, in the folder lazymobile was started in. Not for an iPhone |
 | `t` | Open a web address or deep link, such as `myapp://home?id=1`. Not for an iPhone |
+| `R` | Run one of the project's own commands from `.lazymobile.json` on the selected running device. It shows the exact command and the folder, and asks first. The command takes over the terminal until it ends |
 | `i` | Install an `.apk` or `.app` on a running device: pick a build found in the folder (Gradle, Flutter and Xcode build folders) or one used before, or type a path. An iPhone needs a build made and signed for devices |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |
 | `n` | New simulator or emulator |
@@ -287,6 +290,8 @@ lazymobile permission "Pixel 9a" grant camera com.example.app   # camera, locati
 lazymobile cleardata "Pixel 9a" com.example.app --yes   # emulators; on iOS, uninstall instead
 lazymobile location "Pixel 9a" 37.7749,-122.4194   # or: clear (simulators only)
 lazymobile statusbar "iPhone 17" clean   # or: reset
+lazymobile action --list                                    # the commands in .lazymobile.json
+lazymobile action "Pixel 9a" "Flutter run" --yes            # without --yes it only shows the command
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
@@ -330,6 +335,36 @@ Optional. A `.lazymobile.json` next to `eas.json` changes how `eas` is run:
 
 The project is found by looking for `eas.json` in the current folder and its parents, up to the
 repository root, and then in `apps/*/`.
+
+### Your own commands
+
+`actions` adds commands of your own to the dashboard (`R`) and to `lazymobile action`:
+
+```json
+{
+  "actions": [
+    { "name": "Flutter run", "command": ["flutter", "run", "-d", "{device_id}"] },
+    { "name": "Install debug", "platform": "android", "command": ["./gradlew", "installDebug"] },
+    { "name": "Clear app", "command": ["adb", "-s", "{device_id}", "shell", "pm", "clear", "{app}"] }
+  ]
+}
+```
+
+- `command` is a list of arguments, not a shell line, so nothing is split or expanded for you. In
+  the arguments after the first, `{device_id}` is what the platform's own tool wants (`flutter -d`,
+  `adb -s`, `xcrun simctl`), `{platform}` is `ios` or `android`, and `{app}` is the app id you last
+  used on that platform (`--app` on the command line).
+- `platform` is optional. It shows the action only for `android` or `ios` devices.
+- The command runs in the folder of the file that defines it. The file is read from the folder you
+  started lazymobile in and the folders above it, up to the repository root. If two files use the
+  same name, the nearer one wins.
+- A mistake in the file (an unknown placeholder, a missing name, two actions with one name) is
+  reported, and nothing runs.
+- **A file like this can come from a repository you cloned**, so a command never runs unseen. The
+  dashboard shows the command and the folder and waits for `y`. The command line refuses without
+  `--yes`. There is no "always allow". Read the file before you run its actions.
+- The same trust applies to `eas.command` and `eas.build_command` above, which are run when you
+  use the builds pane, without a window like this one.
 
 ## In Neovim
 

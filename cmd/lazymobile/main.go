@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
+	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/cli"
 	"github.com/0xrnp/lazymobile/internal/doctor"
@@ -69,6 +70,13 @@ func main() {
 				return client
 			}
 			return nil
+		},
+		Actions: func() ([]actions.Action, error) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil, nil
+			}
+			return actions.Load(cwd)
 		},
 		State: store,
 		Doctor: func(ctx context.Context) doctor.Report {

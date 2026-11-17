@@ -139,6 +139,8 @@ var keyTable = []keyAction{
 		when: selectedDevice(screenFeature)},
 	{id: "install", ctx: ctxDevices, keys: []string{"i"}, show: "i", desc: "Install an .apk or .app on a running device",
 		when: selectedDevice(screenFeature)},
+	{id: "project_action", ctx: ctxDevices, keys: []string{"R"}, show: "R", desc: "Run a project command from .lazymobile.json (asks first)",
+		when: selectedDevice(running)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",
 		when: selectedDevice(screenFeature)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",

@@ -18,6 +18,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
@@ -55,6 +56,8 @@ Usage:
   lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
+  lazymobile action --list [--json]   the project's own commands from .lazymobile.json
+  lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
@@ -91,6 +94,8 @@ type App struct {
 	Doctor func(ctx context.Context) doctor.Report
 	// Builds returns the Expo project of the current folder, or nil when there is none.
 	Builds func() BuildLister
+	// Actions returns the project's own commands from .lazymobile.json, or nil when there is none.
+	Actions func() ([]actions.Action, error)
 	// State remembers app ids between runs. The zero Store remembers nothing.
 	State state.Store
 }
@@ -190,7 +195,10 @@ type result struct {
 	// Permission is the permission that was granted or revoked.
 	Permission string `json:"permission,omitempty"`
 	// Location is "latitude,longitude", or "cleared".
-	Location string   `json:"location,omitempty"`
+	Location string `json:"location,omitempty"`
+	// Name and Command are the project action that ran, with the device filled in.
+	Name     string   `json:"name,omitempty"`
+	Command  []string `json:"command,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -244,6 +252,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.location(ctx, rest)
 	case "statusbar":
 		return a.statusBar(ctx, rest)
+	case "action":
+		return a.action(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
 	case "record":

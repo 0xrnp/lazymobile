@@ -880,6 +880,8 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.statusBar(d, key == "c")
 	case "i":
 		return m.pickBuild(d)
+	case "R":
+		return m.projectActions(d)
 	case "p":
 		return m.screenshot(d)
 	case "t":
