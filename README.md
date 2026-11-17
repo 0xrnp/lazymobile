@@ -80,6 +80,7 @@ Early release. What has been run, and what has not:
 | Log filter words, exclusions and regular expressions | The parser with many cases, and the dashboard with fake log lines only. Not run against a real device's log |
 | Saving a log as JSON | The file written from fake log lines in the tests. Not run in a real dashboard |
 | Saved filters (`P`) | The saved file and the dashboard keys, with fake log lines only |
+| Boot and install on several devices | `boot --all` with the real program and real iOS 27.2 simulators: two booted together with `--wait`, a real iPhone left alone, a second run skipping both. `install --all`, sets and Android emulators only with fake tools |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -294,6 +295,9 @@ lazymobile permission "Pixel 9a" grant camera com.example.app   # camera, locati
 lazymobile cleardata "Pixel 9a" com.example.app --yes   # emulators; on iOS, uninstall instead
 lazymobile location "Pixel 9a" 37.7749,-122.4194   # or: clear (simulators only)
 lazymobile statusbar "iPhone 17" clean   # or: reset
+lazymobile boot --all "iPhone*" "Pixel 9a" [--wait]         # several at once; a real phone is skipped
+lazymobile install --all build/app.apk [--phones]           # on every running device that can take it
+lazymobile boot --set matrix                                # a named set from .lazymobile.json
 lazymobile action --list                                    # the commands in .lazymobile.json
 lazymobile action "Pixel 9a" "Flutter run" --yes            # without --yes it only shows the command
 lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
@@ -339,6 +343,23 @@ Optional. A `.lazymobile.json` next to `eas.json` changes how `eas` is run:
 
 The project is found by looking for `eas.json` in the current folder and its parents, up to the
 repository root, and then in `apps/*/`.
+
+### Sets of devices
+
+`device_sets` names groups of devices, such as a test matrix, for `boot --set` and `install --set`:
+
+```json
+{ "device_sets": { "matrix": ["iPhone 17", "Pixel 9a", "Pixel Tablet*"] } }
+```
+
+- Each entry is a name, a part of a name, an id, or a pattern with `*` or `?` that matches the whole
+  name (`iPhone*`), ignoring case. An entry that matches no device is an error, so a typo does not
+  drop a device from the run.
+- A set only names devices. It never holds a command.
+- `boot --all` and `install --all` work on up to three devices at a time and print one line for
+  each: `ok`, `skipped` (already running, a real phone, not running, the wrong kind of build) or
+  `failed`. The exit code is 1 if any failed. `install --all` goes to every running simulator and
+  emulator that can take the build. Real phones are only included with `--phones`.
 
 ### Your own commands
 

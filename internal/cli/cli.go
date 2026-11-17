@@ -21,6 +21,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
+	"github.com/0xrnp/lazymobile/internal/devicesets"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/eas"
 	"github.com/0xrnp/lazymobile/internal/ios"
@@ -44,11 +45,13 @@ Usage:
   lazymobile                       open the dashboard
   lazymobile list [--json]         list every device
   lazymobile boot <device> [--cold] [--wipe --yes] [--wait] [--no-window] [--json]
+  lazymobile boot --all <name or pattern>... | --set <name> [--cold] [--wait] [--no-window] [--json]   several at once, such as "iPhone*"
   lazymobile shutdown <device> [--keep-simulator-app] [--json]
   lazymobile erase <device> --yes [--json]   erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes [--json]
   lazymobile uninstall <device> <app-id> --yes [--json]   remove an app and its data from a running device
   lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator or an iPhone
+  lazymobile install --all | --set <name> <path> [--phones] [--json]   on every running device that can take it. Real phones only with --phones
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light
@@ -94,6 +97,8 @@ type App struct {
 	Doctor func(ctx context.Context) doctor.Report
 	// Builds returns the Expo project of the current folder, or nil when there is none.
 	Builds func() BuildLister
+	// DeviceSets returns the named groups of devices from .lazymobile.json.
+	DeviceSets func() (devicesets.Sets, error)
 	// Actions returns the project's own commands from .lazymobile.json, or nil when there is none.
 	Actions func() ([]actions.Action, error)
 	// State remembers app ids between runs. The zero Store remembers nothing.
@@ -348,7 +353,22 @@ func (a *App) boot(ctx context.Context, args []string) error {
 	yes := fs.Bool("yes", false, "")
 	noWindow := fs.Bool("no-window", false, "")
 	asJSON := fs.Bool("json", false, "")
-	d, err := a.one(ctx, fs, args, "boot")
+	var many several
+	many.flags(fs)
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if many.wanted() {
+		if *wipe {
+			return usageError{"--wipe erases data, so it is done for one device at a time"}
+		}
+		return a.bootSeveral(ctx, many, positional, mobile.BootOptions{Cold: *cold, Wait: *wait}, *noWindow, *asJSON)
+	}
+	if len(positional) != 1 {
+		return usageError{"boot needs one device"}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
 	if err != nil {
 		return err
 	}
@@ -410,9 +430,21 @@ func (a *App) destructive(ctx context.Context, args []string, name, done string,
 func (a *App) install(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
+	phones := fs.Bool("phones", false, "")
+	var many several
+	many.flags(fs)
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
+	}
+	if many.wanted() {
+		if len(positional) != 1 {
+			return usageError{"install --all and --set need just a path"}
+		}
+		return a.installSeveral(ctx, many, positional[0], *phones, *asJSON)
+	}
+	if *phones {
+		return usageError{"--phones goes with --all or --set"}
 	}
 	if len(positional) != 2 {
 		return usageError{"install needs a device and a path"}

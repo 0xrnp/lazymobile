@@ -11,6 +11,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/cli"
+	"github.com/0xrnp/lazymobile/internal/devicesets"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/eas"
 	"github.com/0xrnp/lazymobile/internal/mobile"
@@ -70,6 +71,13 @@ func main() {
 				return client
 			}
 			return nil
+		},
+		DeviceSets: func() (devicesets.Sets, error) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return devicesets.Sets{}, nil
+			}
+			return devicesets.Load(cwd)
 		},
 		Actions: func() ([]actions.Action, error) {
 			cwd, err := os.Getwd()

@@ -85,3 +85,17 @@ A device in `device` or `devices` has `id`, `name`, `platform` (`ios` or `androi
 
 New fields can be added to any object. A field that is there will not change its meaning without
 a new version number noted in the release notes.
+
+## `boot --all`, `install --all` and `--set`
+
+These work on several devices and print one object, with `action` set to `boot_all` or `install_all`:
+
+```json
+{ "ok": false, "action": "boot_all", "results": [
+  { "device": { "id": "...", "name": "iPhone 17" }, "status": "ok", "message": "is ready" },
+  { "device": { "id": "...", "name": "Pixel 9a" }, "status": "failed", "message": "...", "error": { "code": "command_failed", "message": "..." } } ] }
+```
+
+- `status` is `ok`, `skipped` or `failed`. `message` says why a device was skipped. `error` is the
+  same object a single command prints, and is only set for `failed`.
+- `ok` is false, and the exit code is 1, when any device failed. A skipped device is not a failure.
