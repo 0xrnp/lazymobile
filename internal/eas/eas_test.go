@@ -133,6 +133,9 @@ func TestDetect(t *testing.T) {
 		if want := []string{filepath.Join(root, "node_modules", ".bin", "eas")}; !reflect.DeepEqual(project.Command, want) {
 			t.Errorf("command = %v, want the project's pinned copy", project.Command)
 		}
+		if project.Configured || (&Client{Project: project}).ConfiguredCommand() != nil {
+			t.Errorf("the pinned copy is not from the settings file")
+		}
 	})
 
 	t.Run("in a monorepo app folder, with a global eas", func(t *testing.T) {
@@ -162,6 +165,9 @@ func TestDetect(t *testing.T) {
 		project, _ := Detect(root, noGlobal)
 		if !reflect.DeepEqual(project.Command, []string{"pnpm", "exec", "eas"}) || len(project.BuildCommand) != 3 {
 			t.Errorf("project = %+v", project)
+		}
+		if !project.Configured || !reflect.DeepEqual((&Client{Project: project}).ConfiguredCommand(), project.Command) {
+			t.Errorf("a command from the settings file must be marked as configured: %+v", project)
 		}
 	})
 

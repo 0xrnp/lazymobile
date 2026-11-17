@@ -18,6 +18,8 @@ type Builds interface {
 	Name() string
 	Profiles() []string
 	StartCommand(profile, platform string) []string
+	// ConfiguredCommand is the eas command from .lazymobile.json, or nil when there is none.
+	ConfiguredCommand() []string
 	List(ctx context.Context, limit int) ([]eas.Build, error)
 	Download(ctx context.Context, id string) (string, error)
 	Cancel(ctx context.Context, id string) error
@@ -35,7 +37,9 @@ const (
 type buildsView struct {
 	// asked is false until the user loads the builds. eas runs the project's own code and uses
 	// the Expo login, so it is never started just because the dashboard opened.
-	asked   bool
+	asked bool
+	// trusted is set once the user has seen the command from .lazymobile.json and agreed.
+	trusted bool
 	loading bool
 	list    []eas.Build
 	err     error
@@ -51,6 +55,16 @@ type buildsMsg struct {
 func (m *Model) loadBuilds() tea.Cmd {
 	v := &m.build
 	if m.builds == nil || v.loading {
+		return nil
+	}
+	if argv := m.builds.ConfiguredCommand(); len(argv) > 0 && !v.trusted {
+		m.confirm("Run the eas command from "+eas.ConfigFile+"?",
+			"Loading the builds runs this command in "+m.builds.Name()+":\n"+strings.Join(argv, " ")+
+				"\n\nThe file can come from a repository you cloned. Run it only if you trust this project.",
+			func(m *Model) tea.Cmd {
+				m.build.trusted = true
+				return m.loadBuilds()
+			})
 		return nil
 	}
 	v.asked, v.loading = true, true

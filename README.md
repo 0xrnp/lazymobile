@@ -300,7 +300,7 @@ lazymobile logs "iPhone 17" --app com.example.app --mode console --json
 lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS
 lazymobile apps "iPhone 17" [--json]     # app ids used before, and the apps installed on it
 lazymobile id "Pixel 9a"          # emulator-5554 when running
-lazymobile builds [--json] [--limit 20]
+lazymobile builds [--json] [--limit 20] [--yes]   # --yes when .lazymobile.json sets the eas command
 lazymobile doctor [--json]
 ```
 
@@ -363,8 +363,9 @@ repository root, and then in `apps/*/`.
 - **A file like this can come from a repository you cloned**, so a command never runs unseen. The
   dashboard shows the command and the folder and waits for `y`. The command line refuses without
   `--yes`. There is no "always allow". Read the file before you run its actions.
-- The same trust applies to `eas.command` and `eas.build_command` above, which are run when you
-  use the builds pane, without a window like this one.
+- The same trust applies to `eas.command` above. When it comes from this file, the builds pane
+  shows it and asks before the first load, and `lazymobile builds` needs `--yes`. `build_command`
+  is already shown in the window that asks before a build starts.
 
 ## In Neovim
 

@@ -40,6 +40,9 @@ type Project struct {
 	// BuildCommand, when set, starts a build instead of `eas build`. "{profile}" and "{platform}"
 	// are replaced. Projects that guard builds behind their own scripts use this.
 	BuildCommand []string
+	// Configured is set when Command came from the settings file, which can be part of a
+	// repository someone else wrote, and not from the project's own copy or PATH.
+	Configured bool
 }
 
 // config is the "eas" part of the settings file.
@@ -98,8 +101,8 @@ func Detect(start string, lookPath func(string) (string, error)) (Project, bool)
 	for _, folder := range []string{dir, start} {
 		var c config
 		if content, err := os.ReadFile(filepath.Join(folder, ConfigFile)); err == nil && json.Unmarshal(content, &c) == nil {
-			if len(project.Command) == 0 {
-				project.Command = c.EAS.Command
+			if len(project.Command) == 0 && len(c.EAS.Command) > 0 {
+				project.Command, project.Configured = c.EAS.Command, true
 			}
 			if len(project.BuildCommand) == 0 {
 				project.BuildCommand = c.EAS.BuildCommand
@@ -282,6 +285,15 @@ type Client struct {
 // Name is the project folder's name, for titles.
 func (c *Client) Name() string {
 	return filepath.Base(c.Project.Dir)
+}
+
+// ConfiguredCommand is the eas command named in .lazymobile.json, or nil when eas is found the
+// usual way. Such a command is the file's to choose, so it is shown and confirmed before it runs.
+func (c *Client) ConfiguredCommand() []string {
+	if c.Project.Configured {
+		return c.Project.Command
+	}
+	return nil
 }
 
 // Profiles are the project's build profiles.

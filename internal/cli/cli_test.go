@@ -908,3 +908,19 @@ func TestRecordRefusesBeforeAnyToolRuns(t *testing.T) {
 		t.Errorf("a recording started: %v", e.fake.Calls())
 	}
 }
+
+func TestBuildsShowACommandFromTheSettingsFileAndNeedYes(t *testing.T) {
+	e := newEnv(t)
+	fake := runtest.Table(map[string]run.Result{"build:list": runtest.Out(`[]`)})
+	e.project = &eas.Client{Runner: fake, Project: eas.Project{Dir: "/work/sample", Command: []string{"pnpm", "exec", "eas"}, Configured: true}}
+	code := e.run("builds")
+	if code != ExitUsage || !strings.Contains(e.errs.String(), "pnpm exec eas") || !strings.Contains(e.errs.String(), "--yes") {
+		t.Errorf("without --yes: code %d, stderr %q", code, e.errs.String())
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("the command ran without --yes: %v", fake.Calls())
+	}
+	if code := e.run("builds", "--yes"); code != ExitOK || !fake.Called("build:list") {
+		t.Errorf("with --yes: code %d, ran %v, stderr %q", code, fake.Calls(), e.errs.String())
+	}
+}

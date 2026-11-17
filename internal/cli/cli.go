@@ -64,7 +64,7 @@ Usage:
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
-  lazymobile builds [--json] [--limit n]   Expo (EAS) builds of the project in this folder
+  lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
   lazymobile doctor [--json]       what is installed, what is missing, and how to fix it
   lazymobile version
 
@@ -897,12 +897,15 @@ func WriteReport(w io.Writer, report doctor.Report) {
 // BuildLister lists the Expo builds of the project in the current folder.
 type BuildLister interface {
 	Name() string
+	// ConfiguredCommand is the eas command from .lazymobile.json, or nil when there is none.
+	ConfiguredCommand() []string
 	List(ctx context.Context, limit int) ([]eas.Build, error)
 }
 
 func (a *App) builds(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("builds", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
+	yes := fs.Bool("yes", false, "")
 	limit := fs.Int("limit", 10, "")
 	if positional, err := parse(fs, args); err != nil {
 		return err
@@ -916,6 +919,11 @@ func (a *App) builds(ctx context.Context, args []string) error {
 	if project == nil {
 		return apperr.New(apperr.NotFound, "No Expo project was found here").
 			WithHint("Run this inside a project that has an eas.json file.")
+	}
+	// The settings file can come from a repository someone else wrote, so its command is shown first.
+	if argv := project.ConfiguredCommand(); len(argv) > 0 && !*yes {
+		return usageError{fmt.Sprintf("%s sets the eas command to `%s`, which would run in %s. Add --yes to run it",
+			eas.ConfigFile, strings.Join(argv, " "), project.Name())}
 	}
 	list, err := project.List(ctx, *limit)
 	if err != nil {
