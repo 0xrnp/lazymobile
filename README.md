@@ -14,10 +14,14 @@ A terminal dashboard for mobile development: iOS simulators, Android emulators, 
 their logs, and Expo builds, in one screen. It works in any terminal, and inside Neovim or
 another editor's terminal.
 
-![The dashboard following the log of a running Android emulator](docs/logs.png)
+![Following an emulator's log through a crash, filtering it, forwarding Metro's port, and the key list](docs/demo.gif)
 
 <details>
 <summary>More screenshots</summary>
+
+A log of a running Android emulator:
+
+![The dashboard following the log of a running Android emulator](docs/logs.png)
 
 The device list:
 
