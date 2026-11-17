@@ -286,3 +286,29 @@ func TestStartUsesTheProjectsOwnBuildCommand(t *testing.T) {
 		t.Errorf("ran %v, want only the project's command", calls)
 	}
 }
+
+func TestLoggedIn(t *testing.T) {
+	cases := []struct {
+		name    string
+		answer  run.Result
+		want    bool
+		wantErr bool
+	}{
+		{"logged in", runtest.Out("someone\n"), true, false},
+		{"not logged in", runtest.Fail(1, "Not logged in. Log in with eas login"), false, false},
+		{"something else failed", runtest.Fail(1, "Error: getaddrinfo ENOTFOUND api.expo.dev"), false, true},
+	}
+	for _, c := range cases {
+		client := &Client{Runner: runtest.Table(map[string]run.Result{"whoami": c.answer}), Project: Project{Dir: "/work/app", Command: []string{"eas"}}}
+		got, err := client.LoggedIn(context.Background())
+		if got != c.want || (err != nil) != c.wantErr {
+			t.Errorf("%s: got %v, %v", c.name, got, err)
+		}
+	}
+	if !reflect.DeepEqual((&Client{Project: Project{Command: []string{"pnpm", "exec", "eas"}}}).LoginCommand(), []string{"pnpm", "exec", "eas", "login"}) {
+		t.Errorf("login command wrong")
+	}
+	if (&Client{}).LoginCommand() != nil {
+		t.Errorf("no eas, no login command")
+	}
+}

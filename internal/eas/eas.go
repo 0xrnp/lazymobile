@@ -296,6 +296,29 @@ func (c *Client) ConfiguredCommand() []string {
 	return nil
 }
 
+// Available reports whether an eas command was found.
+func (c *Client) Available() bool { return len(c.Project.Command) > 0 }
+
+// LoginCommand is the command that logs in to Expo, or nil when eas was not found.
+func (c *Client) LoginCommand() []string {
+	if !c.Available() {
+		return nil
+	}
+	return append(append([]string(nil), c.Project.Command...), "login")
+}
+
+// LoggedIn asks eas who is logged in. It is false, with no error, when nobody is.
+func (c *Client) LoggedIn(ctx context.Context) (bool, error) {
+	_, _, err := c.eas(ctx, listTimeout, "whoami")
+	if err == nil {
+		return true, nil
+	}
+	if e, ok := err.(*apperr.Error); ok && e.Code == apperr.CommandFailed && strings.Contains(e.Hint, "eas login") {
+		return false, nil
+	}
+	return false, err
+}
+
 // Profiles are the project's build profiles.
 func (c *Client) Profiles() []string {
 	return c.Project.Profiles

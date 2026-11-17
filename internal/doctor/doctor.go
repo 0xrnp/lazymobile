@@ -4,6 +4,7 @@ package doctor
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -34,6 +35,9 @@ type Problem struct {
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
 	Hint     string   `json:"hint,omitempty"`
+	// Fix is a command that fixes the problem, as an argument list. It is only set when one command
+	// does it. lazymobile never runs it without asking.
+	Fix []string `json:"fix,omitempty"`
 }
 
 // Found is a tool that is present.
@@ -61,6 +65,18 @@ func (r Report) Healthy() bool {
 
 const switchHint = "sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
 
+// xcodeApp is where the Xcode app usually is. A variable so tests do not depend on the machine.
+var xcodeApp = "/Applications/Xcode.app"
+
+// switchFix is the command that selects Xcode when the app is where it usually is, and nothing
+// when it is not, because then there is nothing to switch to yet.
+func switchFix() []string {
+	if _, err := os.Stat(xcodeApp); err != nil {
+		return nil
+	}
+	return []string{"sudo", "xcode-select", "--switch", xcodeApp + "/Contents/Developer"}
+}
+
 var xcodeVersion = regexp.MustCompile(`Xcode\s+(\S+)`)
 
 func succeeded(res run.Result) bool {
@@ -68,8 +84,8 @@ func succeeded(res run.Result) bool {
 }
 
 func xcode(ctx context.Context, r run.Runner, report *Report) {
-	problem := func(code string, severity Severity, message, hint string) {
-		report.Problems = append(report.Problems, Problem{Code: code, Platform: "ios", Severity: severity, Message: message, Hint: hint})
+	problem := func(code string, severity Severity, message, hint string, fix ...string) {
+		report.Problems = append(report.Problems, Problem{Code: code, Platform: "ios", Severity: severity, Message: message, Hint: hint, Fix: fix})
 	}
 	selected := r.Run(ctx, []string{"xcode-select", "-p"}, run.Options{Timeout: toolTimeout})
 	dir := strings.TrimSpace(selected.Stdout)
@@ -81,7 +97,7 @@ func xcode(ctx context.Context, r run.Runner, report *Report) {
 	if strings.Contains(dir, "CommandLineTools") {
 		problem("xcode_clt_only", Unavailable,
 			"Only the Command Line Tools are installed, and simulators need the full Xcode app",
-			"Install Xcode from the App Store, then run: "+switchHint)
+			"Install Xcode from the App Store, then run: "+switchHint, switchFix()...)
 		return
 	}
 
@@ -110,7 +126,7 @@ func xcode(ctx context.Context, r run.Runner, report *Report) {
 		report.Found = append(report.Found, Found{"Xcode", detail})
 	} else if strings.Contains(strings.ToLower(version.Stderr+version.Stdout), "license") {
 		problem("xcode_license", Unavailable, "The Xcode license has not been accepted",
-			"Accept it once with: sudo xcodebuild -license accept")
+			"Accept it once with: sudo xcodebuild -license accept", "sudo", "xcodebuild", "-license", "accept")
 	}
 	if !succeeded(simctl) {
 		problem("simctl_missing", Unavailable, "simctl was not found in the selected Xcode",
@@ -122,8 +138,15 @@ func xcode(ctx context.Context, r run.Runner, report *Report) {
 }
 
 func androidSDK(ctx context.Context, r run.Runner, opts android.Options, report *Report) {
-	problem := func(code string, severity Severity, message, hint string) {
-		report.Problems = append(report.Problems, Problem{Code: code, Platform: "android", Severity: severity, Message: message, Hint: hint})
+	problem := func(code string, severity Severity, message, hint string, fix ...string) {
+		report.Problems = append(report.Problems, Problem{Code: code, Platform: "android", Severity: severity, Message: message, Hint: hint, Fix: fix})
+	}
+	// install is the command that adds an SDK package, when sdkmanager is there to run it.
+	install := func(pkg string) []string {
+		if tool, ok := opts.FindTool("sdkmanager"); ok {
+			return []string{tool.Path, pkg}
+		}
+		return nil
 	}
 	sdk, candidates := opts.SDKDir()
 
@@ -159,11 +182,11 @@ func androidSDK(ctx context.Context, r run.Runner, opts android.Options, report 
 		report.Found = append(report.Found, Found{"Android SDK", sdk})
 	}
 	if _, ok := tools["emulator"]; !ok {
-		problem("android_emulator_missing", Unavailable, "The Android emulator is not installed", `Install it with: sdkmanager "emulator"`)
+		problem("android_emulator_missing", Unavailable, "The Android emulator is not installed", `Install it with: sdkmanager "emulator"`, install("emulator")...)
 	}
 	if _, ok := tools["adb"]; !ok {
 		problem("android_adb_missing", Unavailable, "adb is not installed, so physical Android devices are unavailable",
-			`Install it with: sdkmanager "platform-tools"`)
+			`Install it with: sdkmanager "platform-tools"`, install("platform-tools")...)
 	}
 	if _, ok := tools["avdmanager"]; !ok {
 		problem("android_avdmanager_missing", Optional, "avdmanager is not installed, so new Android devices cannot be created",

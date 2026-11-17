@@ -45,7 +45,7 @@ The apps installed on the device, and the ones used before, offered when a log i
 - Inside an Expo project: list EAS builds, install a finished build on a running simulator or
   emulator, start and cancel builds.
 - The same features as plain commands, with `--json`, for scripts and coding agents.
-- `lazymobile doctor` says what is missing and how to install it.
+- `lazymobile doctor` says what is missing and how to install it. `doctor --fix` shows the command for each fix and runs it only after you say yes. It also checks `idevicesyslog` when an iPhone is connected, and the Expo login inside an Expo project.
 - One binary. It calls the tools you already have (`xcrun`, `adb`, `emulator`, `eas`).
 
 Requirements: macOS or Linux. iOS needs macOS with Xcode. Android needs the Android SDK (Android
@@ -81,6 +81,7 @@ Early release. What has been run, and what has not:
 | Saving a log as JSON | The file written from fake log lines in the tests. Not run in a real dashboard |
 | Saved filters (`P`) | The saved file and the dashboard keys, with fake log lines only |
 | Boot and install on several devices | `boot --all` with the real program and real iOS 27.2 simulators: two booted together with `--wait`, a real iPhone left alone, a second run skipping both. `install --all`, sets and Android emulators only with fake tools |
+| `doctor --fix` and the new checks | The real program on macOS with Xcode 27.2: the checks on a healthy machine, `idevicesyslog` found with a real iPhone connected, and with it hidden from PATH the fix `brew install libimobiledevice` was offered and, without a terminal, only printed. Not run: a fix command itself, the Expo login check against a real Expo project, the Xcode license and Android SDK fixes (fake tools only) |
 | Android phones | A real Android phone |
 | `idevicesyslog` (an iPhone's system log) | Fake tools only |
 | Linux | The dashboard on Linux, and a Homebrew install in a Linux container (arm64). The suite runs in CI on Ubuntu |
@@ -310,6 +311,7 @@ lazymobile apps "iPhone 17" [--json]     # app ids used before, and the apps ins
 lazymobile id "Pixel 9a"          # emulator-5554 when running
 lazymobile builds [--json] [--limit 20] [--yes]   # --yes when .lazymobile.json sets the eas command
 lazymobile doctor [--json]
+lazymobile doctor --fix [--yes]     # shows each fix's command and asks before running it; --yes for scripts
 ```
 
 A device is an id, an adb serial, a name, or a unique part of a name. Commands that erase,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/android"
@@ -121,4 +122,115 @@ func TestAndroidChecks(t *testing.T) {
 			t.Error("looked for Xcode on Linux")
 		}
 	})
+}
+
+type fakeEAS struct {
+	configured []string
+	available  bool
+	loggedIn   bool
+	err        error
+	asked      int
+}
+
+func (f *fakeEAS) ConfiguredCommand() []string { return f.configured }
+func (f *fakeEAS) Available() bool             { return f.available }
+func (f *fakeEAS) LoginCommand() []string      { return []string{"eas", "login"} }
+func (f *fakeEAS) LoggedIn(context.Context) (bool, error) {
+	f.asked++
+	return f.loggedIn, f.err
+}
+
+func has(programs ...string) func(string) (string, error) {
+	return func(name string) (string, error) {
+		for _, p := range programs {
+			if p == name {
+				return "/bin/" + name, nil
+			}
+		}
+		return "", errors.New("not found")
+	}
+}
+
+func TestExtraChecks(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra Extra
+		eas   *fakeEAS
+		want  map[string]Severity
+		fix   map[string][]string
+		asked int
+	}{
+		{"nothing connected, no project", Extra{}, nil, map[string]Severity{}, nil, 0},
+		{"iPhone without idevicesyslog", Extra{IPhoneConnected: true, LookPath: has("brew")}, nil,
+			map[string]Severity{"idevicesyslog_missing": Optional},
+			map[string][]string{"idevicesyslog_missing": {"brew", "install", "libimobiledevice"}}, 0},
+		{"iPhone without idevicesyslog or brew", Extra{IPhoneConnected: true, LookPath: has()}, nil,
+			map[string]Severity{"idevicesyslog_missing": Optional}, map[string][]string{"idevicesyslog_missing": nil}, 0},
+		{"iPhone with idevicesyslog", Extra{IPhoneConnected: true, LookPath: has("idevicesyslog")}, nil, map[string]Severity{}, nil, 0},
+		{"no eas", Extra{LookPath: has("npm")}, &fakeEAS{},
+			map[string]Severity{"eas_missing": Optional},
+			map[string][]string{"eas_missing": {"npm", "install", "--global", "eas-cli"}}, 0},
+		{"not logged in", Extra{}, &fakeEAS{available: true},
+			map[string]Severity{"eas_not_logged_in": Optional},
+			map[string][]string{"eas_not_logged_in": {"eas", "login"}}, 1},
+		{"logged in", Extra{}, &fakeEAS{available: true, loggedIn: true}, map[string]Severity{}, nil, 1},
+		{"could not check", Extra{}, &fakeEAS{available: true, err: errors.New("offline")},
+			map[string]Severity{"eas_check_failed": Optional}, nil, 1},
+		{"a command from .lazymobile.json is never run", Extra{}, &fakeEAS{available: true, configured: []string{"sh", "-c", "x"}},
+			map[string]Severity{}, nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.eas != nil {
+				c.extra.EAS = c.eas
+			}
+			report := CheckExtra(context.Background(), c.extra)
+			got := codes(report)
+			if len(got) != len(c.want) {
+				t.Fatalf("problems = %v, want %v", got, c.want)
+			}
+			for code, severity := range c.want {
+				if got[code] != severity {
+					t.Errorf("%s = %q, want %q", code, got[code], severity)
+				}
+			}
+			for _, p := range report.Problems {
+				if want, listed := c.fix[p.Code]; listed && !reflect.DeepEqual(p.Fix, want) {
+					t.Errorf("%s fix = %v, want %v", p.Code, p.Fix, want)
+				}
+			}
+			if c.eas != nil && c.eas.asked != c.asked {
+				t.Errorf("eas asked %d times, want %d", c.eas.asked, c.asked)
+			}
+		})
+	}
+}
+
+func TestFixesAreOnlyOfferedWhenOneCommandDoesIt(t *testing.T) {
+	old := xcodeApp
+	defer func() { xcodeApp = old }()
+
+	xcodeApp = t.TempDir()
+	var report Report
+	xcode(context.Background(), runtest.Table(map[string]run.Result{"xcode-select": runtest.Out("/Library/Developer/CommandLineTools\n")}), &report)
+	want := []string{"sudo", "xcode-select", "--switch", xcodeApp + "/Contents/Developer"}
+	if len(report.Problems) != 1 || !reflect.DeepEqual(report.Problems[0].Fix, want) {
+		t.Errorf("with Xcode installed: %+v", report.Problems)
+	}
+
+	xcodeApp = filepath.Join(t.TempDir(), "missing")
+	report = Report{}
+	xcode(context.Background(), runtest.Table(map[string]run.Result{"xcode-select": runtest.Out("/Library/Developer/CommandLineTools\n")}), &report)
+	if len(report.Problems) != 1 || report.Problems[0].Fix != nil {
+		t.Errorf("without Xcode there is nothing to switch to: %+v", report.Problems)
+	}
+
+	report = Report{}
+	xcode(context.Background(), runtest.Table(map[string]run.Result{
+		"xcode-select": runtest.Out("/Applications/Xcode.app/Contents/Developer\n"), "--find simctl": {}, "--find devicectl": {},
+		"xcodebuild": runtest.Fail(69, "You have not agreed to the Xcode license agreements."),
+	}), &report)
+	if len(report.Problems) != 1 || !reflect.DeepEqual(report.Problems[0].Fix, []string{"sudo", "xcodebuild", "-license", "accept"}) {
+		t.Errorf("license: %+v", report.Problems)
+	}
 }

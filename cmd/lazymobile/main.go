@@ -3,6 +3,8 @@
 package main
 
 import (
+	"github.com/charmbracelet/x/term"
+
 	"context"
 	"os"
 	"runtime"
@@ -11,6 +13,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/cli"
+	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/devicesets"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/eas"
@@ -33,6 +36,9 @@ func moduleVersion() string {
 }
 
 // project is the Expo project of the current folder, when there is one.
+// isTerminal reports whether f is a terminal, where a question can be asked.
+func isTerminal(f *os.File) bool { return term.IsTerminal(f.Fd()) }
+
 func project(runner run.Runner) (*eas.Client, bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -52,8 +58,9 @@ func main() {
 	runner := run.Exec{}
 	options := android.Options{}
 	store := state.Store{Path: state.DefaultPath()}
+	manager := mobile.New(runner, options, runtime.GOOS)
 	app := &cli.App{
-		Manager: mobile.New(runner, options, runtime.GOOS),
+		Manager: manager,
 		Version: version,
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
@@ -88,8 +95,22 @@ func main() {
 		},
 		State: store,
 		Doctor: func(ctx context.Context) doctor.Report {
-			return doctor.Check(ctx, runner, options, runtime.GOOS)
+			report := doctor.Check(ctx, runner, options, runtime.GOOS)
+			extra := doctor.Extra{}
+			devices, _ := manager.List(ctx)
+			for _, d := range devices {
+				if d.Platform == device.IOS && d.Kind == device.Physical {
+					extra.IPhoneConnected = true
+				}
+			}
+			if client, found := project(runner); found {
+				extra.EAS = client
+			}
+			report.Add(doctor.CheckExtra(ctx, extra))
+			return report
 		},
+		Stdin:       os.Stdin,
+		Interactive: isTerminal(os.Stdin),
 	}
 	os.Exit(app.Run(context.Background(), os.Args[1:]))
 }

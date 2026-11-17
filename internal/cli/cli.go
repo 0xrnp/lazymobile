@@ -68,7 +68,7 @@ Usage:
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
-  lazymobile doctor [--json]       what is installed, what is missing, and how to fix it
+  lazymobile doctor [--fix [--yes]] [--json]       what is installed, what is missing, and how to fix it
   lazymobile version
 
 Once no simulator is running, Simulator or DeviceHub is quit, which closes the window it keeps
@@ -97,6 +97,11 @@ type App struct {
 	Doctor func(ctx context.Context) doctor.Report
 	// Builds returns the Expo project of the current folder, or nil when there is none.
 	Builds func() BuildLister
+	// Stdin answers the questions of doctor --fix. Interactive is whether it is a terminal.
+	Stdin       io.Reader
+	Interactive bool
+	// RunFix runs the command of a doctor fix. Nil runs it for real, with the terminal.
+	RunFix func(ctx context.Context, argv []string) error
 	// DeviceSets returns the named groups of devices from .lazymobile.json.
 	DeviceSets func() (devicesets.Sets, error)
 	// Actions returns the project's own commands from .lazymobile.json, or nil when there is none.
@@ -880,10 +885,18 @@ func firstLine(text string) string {
 func (a *App) doctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
+	fixIt := fs.Bool("fix", false, "")
+	yes := fs.Bool("yes", false, "")
 	if positional, err := parse(fs, args); err != nil {
 		return err
 	} else if len(positional) > 0 {
 		return usageError{"doctor takes no arguments"}
+	}
+	if *fixIt && *asJSON {
+		return usageError{"--fix asks questions, so it cannot be used with --json. The fixes are in the report's \"fix\" fields"}
+	}
+	if *yes && !*fixIt {
+		return usageError{"--yes goes with --fix"}
 	}
 	report := a.Doctor(ctx)
 	if *asJSON {
@@ -898,6 +911,17 @@ func (a *App) doctor(ctx context.Context, args []string) error {
 		}
 	} else {
 		WriteReport(a.Stdout, report)
+	}
+	if *fixIt {
+		ran, err := a.fix(ctx, report, *yes)
+		if err != nil {
+			return err
+		}
+		if ran {
+			fmt.Fprintln(a.Stdout, "\nChecking again:")
+			report = a.Doctor(ctx)
+			WriteReport(a.Stdout, report)
+		}
 	}
 	if !report.Healthy() {
 		return reportedError{errors.New("some tools are set up wrongly")}
@@ -920,6 +944,9 @@ func WriteReport(w io.Writer, report doctor.Report) {
 	}
 	if len(report.Problems) == 0 {
 		fmt.Fprintln(w, "Everything needed is installed.")
+	}
+	if len(fixable(report)) > 0 {
+		fmt.Fprintln(w, "\nRun `lazymobile doctor --fix` to see the command for each fix. It asks before running one.")
 	}
 	if report.OS != "darwin" {
 		fmt.Fprintln(w, "iOS needs macOS with Xcode, so only Android is checked here.")
