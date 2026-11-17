@@ -31,9 +31,8 @@ type outcome struct {
 
 // several is what `boot` and `install` share when they take more than one device.
 type several struct {
-	all  bool
-	set  string
-	rest []string
+	all bool
+	set string
 }
 
 func (s *several) flags(fs *flag.FlagSet) {
