@@ -58,7 +58,7 @@ Early release. What has been run, and what has not:
 
 | | Tested |
 | --- | --- |
-| `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a): `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
+| `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a), from the command and from the dashboard key `D` in a real terminal: `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
 | Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
@@ -149,6 +149,7 @@ Devices:
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
 | `p` | Save a screenshot, a PNG, in the folder lazymobile was started in. Not for an iPhone |
 | `t` | Open a web address or deep link, such as `myapp://home?id=1`. Not for an iPhone |
+| `D` | For an app in development on an Android device: reach this computer on port 8081 (Metro), open the app's developer menu, or reload it |
 | `R` | Run one of the project's own commands from `.lazymobile.json` on the selected running device. It shows the exact command and the folder, and asks first. The command takes over the terminal until it ends |
 | `i` | Install an `.apk` or `.app` on a running device: pick a build found in the folder (Gradle, Flutter and Xcode build folders) or one used before, or type a path. An iPhone needs a build made and signed for devices |
 | `u` | Uninstall an app: lists the apps you installed (on an iPhone, its developer apps), then asks first |

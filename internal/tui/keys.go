@@ -143,6 +143,8 @@ var keyTable = []keyAction{
 		when: selectedDevice(running)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",
 		when: selectedDevice(screenFeature)},
+	{id: "dev", ctx: ctxDevices, keys: []string{"D"}, show: "D", desc: "Reach Metro, open the dev menu or reload (Android)",
+		when: selectedDevice(devFeature)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",
 		footer: func(m *Model) string {
 			if m.logCount() > 0 {

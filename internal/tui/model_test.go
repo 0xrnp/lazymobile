@@ -189,6 +189,9 @@ func (f *fakeBackend) ClearData(_ context.Context, d device.Device, id string) e
 func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
 	return f.record("link %s %s", d.ID, link)
 }
+func (f *fakeBackend) Dev(_ context.Context, d device.Device, action string, port int) error {
+	return f.record("dev %s %s %d", d.ID, action, port)
+}
 func (f *fakeBackend) Screenshot(_ context.Context, d device.Device, path string) (string, error) {
 	return path, f.record("screenshot %s %s", d.ID, path)
 }
@@ -2255,4 +2258,26 @@ func TestInstallOnAnIPhoneTakesAnAppFolderAndRefusesAStoppedDevice(t *testing.T)
 	g.press("i")
 	g.wantScreen("is not running")
 	g.wantNoScreen("Install on")
+}
+
+func TestDOffersTheDevHelpersOnAnAndroidDevice(t *testing.T) {
+	h := start(t, pixel)
+	h.press("D")
+	h.wantScreen("Help the app on Pixel 9a", "Reach this computer on port 8081", "Open the developer menu", "Reload the app")
+	h.press("j", "j", "enter")
+	h.wantCalls("dev Pixel_9a reload 8081", 1)
+	h.wantScreen("Reloaded the app on Pixel 9a")
+}
+
+func TestDRefusesASimulatorAndAStoppedDevice(t *testing.T) {
+	h := start(t, iphone, ipad)
+	h.press("D")
+	h.wantScreen("iPhone 17 is not an Android device")
+	h.selectDevice(ipad)
+	h.press("D")
+	h.wantScreen("iPad Air is not running")
+	h.wantCalls("dev", 0)
+	if h.m.modal != nil {
+		t.Error("a window opened")
+	}
 }

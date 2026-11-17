@@ -49,6 +49,7 @@ type Backend interface {
 	ClearLocation(ctx context.Context, d device.Device) error
 	SetStatusBar(ctx context.Context, d device.Device, clean bool) error
 	OpenLink(ctx context.Context, d device.Device, link string) error
+	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
@@ -886,6 +887,8 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.screenshot(d)
 	case "t":
 		return m.openLink(d)
+	case "D":
+		return m.devHelpers(d)
 	case "x":
 		if d.Platform == device.Android && d.Transport == "wifi" {
 			return m.act(d, "Disconnecting", "Disconnected", isGone, func(ctx context.Context) error {
