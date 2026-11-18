@@ -110,6 +110,13 @@ func TestToolsLeaveOutWhatErasesData(t *testing.T) {
 			t.Errorf("%s is served", refused)
 		}
 	}
+	// Without a hint, a client may ask before every call.
+	for _, tool := range list.Tools {
+		a := tool.Annotations
+		if a == nil || (!a.ReadOnlyHint && (a.DestructiveHint == nil || *a.DestructiveHint)) {
+			t.Errorf("%s may be taken as destructive: %+v", tool.Name, a)
+		}
+	}
 }
 
 func TestListDevices(t *testing.T) {

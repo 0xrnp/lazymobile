@@ -43,6 +43,8 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) New() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lazymobile", Version: s.Version}, nil)
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	// The spec assumes a tool is destructive unless told otherwise.
+	notDestructive := &mcp.ToolAnnotations{DestructiveHint: new(bool)}
 
 	mcp.AddTool(server, &mcp.Tool{Name: "list_devices", Annotations: readOnly,
 		Description: "List every iOS simulator, Android emulator and connected phone, with its state and id."}, s.listDevices)
@@ -51,18 +53,18 @@ func (s *Server) New() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "doctor", Annotations: readOnly,
 		Description: "Report which tools (Xcode, Android SDK, adb) are installed, what is missing, and how to fix it."}, s.doctor)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "boot",
+	mcp.AddTool(server, &mcp.Tool{Name: "boot", Annotations: notDestructive,
 		Description: "Boot a simulator or emulator and wait until it is ready."}, s.boot)
-	mcp.AddTool(server, &mcp.Tool{Name: "shutdown",
+	mcp.AddTool(server, &mcp.Tool{Name: "shutdown", Annotations: notDestructive,
 		Description: "Shut down a simulator or emulator."}, s.shutdown)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "install",
+	mcp.AddTool(server, &mcp.Tool{Name: "install", Annotations: notDestructive,
 		Description: "Install an .apk, or an .app folder for a simulator or an iPhone, on a running device."}, s.install)
-	mcp.AddTool(server, &mcp.Tool{Name: "launch",
+	mcp.AddTool(server, &mcp.Tool{Name: "launch", Annotations: notDestructive,
 		Description: "Open an app by its bundle id or package name."}, s.launch)
-	mcp.AddTool(server, &mcp.Tool{Name: "stop",
+	mcp.AddTool(server, &mcp.Tool{Name: "stop", Annotations: notDestructive,
 		Description: "Stop a running app. Its data is kept."}, s.stop)
-	mcp.AddTool(server, &mcp.Tool{Name: "open_link",
+	mcp.AddTool(server, &mcp.Tool{Name: "open_link", Annotations: notDestructive,
 		Description: "Open a web address or a deep link, such as myapp://home, on a running device."}, s.openLink)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "screenshot", Annotations: readOnly,
@@ -71,11 +73,11 @@ func (s *Server) New() *mcp.Server {
 		Description: "Read what a running simulator, emulator or Android phone has already logged, and return the last lines. " +
 			"Does not follow the log. A physical iPhone has no log history to read."}, s.readLogs)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "set_appearance",
+	mcp.AddTool(server, &mcp.Tool{Name: "set_appearance", Annotations: notDestructive,
 		Description: "Switch a device to dark or light mode."}, s.setAppearance)
-	mcp.AddTool(server, &mcp.Tool{Name: "set_location",
+	mcp.AddTool(server, &mcp.Tool{Name: "set_location", Annotations: notDestructive,
 		Description: "Put a simulator or emulator at a latitude and longitude, or clear its location."}, s.setLocation)
-	mcp.AddTool(server, &mcp.Tool{Name: "set_permission",
+	mcp.AddTool(server, &mcp.Tool{Name: "set_permission", Annotations: notDestructive,
 		Description: "Grant or revoke a permission, such as camera, location or photos, for an app."}, s.setPermission)
 	return server
 }
