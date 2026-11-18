@@ -13,7 +13,7 @@ only". If you have the hardware, say what you ran and what happened.
 
 ## Set up
 
-You need Go 1.26.7 or newer (see `go.mod`).
+You need Go 1.27.4 or newer (see `go.mod`).
 
 ```sh
 make check    # formatting, vet, staticcheck, and the tests with the race detector

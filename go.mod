@@ -1,6 +1,6 @@
 module github.com/0xrnp/lazymobile
 
-go 1.26.7
+go 1.27.4
 
 require (
 	charm.land/bubbletea/v2 v2.1.1

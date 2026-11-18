@@ -123,7 +123,7 @@ With [Homebrew](https://brew.sh), on macOS or Linux:
 brew install 0xrnp/tap/lazymobile
 ```
 
-With Go 1.26.7 or newer:
+With Go 1.27.4 or newer:
 
 ```sh
 go install github.com/0xrnp/lazymobile/cmd/lazymobile@latest
