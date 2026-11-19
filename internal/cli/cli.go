@@ -63,6 +63,7 @@ Usage:
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
+  lazymobile run [<device>] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). Its keys, such as r for hot reload, keep working
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
@@ -113,6 +114,10 @@ type App struct {
 	Actions func() ([]actions.Action, error)
 	// State remembers app ids between runs. The zero Store remembers nothing.
 	State state.Store
+	// Getwd is the folder `run` looks at. Nil means the current folder.
+	Getwd func() (string, error)
+	// RunTool runs the project's command for `run`, with the terminal. Nil runs it for real.
+	RunTool func(ctx context.Context, dir string, argv []string) error
 }
 
 // usageError is a mistake in how a command was typed.
@@ -273,6 +278,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.statusBar(ctx, rest)
 	case "action":
 		return a.action(ctx, rest)
+	case "run":
+		return a.runProject(ctx, rest)
 	case "link":
 		return a.link(ctx, rest)
 	case "dev":

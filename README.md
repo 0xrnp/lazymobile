@@ -51,6 +51,9 @@ Every key, with `?`:
   many logs as you like, side by side or stacked, to read several devices at once.
 - Inside an Expo project: list EAS builds, install a finished build on a running simulator or
   emulator, start and cancel builds.
+- `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
+  tool you already use (`flutter run`, or your own command), with its keys such as hot reload
+  working as before.
 - The same features as plain commands, with `--json`, for scripts and coding agents.
 - An MCP server for coding agents, with `lazymobile mcp`: boot, install, launch, screenshot and read
   logs, without the commands that erase data.
@@ -66,6 +69,7 @@ Early release. What has been run, and what has not:
 
 | | Tested |
 | --- | --- |
+| `run` | A real Android emulator (Pixel 9a) with Flutter 3.38.10 and a new Flutter app: `lazymobile run Pixel_9a` started the emulator, ran `flutter run -d emulator-5554`, the app opened, and `r` gave a hot reload. Not run: an iOS simulator or an iPhone, a project with its own `run` action in `.lazymobile.json`, or React Native and Expo. Those paths are tested with fake tools only |
 | `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a), from the command and from the dashboard key `D` in a real terminal: `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
@@ -438,6 +442,30 @@ there.
 
 If you map `<Esc>` in terminal mode, lazymobile does not receive it. Its windows also close with
 `ctrl+c`.
+
+## Run your app
+
+`lazymobile run` finds the device, starts it if it is off, and runs the app of the current folder on
+it with the tool you already use. It shows the exact command, then hands the terminal over, so
+`r` for hot reload and the other keys work as before.
+
+```sh
+lazymobile run                       # the one simulator or emulator that is running
+lazymobile run "Pixel 9a"            # start it if it is off, then run
+lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
+```
+
+- In a Flutter project (a `pubspec.yaml`) it runs `flutter run -d <device>`.
+- For anything else, or for your own flavors and env files, add an action named `run` to
+  `.lazymobile.json` (see "Project settings"). Its command is shown and needs `--yes`, because the
+  file can come from a repository someone else wrote. `{device_id}` is replaced by the device:
+
+  ```json
+  {"actions": [{"name": "run", "command": ["make", "run-dev", "DEVICE={device_id}"]}]}
+  ```
+
+- With no device named, it uses the one simulator or emulator that is running. With none or
+  several running it asks you to name one. It never picks a real phone unless you name it.
 
 ## For agents (MCP)
 
