@@ -499,6 +499,8 @@ The log of the app is on the right, and opens by itself once lazymobile knows th
 | `ctrl+]` | switch to the full dashboard (devices, logs, screenshots, bug report) and back; the tool keeps running |
 | `ctrl+o` | give the keys to the log (filter `/`, level `L`, pause `p`, copy `y`) or back to the tool; `esc` goes back too |
 | `l` | from the log, the first time: pick the app whose log to show |
+| `+`, `-` | from the log: widen or narrow it. Dragging the line between the panes does too, and the folder remembers where it was left |
+| `z` | from the log: show it at full width, and again to show both |
 | `shift+pgup`, `shift+pgdn`, the wheel | scroll back through the tool's output; typing goes back to the end |
 | `enter` | after the tool ended: run it again |
 | `q` | from the log, the dashboard or an ended tool: quit. While the tool runs it asks, then stops it (ctrl+c, then a kill after 5 seconds) so no dev server is left behind |

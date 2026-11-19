@@ -242,8 +242,8 @@ func (m *Model) runKey(a *keyAction) tea.Cmd {
 		// Each run action is done from the pane it belongs to, as its key would be there.
 		switch a.id {
 		case "run_again":
-			m.run.onTool = true
-		case "run_pick", "run_back":
+			m.run.onTool, m.run.logZoomed = true, false
+		case "run_pick", "run_back", "run_resize", "run_zoom":
 			m.focusRunLog()
 		}
 		return m.runViewKeyString(a.keys[0])

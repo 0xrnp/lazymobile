@@ -267,7 +267,7 @@ var keyTable = []keyAction{
 	{id: "run_focus", ctx: ctxRun, keys: []string{"ctrl+o"}, show: "ctrl+o", desc: "Give the keys to the tool or to its log",
 		footer: func(m *Model) string {
 			if m.run != nil && m.run.onTool {
-				return "log"
+				return "log, then + - to resize"
 			}
 			return ""
 		}, when: needsRun},
@@ -287,6 +287,10 @@ var keyTable = []keyAction{
 		}},
 	{id: "run_pick", ctx: ctxRun, keys: []string{"l"}, show: "l", desc: "From the log: pick the app, which opens by itself next time",
 		footer: say("pick the app"), when: needsRun},
+	{id: "run_resize", ctx: ctxRun, keys: []string{"+", "=", "-"}, show: "+ -", desc: "From the log: widen or narrow it, or drag the line",
+		footer: say("- resize (or drag the line)"), when: needsRun},
+	{id: "run_zoom", ctx: ctxRun, keys: []string{"z"}, show: "z", desc: "From the log: show it at full width, again to undo",
+		footer: say("full width"), when: needsRun},
 	{id: "run_help", ctx: ctxRun, keys: []string{"?"}, show: "?", desc: "From the log, or once the tool ended: this menu",
 		footer: say("keys"), when: needsRun},
 	{id: "run_quit", ctx: ctxRun, keys: []string{"q", "ctrl+c"}, show: "q", desc: "From the log, or once the tool ended: quit (asks first)",

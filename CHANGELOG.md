@@ -12,8 +12,8 @@ them, and the dashboard shows what is new once after an upgrade.
   which way to run (run dev, run prod) and which device when it cannot tell, and remembers the
   answers for the folder (#42)
 - `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
-  the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running
-  (#42)
+  the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running.
+  Drag the line between the panes, or press `+` and `-` from the log, to resize them (#42)
 - A dashboard open in the same folder follows a run: it selects the device and opens the app's
   log. `lazymobile run --split` opens that dashboard in a new pane in Rex, tmux or Zellij (#42)
 - `lazymobile report <device> <app-id>`, and "Save a bug report" in the dashboard's app menu: a new

@@ -445,3 +445,144 @@ func TestRunActionsFromTheKeysMenuActFromTheirPane(t *testing.T) {
 		t.Error("a dashboard action ran behind the run view")
 	}
 }
+
+// paneWidths are the widths of the tool's pane and the log's pane on the screen now.
+func (r *runHarness) paneWidths() (int, int) {
+	l := r.m.layout()
+	return l.tool.width, l.runLog.width
+}
+
+func TestTheLineBetweenThePanesMovesFromTheLogAndIsRemembered(t *testing.T) {
+	memory := memoryIn(t)
+	r := startRun(t, memory, pixel, pixel)
+	if tool, log := r.paneWidths(); tool != 72 || log != 48 {
+		t.Fatalf("panes %d and %d", tool, log)
+	}
+	// While the tool has the keys, + is the tool's.
+	r.press("+")
+	if got := r.tool().sent(); len(got) != 1 || got[0] != "+" {
+		t.Errorf("the tool got %q", got)
+	}
+	r.key(ctrlO)
+	r.press("+", "+")
+	if tool, log := r.paneWidths(); tool != 64 || log != 56 {
+		t.Errorf("after + +: panes %d and %d", tool, log)
+	}
+	// The tool is told the inside of its narrower pane.
+	if tool := r.tool(); tool.cols != 62 {
+		t.Errorf("the tool has %d columns", tool.cols)
+	}
+	r.press("-")
+	if tool, log := r.paneWidths(); tool != 68 || log != 52 {
+		t.Errorf("after -: panes %d and %d", tool, log)
+	}
+	// However far it moves, both panes stay usable.
+	r.press("-", "-", "-", "-", "-", "-", "-", "-", "-")
+	if _, log := r.paneWidths(); log != minPaneWidth {
+		t.Errorf("the log is %d wide", log)
+	}
+
+	// The next run in the folder opens with the line where it was left.
+	again := startRun(t, memory, pixel, pixel)
+	if tool, log := again.paneWidths(); tool != 90 || log != 30 {
+		t.Errorf("the next run: panes %d and %d", tool, log)
+	}
+}
+
+func TestDraggingTheLineMovesItAndTellsTheToolOnce(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	resized := r.tool().resized
+	// The line is the tool's right border and the log's left one.
+	r.m.Update(tea.MouseClickMsg{X: 72, Y: 5, Button: tea.MouseLeft})
+	for _, x := range []int{70, 65, 60} {
+		r.m.Update(tea.MouseMotionMsg{X: x, Y: 5, Button: tea.MouseLeft})
+	}
+	if tool, log := r.paneWidths(); tool != 60 || log != 60 {
+		t.Errorf("while dragging: panes %d and %d", tool, log)
+	}
+	if r.tool().resized != resized {
+		t.Error("the tool was resized during the drag")
+	}
+	_, cmd := r.m.Update(tea.MouseReleaseMsg{X: 60, Y: 5, Button: tea.MouseLeft})
+	r.run(cmd)
+	if tool := r.tool(); tool.resized != resized+1 || tool.cols != 58 {
+		t.Errorf("after the drag the tool was resized %d times to %d columns", tool.resized-resized, tool.cols)
+	}
+	// A click inside a pane still gives it the keys, and moves nothing.
+	r.m.Update(tea.MouseClickMsg{X: 90, Y: 5, Button: tea.MouseLeft})
+	r.m.Update(tea.MouseMotionMsg{X: 100, Y: 5, Button: tea.MouseLeft})
+	if tool, _ := r.paneWidths(); tool != 60 || r.m.run.onTool {
+		t.Errorf("a click in the log: tool pane %d, onTool %v", tool, r.m.run.onTool)
+	}
+}
+
+func TestZShowsTheLogAtFullWidthWithoutResizingTheTool(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	cols := r.tool().cols
+	r.key(ctrlO)
+	r.press("z")
+	if tool, log := r.paneWidths(); tool != 0 || log != 120 {
+		t.Errorf("zoomed: panes %d and %d", tool, log)
+	}
+	if r.tool().cols != cols {
+		t.Errorf("the tool was resized to %d columns", r.tool().cols)
+	}
+	// Giving the keys back to the tool shows both again.
+	r.press("esc")
+	if tool, log := r.paneWidths(); tool != 72 || log != 48 {
+		t.Errorf("after esc: panes %d and %d", tool, log)
+	}
+}
+
+func TestTheLineDoesNotMoveWhenOnlyOnePaneShows(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	r.key(ctrlO)
+	r.press("+")
+	r.wantScreen("Only one pane is shown")
+	if tool, log := r.paneWidths(); tool != 0 || log != 80 {
+		t.Errorf("panes %d and %d", tool, log)
+	}
+}
+
+func TestTheLineMovesWithTheMouseFromEitherBorderAndOnlyFromThePanes(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	// Taken by the tool's right border, the line moves one column for one column of the mouse.
+	r.m.Update(tea.MouseClickMsg{X: 71, Y: 5, Button: tea.MouseLeft})
+	r.m.Update(tea.MouseMotionMsg{X: 70, Y: 5, Button: tea.MouseLeft})
+	if tool, _ := r.paneWidths(); tool != 71 {
+		t.Errorf("the tool pane is %d wide", tool)
+	}
+	// The release never came, as when the button is let go outside the window. The next press
+	// inside a pane does not drag the line.
+	r.m.Update(tea.MouseClickMsg{X: 20, Y: 5, Button: tea.MouseLeft})
+	r.m.Update(tea.MouseMotionMsg{X: 40, Y: 5, Button: tea.MouseLeft})
+	if tool, _ := r.paneWidths(); tool != 71 {
+		t.Errorf("a press in the tool moved the line: the tool pane is %d wide", tool)
+	}
+	// A press on the hint rows under the line does not take it.
+	r.m.Update(tea.MouseClickMsg{X: 71, Y: 29, Button: tea.MouseLeft})
+	r.m.Update(tea.MouseMotionMsg{X: 50, Y: 29, Button: tea.MouseLeft})
+	if tool, _ := r.paneWidths(); tool != 71 {
+		t.Errorf("a press on the hints moved the line: the tool pane is %d wide", tool)
+	}
+}
+
+func TestRunningAgainFromTheMenuShowsBothPanes(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.key(ctrlO)
+	r.press("z")
+	r.m.Update(toolEndMsg{id: r.m.run.id})
+	r.chooseInMenu("run_again")
+	r.key(ctrlO)
+	if tool, log := r.paneWidths(); tool != 72 || log != 48 {
+		t.Errorf("panes %d and %d", tool, log)
+	}
+}
+
+func TestTheHintsSayHowToResizeFromEitherPane(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.wantScreen("ctrl+o log, then + - to resize")
+	r.key(ctrlO)
+	r.wantScreen("+ - resize (or drag the line)", "z full width")
+}

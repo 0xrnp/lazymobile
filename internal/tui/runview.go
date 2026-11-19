@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/logs"
+	"github.com/0xrnp/lazymobile/internal/state"
 	"github.com/0xrnp/lazymobile/internal/vterm"
 )
 
@@ -71,7 +72,19 @@ type toolRun struct {
 	back int
 	// cols and rows are the size the tool was last told.
 	cols, rows int
+	// logShare is how much of the width the log takes beside the tool, in thousandths, or zero for
+	// the default. logZoomed shows the log at full width while it has the keys. dragging is whether
+	// the line between the panes is being dragged.
+	logShare  int
+	logZoomed bool
+	dragging  bool
+	// grab is where the line was taken, from the log's left border: 0 on it, -1 on the tool's right
+	// border, so a drag moves the line by as much as the mouse.
+	grab int
 }
+
+// defaultLogShare is how much of the width the log takes beside the tool, in thousandths.
+const defaultLogShare = 400
 
 type (
 	toolChangedMsg struct{ id int }
@@ -92,6 +105,9 @@ var runKeysOwn = map[string]bool{
 // size is known.
 func (m *Model) attachRun(spec RunSpec) {
 	m.run = &toolRun{spec: spec, shown: true, onTool: true}
+	if m.memory.Folder != "" {
+		m.run.logShare = m.memory.Store.Load().Runs[m.memory.Folder].LogShare
+	}
 	// The run is followed at the first look, not a tick later.
 	m.followTicks = followEvery - 1
 }
@@ -122,8 +138,10 @@ func (m *Model) runTitle() string {
 // split width only one shows, the one with the keys.
 func (m *Model) runPaneWidths() (tool, log int) {
 	if m.width >= splitWidth {
-		log = max(m.width*2/5, minPaneWidth)
-		return m.width - log, log
+		if m.run != nil && m.run.logZoomed && !m.run.onTool {
+			return 0, m.width
+		}
+		return m.sideBySide()
 	}
 	if m.run != nil && !m.run.onTool {
 		return 0, m.width
@@ -131,12 +149,71 @@ func (m *Model) runPaneWidths() (tool, log int) {
 	return m.width, 0
 }
 
+// sideBySide are the widths of the tool's pane and the log's pane when both show.
+func (m *Model) sideBySide() (tool, log int) {
+	share := defaultLogShare
+	if m.run != nil && m.run.logShare > 0 {
+		share = m.run.logShare
+	}
+	log = min(max((m.width*share+500)/1000, minPaneWidth), m.width-minPaneWidth)
+	return m.width - log, log
+}
+
+// setLogWidth moves the line between the panes so the log is this wide, within what the screen
+// allows.
+func (m *Model) setLogWidth(log int) {
+	log = min(max(log, minPaneWidth), m.width-minPaneWidth)
+	m.run.logShare = (log*1000 + m.width/2) / m.width
+}
+
+// moveRunLine widens the log by step columns, or narrows it with a negative step, and tells the
+// tool its new size.
+func (m *Model) moveRunLine(step int) tea.Cmd {
+	if m.width < splitWidth {
+		m.setNote("Only one pane is shown. Widen the terminal to see both", false)
+		return nil
+	}
+	m.run.logZoomed = false
+	_, log := m.sideBySide()
+	m.setLogWidth(log + step)
+	m.saveRunSplit()
+	return m.fitTool()
+}
+
+// saveRunSplit remembers where the line between the panes is, for the next run in the folder.
+func (m *Model) saveRunSplit() {
+	if m.memory.Folder == "" {
+		return
+	}
+	folder, share := m.memory.Folder, m.run.logShare
+	_ = m.memory.Store.Update(func(f *state.File) { f.RememberRunSplit(folder, share) })
+}
+
+// onRunLine reports whether x, y is on the line between the panes, which a drag moves.
+func (m *Model) onRunLine(x, y int) bool {
+	l := m.layout()
+	return l.tool.width > 0 && l.runLog.width > 0 && y >= 0 && y < l.bodyHeight && (x == l.tool.width-1 || x == l.tool.width)
+}
+
+// runDrag moves the line between the panes to where the mouse is while it is dragged.
+func (m *Model) runDrag(x int) {
+	m.setLogWidth(m.width - (x - m.run.grab))
+}
+
+// runDragEnd ends a drag of the line, and tells the tool its new size. The tool is told only then,
+// so it redraws once rather than at every column.
+func (m *Model) runDragEnd() tea.Cmd {
+	m.run.dragging = false
+	m.saveRunSplit()
+	return m.fitTool()
+}
+
 // toolSize is the size of the tool's terminal: the inside of its pane in the run view. It is the
 // same while the dashboard or the log is shown, so switching never makes the tool redraw.
 func (m *Model) toolSize() (cols, rows int) {
 	width := m.width
 	if m.width >= splitWidth {
-		width, _ = m.runPaneWidths()
+		width, _ = m.sideBySide()
 	}
 	return max(width-2, 20), max(m.height-4, 5)
 }
@@ -306,7 +383,7 @@ func (m *Model) runViewKeyString(key string) tea.Cmd {
 		if r.onTool {
 			m.focusRunLog()
 		} else {
-			r.onTool = true
+			r.onTool, r.logZoomed = true, false
 		}
 		return nil
 	case "shift+up":
@@ -338,12 +415,23 @@ func (m *Model) runViewKeyString(key string) tea.Cmd {
 	}
 	switch key {
 	case "esc":
-		r.onTool = true
+		r.onTool, r.logZoomed = true, false
 		return nil
 	case "q", "ctrl+c":
 		return m.quit()
 	case "?":
 		m.modal = m.keysModal()
+		return nil
+	case "+", "=":
+		return m.moveRunLine(resizeStep)
+	case "-":
+		return m.moveRunLine(-resizeStep)
+	case "z":
+		if m.width < splitWidth {
+			m.setNote("The log already takes the whole width", false)
+			return nil
+		}
+		r.logZoomed = !r.logZoomed
 		return nil
 	}
 	slot := m.runLogSlot()
@@ -456,12 +544,17 @@ func (m *Model) runCursor(l layout) (*tea.Cursor, bool) {
 	return tea.NewCursor(l.tool.x+1+x, l.tool.y+1+y), true
 }
 
-// runClick gives the keys to the pane clicked in the run view.
+// runClick gives the keys to the pane clicked in the run view, or starts a drag of the line
+// between the panes.
 func (m *Model) runClick(x, y int) bool {
 	l := m.layout()
+	// A terminal may not report a release outside its window, so each press decides afresh.
+	m.run.dragging = false
 	switch {
+	case m.onRunLine(x, y):
+		m.run.dragging, m.run.grab = true, x-l.tool.width
 	case l.tool.contains(x, y):
-		m.run.onTool = true
+		m.run.onTool, m.run.logZoomed = true, false
 	case l.runLog.contains(x, y):
 		m.focusRunLog()
 	default:
@@ -503,9 +596,9 @@ func (m *Model) runFooterKeys() []string {
 	case r.onTool:
 		return []string{"run_again", "run_focus", "run_switch", "run_quit"}
 	case m.runLogSlot() < 0:
-		return []string{"run_pick", "run_back", "run_switch", "run_quit"}
+		return []string{"run_pick", "run_back", "run_resize", "run_zoom", "run_switch", "run_quit"}
 	}
-	return []string{"run_back", "run_switch", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"}
+	return []string{"run_back", "run_resize", "run_zoom", "run_switch", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"}
 }
 
 func needsRun(m *Model) string {

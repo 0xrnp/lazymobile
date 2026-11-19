@@ -63,6 +63,22 @@ type Run struct {
 	// Apps are the app a log was last opened for in the folder, by platform, so a followed run can
 	// open its log without being asked.
 	Apps map[device.Platform]string `json:"apps,omitempty"`
+	// LogShare is how much of the width the log takes beside the tool in lazymobile run --here, in
+	// thousandths, once it was moved. Zero is the default.
+	LogShare int `json:"log_share,omitempty"`
+}
+
+// RememberRunSplit records how much of the width the log took beside the tool, in thousandths.
+func (f *File) RememberRunSplit(folder string, share int) {
+	if folder == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	run := f.Runs[folder]
+	run.LogShare = share
+	f.Runs[folder] = run
 }
 
 // RememberRunProfile records the way to run the folder's app that was chosen.

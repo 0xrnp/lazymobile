@@ -324,6 +324,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal.kind == modalKeys {
 			m.modal.keys.wheel(msg.Button)
 		}
+	case tea.MouseMotionMsg:
+		if m.run != nil && m.run.dragging && msg.Button == tea.MouseLeft {
+			m.runDrag(msg.X)
+		}
+	case tea.MouseReleaseMsg:
+		if m.run != nil && m.run.dragging {
+			return m, m.runDragEnd()
+		}
 	case tea.MouseClickMsg:
 		if m.modal == nil && msg.Button == tea.MouseLeft {
 			if m.runShown() {
