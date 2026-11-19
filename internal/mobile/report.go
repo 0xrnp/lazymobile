@@ -163,7 +163,11 @@ func (m *Manager) reportLog(ctx context.Context, d device.Device, app string, op
 
 func reportSummary(d device.Device, app device.App, opts ReportOptions, r Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Bug report made by lazymobile %s on %s\n\n", opts.Version, opts.Now.Format("2006-01-02 15:04:05 -0700"))
+	made := "lazymobile"
+	if opts.Version != "" {
+		made += " " + opts.Version
+	}
+	fmt.Fprintf(&b, "Bug report made by %s on %s\n\n", made, opts.Now.Format("2006-01-02 15:04:05 -0700"))
 	fmt.Fprintf(&b, "Device:   %s (%s)\n", d.Name, d.TargetID())
 	system := []string{string(d.Kind)}
 	if label := d.OSLabel(); label != "" {

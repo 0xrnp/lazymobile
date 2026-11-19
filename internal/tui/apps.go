@@ -420,6 +420,9 @@ var (
 	showCrash = appAction{label: "Show its latest crash report", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		return m.showCrash(d, id)
 	}}
+	saveReport = appAction{label: "Save a bug report in this folder", next: func(m *Model, d device.Device, id string) tea.Cmd {
+		return m.saveReport(d, id)
+	}}
 	clearData = appAction{label: "Clear its data…", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		m.confirm("Clear the data of "+id+"?", "This erases everything "+id+" saved on "+d.Name+", as if it had just been installed. It cannot be undone.",
 			func(m *Model) tea.Cmd {
@@ -441,13 +444,13 @@ func appActionsFor(d device.Device) []appAction {
 	case d.Platform == device.IOS && d.Kind == device.Physical:
 		return actions[:2]
 	case d.Kind == device.Physical:
-		return append(actions, showCrash)
+		return append(actions, showCrash, saveReport)
 	}
 	actions = append(actions, grantPermission, revokePermission)
 	if d.Platform == device.Android {
 		actions = append(actions, clearData)
 	}
-	return append(actions, showCrash)
+	return append(actions, showCrash, saveReport)
 }
 
 func (m *Model) appActionModal(d device.Device, id string) {
@@ -469,6 +472,40 @@ func (m *Model) appActionModal(d device.Device, id string) {
 				return action.run(ctx, backend, d, id)
 			})
 		},
+	}
+}
+
+// saveReport saves a bug report of an app in a new folder in the folder lazymobile was started in:
+// a screenshot, the app's last log lines, its latest crash report, and the device and app version.
+func (m *Model) saveReport(d device.Device, id string) tea.Cmd {
+	key := d.Key()
+	if current := m.busy[key]; current != "" {
+		m.setNote(fmt.Sprintf("%s is busy: %s", d.Name, strings.ToLower(current)), true)
+		return nil
+	}
+	name := mobile.ReportName(d, m.now())
+	m.busy[key] = "Saving a bug report of " + id
+	m.setNote("Saving a bug report of "+id+" from "+d.Name+"…", false)
+	ctx, backend, version := m.ctx, m.backend, m.memory.Version
+	return func() tea.Msg {
+		report, err := backend.Report(ctx, d, id, mobile.ReportOptions{Dir: name, Version: version})
+		return applyMsg(func(m *Model) tea.Cmd {
+			delete(m.busy, key)
+			if err != nil {
+				m.fail("Could not save a bug report of "+id, err)
+				return nil
+			}
+			note := "Saved the bug report in " + name
+			if len(report.Skipped) > 0 {
+				parts := make([]string, len(report.Skipped))
+				for i, skipped := range report.Skipped {
+					parts[i], _, _ = strings.Cut(skipped, ":")
+				}
+				note += ", without the " + strings.Join(parts, ", the ")
+			}
+			m.setNote(note, len(report.Skipped) > 0)
+			return nil
+		})
 	}
 }
 

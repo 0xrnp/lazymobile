@@ -52,6 +52,7 @@ type Backend interface {
 	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
+	Report(ctx context.Context, d device.Device, app string, opts mobile.ReportOptions) (mobile.Report, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
@@ -63,6 +64,8 @@ type Backend interface {
 type Memory struct {
 	Store  state.Store
 	Folder string
+	// Version is lazymobile's own version, written in a bug report.
+	Version string
 }
 
 const (

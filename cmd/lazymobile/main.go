@@ -71,7 +71,7 @@ func main() {
 				builds = client
 			}
 			folder, _ := os.Getwd()
-			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder})
+			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {

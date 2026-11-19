@@ -80,6 +80,7 @@ type fakeBackend struct {
 	// installed are the apps InstalledApps reports, and info what AppInfo knows about an app that
 	// is not among them, or that InstalledApps gives without a version, as Android does.
 	installed []device.App
+	reported  mobile.Report
 	info      []device.App
 	sessions  []*fakeSession
 }
@@ -200,6 +201,12 @@ func (f *fakeBackend) Crash(_ context.Context, d device.Device, id string) (devi
 }
 func (f *fakeBackend) Screenshot(_ context.Context, d device.Device, path string) (string, error) {
 	return path, f.record("screenshot %s %s", d.ID, path)
+}
+func (f *fakeBackend) Report(_ context.Context, d device.Device, id string, opts mobile.ReportOptions) (mobile.Report, error) {
+	if err := f.record("report %s %s %s %s", d.ID, id, opts.Dir, opts.Version); err != nil {
+		return mobile.Report{}, err
+	}
+	return f.reported, nil
 }
 func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
 	if err := f.record("apps %s", d.ID); err != nil {
@@ -2326,4 +2333,40 @@ func TestAMessageBreaksALongWordRatherThanCuttingIt(t *testing.T) {
 			t.Errorf("line %q is wider than the window", line)
 		}
 	}
+}
+
+func TestABugReportIsSavedFromTheAppMenu(t *testing.T) {
+	h := startWith(t, Memory{Version: "v9.9.9"}, iphone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.backend.reported = mobile.Report{Included: []string{"screenshot.png", "log.txt", "summary.txt"}}
+	name := mobile.ReportName(iphone, h.clock)
+	// Launch, Restart, Stop, Grant, Revoke, the crash report, then the bug report.
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down")
+	h.wantScreen("Save a bug report in this folder")
+	h.press("enter")
+	h.wantCalls("report SIM-1 com.example.app "+name+" v9.9.9", 1)
+	h.wantScreen("Saved the bug report in " + name)
+	h.wantNoScreen("without")
+}
+
+func TestABugReportSaysWhatItLeftOut(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.backend.reported = mobile.Report{
+		Included: []string{"log.txt", "summary.txt"},
+		Skipped:  []string{"screenshot: could not take it", "crash report: No crash found"},
+	}
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "enter")
+	h.wantScreen("without the screenshot, the crash report")
+
+	h.backend.fail = map[string]error{"report": apperr.New(apperr.InvalidState, "the folder exists")}
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "enter")
+	h.wantScreen("Could not save a bug report of com.example.app")
+}
+
+func TestAnIPhoneOffersNoBugReport(t *testing.T) {
+	h := start(t, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	h.press("o", "enter")
+	h.wantNoScreen("bug report")
 }

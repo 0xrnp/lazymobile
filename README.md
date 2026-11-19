@@ -159,7 +159,7 @@ Devices:
 | `l`, `enter` | Logs. Every log opens in a pane of its own, beside the ones that are open |
 | `e` | Erase a simulator, or wipe an emulator's data. Asks first |
 | `d` | Delete. Asks first |
-| `o` | Pick an app, then what to do with it: launch, restart or stop it, or show its latest crash report. On a simulator or emulator also grant or revoke a permission, and on an emulator clear its data (asks first). An iPhone's apps can be launched and restarted, not stopped, and its crash reports stay on the phone |
+| `o` | Pick an app, then what to do with it: launch, restart or stop it, show its latest crash report, or save a bug report (a new folder here, as `lazymobile report` makes). On a simulator or emulator also grant or revoke a permission, and on an emulator clear its data (asks first). An iPhone's apps can be launched and restarted, not stopped, and its crash reports stay on the phone, so it has no bug report |
 | `f` | Put a simulator or emulator at a place (latitude,longitude). On a simulator, `clear` takes it off. Not for real phones |
 | `c` `C` | Tidy the status bar of a simulator or emulator for a screenshot (9:41, full battery and signal), or restore it. Not for real phones |
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |
