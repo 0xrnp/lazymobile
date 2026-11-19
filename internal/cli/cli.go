@@ -69,6 +69,7 @@ Usage:
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator or an Android device. --save never replaces a file
+  lazymobile report <device> <app-id> [--out <folder>] [--since 5m] [--lines 200] [--json]   save a bug report in a new folder: a screenshot, the app's last log lines, its latest crash report, and the device and app version. Never replaces a folder
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
@@ -224,6 +225,8 @@ type result struct {
 	Name     string   `json:"name,omitempty"`
 	Command  []string `json:"command,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
+	// Report is the bug report a "report" saved. Path is then its folder.
+	Report *mobile.Report `json:"report,omitempty"`
 }
 
 // done reports a finished action: the object with --json, the sentence otherwise.
@@ -290,6 +293,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.screenshot(ctx, rest)
 	case "crash":
 		return a.crash(ctx, rest)
+	case "report":
+		return a.bugReport(ctx, rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":
