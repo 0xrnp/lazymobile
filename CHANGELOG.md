@@ -21,6 +21,9 @@ them, and the dashboard shows what is new once after an upgrade.
 ### Other
 - `lazymobile changelog` prints these notes, and the dashboard shows what is new once after an
   upgrade (#41)
+- The dashboard says in one line when a newer version is out. It looks at most once a day, with a
+  plain request to GitHub's public release list that carries nothing about you. Set
+  `LAZYMOBILE_NO_UPDATE_CHECK=1` to turn it off (#41)
 - A simulator's log no longer shows the entries launchd and `log` write about reading it (#44)
 - Building from source needs Go 1.27.4 or newer
 

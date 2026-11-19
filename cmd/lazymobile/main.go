@@ -22,6 +22,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/run"
 	"github.com/0xrnp/lazymobile/internal/state"
 	"github.com/0xrnp/lazymobile/internal/tui"
+	"github.com/0xrnp/lazymobile/internal/update"
 )
 
 // version is set by the release build.
@@ -73,7 +74,11 @@ func main() {
 				builds = client
 			}
 			folder, _ := os.Getwd()
-			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version, Changelog: lazymobile.Changelog})
+			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version, Changelog: lazymobile.Changelog,
+				LatestVersion: func(ctx context.Context) (string, error) {
+					return update.Latest(ctx, update.Options{Store: store, Getenv: os.Getenv})
+				},
+			})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {

@@ -39,6 +39,14 @@ type File struct {
 	// SeenVersion is the newest release the dashboard was started with, so what is new is shown
 	// once after an upgrade.
 	SeenVersion string `json:"seen_version,omitempty"`
+	// UpdateCheck is the last look for a newer release.
+	UpdateCheck UpdateCheck `json:"update_check,omitzero"`
+}
+
+// UpdateCheck is when the newest release was last asked for, and what it was.
+type UpdateCheck struct {
+	At     time.Time `json:"at"`
+	Latest string    `json:"latest,omitempty"`
 }
 
 // Run is the device a folder's app was last run on.

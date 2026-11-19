@@ -68,6 +68,9 @@ type Memory struct {
 	// seen to show what is new. Changelog is the text of CHANGELOG.md.
 	Version   string
 	Changelog string
+	// LatestVersion finds the newest release, such as "0.5.0", or "" when it is not known or the
+	// check is off. Nil means the dashboard does not look.
+	LatestVersion func(ctx context.Context) (string, error)
 }
 
 const (
@@ -207,7 +210,7 @@ func Run(ctx context.Context, backend Backend, builds Builds, memory Memory) err
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), tick())
+	return tea.Batch(m.refresh(), tick(), m.checkUpdate())
 }
 
 func tick() tea.Cmd {

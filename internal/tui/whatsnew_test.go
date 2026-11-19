@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/state"
@@ -84,6 +87,38 @@ func TestNothingIsShownOnAFirstStartABuildInBetweenOrAnOlderVersion(t *testing.T
 		startedWith(t, store, version).wantNoScreen("What's new")
 		if got := store.Load().SeenVersion; got != "0.5.0" {
 			t.Errorf("%s changed the seen version to %q", name, got)
+		}
+	}
+}
+
+func updateHarness(t *testing.T, version string, latest func(context.Context) (string, error)) *harness {
+	t.Helper()
+	return startWith(t, Memory{Version: version, LatestVersion: latest}, iphone)
+}
+
+func TestANewerReleaseIsSaidInANote(t *testing.T) {
+	h := updateHarness(t, "0.4.0", func(context.Context) (string, error) { return "0.5.0", nil })
+	h.run(h.m.checkUpdate())
+	h.wantScreen("lazymobile 0.5.0 is out, you have 0.4.0", "brew upgrade lazymobile")
+}
+
+func TestNothingIsSaidWhenThereIsNothingNewOrNothingKnown(t *testing.T) {
+	for name, tt := range map[string]struct {
+		version string
+		latest  func(context.Context) (string, error)
+	}{
+		"same version":     {"0.5.0", func(context.Context) (string, error) { return "0.5.0", nil }},
+		"older release":    {"0.5.0", func(context.Context) (string, error) { return "0.4.0", nil }},
+		"check is off":     {"0.4.0", func(context.Context) (string, error) { return "", nil }},
+		"check failed":     {"0.4.0", func(context.Context) (string, error) { return "0.5.0", errors.New("no network") }},
+		"not a version":    {"0.4.0", func(context.Context) (string, error) { return "latest", nil }},
+		"build in between": {"v0.4.1-0.20261119-abc+dirty", func(context.Context) (string, error) { t.Error("a build in between looked"); return "0.5.0", nil }},
+		"no check wired":   {"0.4.0", nil},
+	} {
+		h := updateHarness(t, tt.version, tt.latest)
+		h.run(h.m.checkUpdate())
+		if strings.Contains(h.screen(), " is out, you have") {
+			t.Errorf("%s: an update was announced", name)
 		}
 	}
 }

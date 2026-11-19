@@ -89,6 +89,7 @@ Early release. What has been run, and what has not:
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
 | `logs --tail` and `--since` | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a): the last lines, a time window, one app and a level, with the command ending by itself. An iPhone is refused (it keeps no history). Not run: an Android phone, an app crash in the window |
+| Update note | The real program built as version 0.3.0 against GitHub's real release list: one line said 0.4.0 was out, and the answer was saved with its time. With `LAZYMOBILE_NO_UPDATE_CHECK=1` nothing was asked and nothing was saved. Not run: a day passing, a computer without a network, and a rate limit (tested only with a fake server) |
 | What is new (`changelog`) | The real program built on macOS: `lazymobile changelog`, with a version and with `--all --json`, and the dashboard in tmux with a build whose notes had a 0.5.0 entry and a saved last version of 0.4.0: the notes opened over the dashboard and the version was saved. Not run: a real upgrade from an installed release, and a second start (tested only with a fake dashboard) |
 | Bug report (`report`) | A real iOS 27.2 simulator (Settings app) and a real Android 16 emulator (Settings app): a new folder with a screenshot, the last log lines, a crash report when there was one, and a summary. Not run: an app you built, an Android phone, a crash report on the simulator, and the app version of an installed app (the Settings apps are not in the installed list). An iPhone is refused. Found on the way: a log read within seconds of launching an app came back empty on the simulator, since the system log is written to disk a little later |
 | Crash reports (`crash`) | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a), from the command: a Safari crash on the simulator (from the Mac's crash reports, matched to that simulator), and on the emulator a Java crash of the Clock app and a native crash of the Bluetooth app from the crash buffer. `--save`, `--json`, a file that exists refused, an app with no crash, and an iPhone refused. The dashboard menu (`o`, then the app) on the emulator in a real terminal. The fallback to Android's dropbox, only with saved real output. Not run: an Android phone, a React Native or Flutter app's crash, a crash older than a restart |
@@ -298,6 +299,12 @@ only by you. Delete the file to forget it all.
   Expo account. A profile with "prod" in its name must be typed out to confirm.
 - Log lines are stripped of terminal control sequences before they are drawn.
 - Saved logs are readable only by you, since logs can hold tokens and personal data.
+- One thing asks the network: the dashboard looks for a newer release, at most once a day, with a
+  plain request to GitHub's public release list of this repository (`api.github.com`). The request
+  has no query, no login and no version of yours, and its user agent is `lazymobile`, though GitHub
+  sees the address it comes from, as with any request. A newer version shows as one line at the
+  bottom. Set `LAZYMOBILE_NO_UPDATE_CHECK=1` to never look. A build made from source, in between
+  releases, never looks, and the plain commands never do.
 
 ## Commands
 
