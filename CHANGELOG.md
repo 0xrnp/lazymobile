@@ -14,6 +14,12 @@ them, and the dashboard shows what is new once after an upgrade.
 - `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
   the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running.
   Drag the line between the panes, or press `+` and `-` from the log, to resize them (#42)
+- `ctrl+p` opens a quick menu on the dashboard and in the run view: `s` saves a screenshot and copies
+  it as a picture to paste into a chat, `r` starts and stops a screen recording and copies the video
+  as a file, `c` copies the newest 200 lines of the open log, as its filter shows them, as text to
+  ask an AI about, and `b`, `o`, `t`
+  and `m` are the bug report, app menu, link and dark mode. A recording shows `● REC`, and quitting
+  asks and saves it first (#42)
 - A dashboard open in the same folder follows a run: it selects the device and opens the app's
   log. `lazymobile run --split` opens that dashboard in a new pane in Rex, tmux or Zellij (#42)
 - `lazymobile report <device> <app-id>`, and "Save a bug report" in the dashboard's app menu: a new

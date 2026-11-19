@@ -98,7 +98,7 @@ type (
 // runKeysOwn are the keys the run view keeps while the tool has the keys. Every other key goes to
 // the tool.
 var runKeysOwn = map[string]bool{
-	"ctrl+]": true, "ctrl+o": true,
+	"ctrl+]": true, "ctrl+o": true, "ctrl+p": true,
 	"shift+up": true, "shift+down": true, "shift+pgup": true, "shift+pgdown": true,
 }
 
@@ -237,20 +237,7 @@ func (m *Model) runLogSlot() int {
 	if m.run == nil {
 		return -1
 	}
-	key := m.run.spec.Device.Key()
-	found := -1
-	for i, v := range m.logPanes {
-		if !v.opened || v.spec.Device.Key() != key {
-			continue
-		}
-		if m.focus == paneLogs && i == m.logIdx {
-			return i
-		}
-		if found < 0 || i == m.lastLog {
-			found = i
-		}
-	}
-	return found
+	return m.logOf(m.run.spec.Device.Key())
 }
 
 // startTool starts the tool at the size of its pane. A tool that cannot start leaves the reason in
@@ -380,6 +367,8 @@ func (m *Model) runViewKeyString(key string) tea.Cmd {
 	case "ctrl+]":
 		m.toggleRun()
 		return nil
+	case "ctrl+p":
+		return m.quickMenu()
 	case "ctrl+o":
 		if r.onTool {
 			m.focusRunLog()
@@ -593,7 +582,7 @@ func (m *Model) runFooterKeys() []string {
 	r := m.run
 	switch {
 	case r.onTool && m.toolRunning():
-		return []string{"run_focus", "run_switch", "run_scroll"}
+		return []string{"run_focus", "run_switch", "run_quick", "run_scroll"}
 	case r.onTool:
 		return []string{"run_again", "run_focus", "run_switch", "run_quit"}
 	}
@@ -603,9 +592,10 @@ func (m *Model) runFooterKeys() []string {
 		resize = []string{"run_resize", "run_zoom"}
 	}
 	if m.runLogSlot() < 0 {
-		return slices.Concat([]string{"run_pick", "run_back"}, resize, []string{"run_switch", "run_quit"})
+		// The last two are what is kept when the line is too short, so they are the keys and quit.
+		return slices.Concat([]string{"run_pick", "run_back"}, resize, []string{"run_switch", "run_quick", "run_help", "run_quit"})
 	}
-	return slices.Concat([]string{"run_back"}, resize, []string{"run_switch", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"})
+	return slices.Concat([]string{"run_back"}, resize, []string{"run_switch", "run_quick", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"})
 }
 
 func needsRun(m *Model) string {

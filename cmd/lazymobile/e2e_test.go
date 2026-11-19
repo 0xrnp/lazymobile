@@ -75,8 +75,16 @@ case "$*" in
 "devices -l") printf 'List of devices attached\nemulator-5554 device product:sdk model:Pixel_Test device:emu transport_id:1\n' ;;
 "shell getprop ro.build.version.release") echo 16 ;;
 "shell getprop sys.boot_completed") echo 1 ;;
+"shell pidof com.example.app") echo 100 ;;
 "emu avd name") printf 'Pixel_Test\nOK\n' ;;
 logcat*) while :; do echo "11-19 10:00:00.000  100  100 I App: hello from the app"; sleep 1; done ;;
+"exec-out screencap -p") printf '\211PNG\r\n\032\nfake screen' ;;
+shell\ screenrecord*)
+  echo $$ > "$FAKE_HOME/recorder.pid"
+  trap 'exit 0' INT TERM
+  while :; do sleep 0.1; done ;;
+"shell pkill -2 screenrecord") [ -f "$FAKE_HOME/recorder.pid" ] && kill -INT "$(cat "$FAKE_HOME/recorder.pid")" 2>/dev/null ;;
+pull*) shift; printf 'fake video' > "$2" ;;
 esac
 exit 0
 `
@@ -84,6 +92,12 @@ exit 0
 const fakeEmulator = `#!/bin/sh
 [ "$1" = "-list-avds" ] && echo Pixel_Test
 exit 0
+`
+
+// fakeClipboard records what it was asked to copy: its name and arguments, then what it read. The
+// same program stands in for pbcopy, osascript, wl-copy and xclip.
+const fakeClipboard = `#!/bin/sh
+{ echo "== $(basename "$0") $*"; [ -t 0 ] || cat; } >> "$FAKE_HOME/clipboard.log"
 `
 
 // fakeXcrun has no simulators and no phones. devicectl writes its answer to the --json-output file.
@@ -119,11 +133,16 @@ func newWorld(t *testing.T) *world {
 	w.write(filepath.Join(sdk, "platform-tools", "adb"), fakeAdb)
 	w.write(filepath.Join(sdk, "emulator", "emulator"), fakeEmulator)
 	w.write(filepath.Join(bin, "xcrun"), fakeXcrun)
+	for _, name := range []string{"pbcopy", "osascript", "wl-copy", "xclip"} {
+		w.write(filepath.Join(bin, name), fakeClipboard)
+	}
 	w.write(filepath.Join(w.project, "tool.sh"), fakeTool)
 	w.write(filepath.Join(w.project, ".lazymobile.json"),
 		`{"actions": [{"name": "run", "command": ["./tool.sh", "{device_id}"]}]}`)
 	w.env = []string{
 		"HOME=" + home,
+		"FAKE_HOME=" + home,
+		"WAYLAND_DISPLAY=wayland-test",
 		"XDG_STATE_HOME=" + filepath.Join(home, "state"),
 		"XDG_CONFIG_HOME=" + filepath.Join(home, "config"),
 		"ANDROID_HOME=" + sdk,
@@ -270,7 +289,7 @@ func TestE2ERunHereGivesKeysToTheToolAndSaysHowToMove(t *testing.T) {
 
 	// The log side says how to resize, and the keys do it.
 	sc.press(ctrl('o'))
-	sc.wait(2*time.Second, "+ - resize (or drag the line)", "z full width")
+	sc.wait(2*time.Second, "+ - resize", "z full width")
 	before := sc.line()
 	sc.press(char('+'), char('+'))
 	deadline := time.Now().Add(2 * time.Second)
@@ -409,5 +428,141 @@ func waitFor(t *testing.T, within time.Duration, what string, ok func() bool) {
 			t.Fatalf("waited %v for %s", within, what)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// openQuick opens the quick menu. The device list loads in the background, and until it has the
+// run's device the menu says so in the note and stays shut, so ctrl+p is pressed again.
+func (sc *screen) openQuick() {
+	sc.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		sc.press(ctrl('p'))
+		until := time.Now().Add(400 * time.Millisecond)
+		for time.Now().Before(until) {
+			if strings.Contains(sc.text(), "Quick actions") {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	sc.t.Fatalf("the quick menu did not open. The screen:\n%s", sc.text())
+}
+
+// clipboard is what the fake clipboard programs were asked to copy.
+func (w *world) clipboard() string {
+	data, _ := os.ReadFile(filepath.Join(w.home, "clipboard.log"))
+	return string(data)
+}
+
+// files are the files in the project folder with this extension.
+func (w *world) files(ext string) []string {
+	found, _ := filepath.Glob(filepath.Join(w.project, "*"+ext))
+	return found
+}
+
+func TestE2EQuickMenuScreenshotIsSavedAndCopiedFromTheRunView(t *testing.T) {
+	w := newWorld(t)
+	sc := w.runHere(140, 36)
+	sc.openQuick()
+	sc.wait(2*time.Second, "Quick actions · Pixel Test", "Record the screen")
+	// The tool never saw ctrl+p.
+	if strings.Contains(sc.text(), "got key") {
+		t.Errorf("the tool got a key:\n%s", sc.text())
+	}
+	began := time.Now()
+	sc.press(char('s'))
+	sc.wait(5*time.Second, "Copied a screenshot, saved as")
+	if took := time.Since(began); took > 3*time.Second {
+		t.Errorf("a screenshot took %v", took)
+	}
+	shots := w.files(".png")
+	if len(shots) != 1 {
+		t.Fatalf("screenshots saved: %v", shots)
+	}
+	if data, _ := os.ReadFile(shots[0]); !strings.HasPrefix(string(data), "\x89PNG") {
+		t.Errorf("the saved file is not a PNG: %q", data)
+	}
+	// The picture is copied as a picture: by osascript with the file's path on macOS, and by wl-copy
+	// as image/png elsewhere.
+	clip := w.clipboard()
+	if !strings.Contains(clip, "PNGf") && !strings.Contains(clip, "image/png") || !strings.Contains(clip, filepath.Base(shots[0])) && !strings.Contains(clip, "fake screen") {
+		t.Errorf("the clipboard got:\n%s", clip)
+	}
+	// The tool still has the keys afterwards.
+	sc.press(char('k'))
+	sc.wait(2*time.Second, "got key [k]")
+}
+
+func TestE2EQuickMenuRecordsAndCopiesTheVideoAndQuitWaitsForIt(t *testing.T) {
+	w := newWorld(t)
+	sc := w.runHere(140, 36)
+	sc.openQuick()
+	sc.press(char('r'))
+	sc.wait(5*time.Second, "● REC", "Recording Pixel Test")
+	waitFor(t, 5*time.Second, "the recorder to start", func() bool {
+		_, err := os.Stat(filepath.Join(w.home, "recorder.pid"))
+		return err == nil
+	})
+	time.Sleep(1500 * time.Millisecond)
+	sc.wait(2*time.Second, "● REC 0:0")
+
+	sc.openQuick()
+	sc.wait(2*time.Second, "Stop recording Pixel Test")
+	sc.press(char('r'))
+	sc.wait(10*time.Second, "Copied the video of Pixel Test")
+	waitFor(t, 2*time.Second, "the REC mark to go", func() bool { return !strings.Contains(sc.text(), "● REC") })
+	videos := w.files(".mp4")
+	if len(videos) != 1 {
+		t.Fatalf("videos saved: %v", videos)
+	}
+	if data, _ := os.ReadFile(videos[0]); string(data) != "fake video" {
+		t.Errorf("the video: %q", data)
+	}
+	if clip := w.clipboard(); !strings.Contains(clip, filepath.Base(videos[0])) {
+		t.Errorf("the clipboard got:\n%s", clip)
+	}
+
+	// Quitting while a second recording runs asks, and saves the video before it exits.
+	sc.openQuick()
+	sc.press(char('r'))
+	sc.wait(5*time.Second, "● REC")
+	sc.press(ctrl(']'), char('q'))
+	sc.wait(2*time.Second, "Stop tool.sh and the recording, then quit?", "saved before lazymobile quits")
+	sc.press(char('y'))
+	select {
+	case <-sc.s.Done():
+	case <-time.After(15 * time.Second):
+		t.Fatalf("lazymobile did not quit. The screen:\n%s", sc.text())
+	}
+	if got := len(w.files(".mp4")); got != 2 {
+		t.Errorf("%d videos saved after quitting, want 2", got)
+	}
+}
+
+func TestE2EQuickMenuCopiesTheLogForAI(t *testing.T) {
+	w := newWorld(t)
+	sc := w.runHere(140, 36)
+	// Open the app's log: ctrl+o gives the keys to the log side, and l asks which app.
+	sc.press(ctrl('o'))
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(sc.text(), "App on Pixel Test") {
+		if time.Now().After(deadline) {
+			t.Fatalf("l did not ask which app. The screen:\n%s", sc.text())
+		}
+		sc.press(char('l'))
+		time.Sleep(400 * time.Millisecond)
+	}
+	sc.s.Paste("com.example.app")
+	sc.press(uv.KeyPressEvent{Code: uv.KeyEnter})
+	sc.wait(5*time.Second, "hello from the app")
+	sc.openQuick()
+	sc.press(char('c'))
+	sc.wait(5*time.Second, "Copied the last")
+	clip := w.clipboard()
+	for _, want := range []string{"hello from the app", "com.example.app", "Pixel Test"} {
+		if !strings.Contains(clip, want) {
+			t.Errorf("the clipboard lacks %q:\n%s", want, clip)
+		}
 	}
 }

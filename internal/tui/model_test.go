@@ -202,6 +202,21 @@ func (f *fakeBackend) Crash(_ context.Context, d device.Device, id string) (devi
 func (f *fakeBackend) Screenshot(_ context.Context, d device.Device, path string) (string, error) {
 	return path, f.record("screenshot %s %s", d.ID, path)
 }
+
+// Record films until ctx ends, as the real one does, and then saves the video.
+func (f *fakeBackend) Record(ctx context.Context, d device.Device, path string, _ time.Duration, _ func()) (string, error) {
+	if err := f.record("record start %s %s", d.ID, path); err != nil {
+		return "", err
+	}
+	<-ctx.Done()
+	return path, f.record("record stop %s %s", d.ID, path)
+}
+func (f *fakeBackend) CopyText(_ context.Context, text string) error {
+	return f.record("copytext %s", strings.ReplaceAll(text, "\n", "|"))
+}
+func (f *fakeBackend) CopyFile(_ context.Context, path string) error {
+	return f.record("copyfile %s", path)
+}
 func (f *fakeBackend) Report(_ context.Context, d device.Device, id string, opts mobile.ReportOptions) (mobile.Report, error) {
 	if err := f.record("report %s %s %s %s", d.ID, id, opts.Dir, opts.Version); err != nil {
 		return mobile.Report{}, err
@@ -310,6 +325,7 @@ var special = map[string]tea.KeyPressMsg{
 	"down":      {Code: tea.KeyDown},
 	"ctrl+c":    {Code: 'c', Mod: tea.ModCtrl},
 	"ctrl+u":    {Code: 'u', Mod: tea.ModCtrl},
+	"ctrl+p":    {Code: 'p', Mod: tea.ModCtrl},
 }
 
 // press sends keys: named ones such as "enter", or single characters.

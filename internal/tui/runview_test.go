@@ -584,5 +584,5 @@ func TestTheHintsSayHowToResizeFromEitherPane(t *testing.T) {
 	r := startRun(t, memoryIn(t), pixel, pixel)
 	r.wantScreen("ctrl+o log, then + - to resize")
 	r.key(ctrlO)
-	r.wantScreen("+ - resize (or drag the line)", "z full width")
+	r.wantScreen("+ - resize", "z full width")
 }

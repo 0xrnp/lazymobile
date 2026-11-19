@@ -250,6 +250,8 @@ var keyTable = []keyAction{
 			}
 			return ""
 		}},
+	{id: "quick", ctx: ctxEverywhere, keys: []string{"ctrl+p"}, show: "ctrl+p", desc: "Quick: screenshot or video to the clipboard, log for AI",
+		footer: say("quick")},
 	{id: "keys", ctx: ctxEverywhere, keys: []string{"?"}, show: "?", desc: "This menu", footer: say("keys")},
 	{id: "quit", ctx: ctxEverywhere, keys: []string{"q", "ctrl+c"}, show: "q", desc: "Quit (simulators and emulators keep running)", footer: say("quit")},
 
@@ -274,6 +276,8 @@ var keyTable = []keyAction{
 			}
 			return ""
 		}, when: needsRun},
+	{id: "run_quick", ctx: ctxRun, keys: []string{"ctrl+p"}, show: "ctrl+p", desc: "Quick actions on the run's device, from either pane",
+		footer: say("quick"), when: needsRun},
 	{id: "run_back", ctx: ctxRun, keys: []string{"esc"}, show: "esc", desc: "From the log, give the keys back to the tool",
 		footer: func(m *Model) string { return "back to " + m.runTitle() }, when: needsRun},
 	{id: "run_scroll", ctx: ctxRun, keys: []string{"shift+pgup", "shift+pgdown", "shift+up", "shift+down"}, show: "shift+pgup",
@@ -291,7 +295,7 @@ var keyTable = []keyAction{
 	{id: "run_pick", ctx: ctxRun, keys: []string{"l"}, show: "l", desc: "From the log: pick the app, which opens by itself next time",
 		footer: say("pick the app"), when: needsRun},
 	{id: "run_resize", ctx: ctxRun, keys: []string{"+", "=", "-"}, show: "+ -", desc: "From the log: widen or narrow it, or drag the line",
-		footer: say("- resize (or drag the line)"), when: needsRun},
+		footer: say("- resize"), when: needsRun},
 	{id: "run_zoom", ctx: ctxRun, keys: []string{"z"}, show: "z", desc: "From the log: show it at full width, again to undo",
 		footer: say("full width"), when: needsRun},
 	{id: "run_help", ctx: ctxRun, keys: []string{"?"}, show: "?", desc: "From the log, or once the tool ended: this menu",
@@ -331,7 +335,7 @@ func (m *Model) footerKeys() []string {
 		default:
 			ids = []string{"zoom", "tab", "log_close"}
 		}
-		ids = append(ids, "log_line", "log_copy", "log_filter", "log_presets", "log_level", "log_wrap", "log_pause", "log_clear", "log_save", "log_stop", "log_restart")
+		ids = append(ids, "quick", "log_line", "log_copy", "log_filter", "log_presets", "log_level", "log_wrap", "log_pause", "log_clear", "log_save", "log_stop", "log_restart")
 	case m.focusOnLog():
 		ids = []string{"tab"}
 	case m.focus == paneBuilds && !m.build.asked:
@@ -339,7 +343,7 @@ func (m *Model) footerKeys() []string {
 	case m.focus == paneBuilds:
 		ids = []string{"build_load", "build_install", "build_open", "build_new", "build_cancel", "build_refresh", "tab"}
 	default:
-		ids = []string{"boot", "shutdown", "logs", "all_logs", "new", "erase", "delete", "copyid", "wifi", "refresh"}
+		ids = []string{"boot", "shutdown", "logs", "quick", "all_logs", "new", "erase", "delete", "copyid", "wifi", "refresh"}
 	}
 	if m.run != nil {
 		// The way back to the tool comes first, so it is never left out for lack of room.

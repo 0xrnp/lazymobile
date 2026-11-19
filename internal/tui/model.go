@@ -19,6 +19,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/state"
+	"sync"
 )
 
 // Backend is what the dashboard needs from the rest of the program.
@@ -52,6 +53,9 @@ type Backend interface {
 	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
+	Record(ctx context.Context, d device.Device, path string, limit time.Duration, started func()) (string, error)
+	CopyText(ctx context.Context, text string) error
+	CopyFile(ctx context.Context, path string) error
 	Report(ctx context.Context, d device.Device, app string, opts mobile.ReportOptions) (mobile.Report, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
@@ -147,6 +151,10 @@ type Model struct {
 	settling map[string]settling
 
 	focus pane
+	// recording is the screen recording that runs, or nil.
+	recording *recording
+	// quitting is whether lazymobile is stopping what it started and about to exit.
+	quitting bool
 	// widen is how many columns the devices pane was made wider (negative: narrower) with + and -.
 	widen int
 	// zoomed shows only the focused pane, on the whole screen.
@@ -310,6 +318,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.run != nil && msg.id == m.run.id {
 			return m, m.listenTool()
 		}
+	case recordedMsg:
+		return m, m.recorded(msg)
 	case toolEndMsg:
 		if m.run != nil && msg.id == m.run.id {
 			m.toolEnded(msg.err)
@@ -667,6 +677,8 @@ func (m *Model) keyString(key string) tea.Cmd {
 	case "?":
 		m.modal = m.keysModal()
 		return nil
+	case "ctrl+p":
+		return m.quickMenu()
 	case "tab":
 		m.cycle(1)
 		return nil
@@ -1075,33 +1087,52 @@ func (m *Model) logKey(key string) tea.Cmd {
 
 // quit ends the dashboard. While a tool runs in it, it asks first, since quitting stops the tool.
 func (m *Model) quit() tea.Cmd {
-	if m.toolRunning() {
-		title := m.runTitle()
-		m.confirm("Stop "+title+" and quit?",
-			title+" is running. Quitting stops it: ctrl+c first, then a kill if it has not ended after a few seconds. ctrl+] goes back to it instead.",
-			func(m *Model) tea.Cmd { return m.quitNow() })
+	if m.toolRunning() || m.recording != nil {
+		title, body := m.quitWhat()
+		m.confirm(title, body, func(m *Model) tea.Cmd { return m.quitNow() })
 		return nil
 	}
 	return m.quitNow()
 }
 
 func (m *Model) quitNow() tea.Cmd {
+	// Saving a recording and stopping a tool take a moment, and the screen stays live meanwhile: a
+	// second q must not start it all again.
+	if m.quitting {
+		return nil
+	}
+	m.quitting = true
 	m.saveView()
+	// What is waited for is taken now: the command runs outside the update loop, where m.run and
+	// m.recording can change.
+	var waits []func()
+	if wait := m.stopRecordingAndWait(); wait != nil {
+		m.setNote("Saving the recording…", false)
+		waits = append(waits, wait)
+	}
 	if m.toolRunning() {
-		// The session is taken now: the command runs outside the update loop, where m.run can change.
 		session := m.run.session
 		m.setNote("Stopping "+m.runTitle()+"…", false)
-		next := m.quitLogs()
-		return func() tea.Msg {
+		waits = append(waits, func() {
 			session.Stop()
 			session.Wait()
-			if next == nil {
-				return nil
-			}
-			return next()
-		}
+		})
 	}
-	return m.quitLogs()
+	next := m.quitLogs()
+	if len(waits) == 0 {
+		return next
+	}
+	return func() tea.Msg {
+		var all sync.WaitGroup
+		for _, wait := range waits {
+			all.Go(wait)
+		}
+		all.Wait()
+		if next == nil {
+			return nil
+		}
+		return next()
+	}
 }
 
 // quitLogs stops the log tools and ends the dashboard.

@@ -116,10 +116,12 @@ func (m *Model) render() string {
 		body = overlay(body, m.modal.render(m.width, l.bodyHeight), m.width)
 	}
 
-	note := " " + m.note
+	// The recording mark has its own colour, so it is not inside the red of an error.
+	text := m.note
 	if m.noteErr {
-		note = red.Render(fit(note, m.width))
+		text = red.Render(text)
 	}
+	note := " " + m.recordingMark() + text
 	lines := append(body, fit(note, m.width), fit(" "+m.hints(), m.width))
 	return strings.Join(lines, "\n")
 }

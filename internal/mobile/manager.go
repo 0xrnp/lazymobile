@@ -36,6 +36,9 @@ type Manager struct {
 	// QuitSimulatorApp quits Simulator or DeviceHub once the last running simulator shuts down,
 	// which closes the window they keep open for it.
 	QuitSimulatorApp bool
+
+	// Getenv reads the environment, to find the clipboard on Linux. Nil means os.Getenv.
+	Getenv func(string) string
 }
 
 // New returns a manager that runs the real tools.
