@@ -8,11 +8,14 @@ them, and the dashboard shows what is new once after an upgrade.
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
   tool you already use (`flutter run`, the project's own `expo run:ios` or `run:android`, or the
-  action named `run` in `.lazymobile.json`). Its keys,
-  such as hot reload, keep working. The device is remembered for the folder, and a dashboard open
-  in the same folder follows the run: it selects the device and opens the app's log, and
-  `lazymobile run` asks which way to run (run dev, run prod) and which device, and
-  remembers the answer; `lazymobile run --split` opens that dashboard for you in a new pane in Rex, tmux or Zellij (#42)
+  action named `run` in `.lazymobile.json`). Its keys, such as hot reload, keep working. It asks
+  which way to run (run dev, run prod) and which device when it cannot tell, and remembers the
+  answers for the folder (#42)
+- `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
+  the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running
+  (#42)
+- A dashboard open in the same folder follows a run: it selects the device and opens the app's
+  log. `lazymobile run --split` opens that dashboard in a new pane in Rex, tmux or Zellij (#42)
 - `lazymobile report <device> <app-id>`, and "Save a bug report" in the dashboard's app menu: a new
   folder with a screenshot, the app's last log lines, its latest crash report, and the device and
   app version (#39)

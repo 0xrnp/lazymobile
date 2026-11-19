@@ -76,6 +76,7 @@ Early release. What has been run, and what has not:
 | `run` | A real Android emulator (Pixel 9a) with Flutter 3.38.10 and a new Flutter app: `lazymobile run Pixel_9a` started the emulator, ran `flutter run -d emulator-5554`, the app opened, and `r` gave a hot reload. Flutter only was run, on Android |
 | Dashboard following a run | A real Android 16 emulator (Pixel 9a) and the Flutter app, with the dashboard and `lazymobile run` in two tmux panes: the dashboard selected the device and said to pick the app, I picked it once, and after closing its log, a new run made the dashboard open the app's log by itself with its lines. Not run: an iOS simulator, a phone, two devices at once, and Neovim's terminal |
 | `run --split` | A real iOS 27.2 simulator and a scratch project whose `run` action is an `echo`: the dashboard opened in a new pane to the right in a real Rex terminal, in tmux 3.8 and in Zellij 0.46, each in the project's folder and with the focus left on the tool's pane (not in Zellij, which cannot), and selected the simulator with the "pick the app" note. Also found and fixed: a tmux inside Rex was split as Rex. Not run: with a Flutter or Expo build, WezTerm and Kitty |
+| `run --here` | A real terminal (tmux 3.8). With `flutter run` and a new Flutter app on a real Android 16 emulator (Pixel 9a), which lazymobile started first: the tool ran in the left pane, `r` gave "Reloaded 0 libraries" and `R` "Restarted application", `ctrl+o` then `l` opened the app picker over the run view and then the app's log on the right, `ctrl+]` showed the full dashboard with that log and the tool still running, and `q` there asked, then stopped `flutter run` within a second, leaving no `flutter run` process. The second run in that folder opened the app's log by itself, and `q` in the tool's pane ended Flutter as it would outside, leaving its output and "ended". With an interactive scratch script on an iOS 27.2 simulator: keys reached the script and not the dashboard, `enter` ran it again after it ended, and quitting left no process. From a screenshot of the maintainer's own run: a real Expo app with a development client on an iOS 27.2 simulator ran with `--here`, with its Metro output on the left and the app's log on the right, its errors in red. Not run: a real phone, WezTerm or Kitty, Linux |
 | `run` asking which way and which device | A real terminal (tmux 3.8) and a scratch project with two `run` actions in `.lazymobile.json`: the list appeared, `j` and Enter chose one and ran it on the one running iOS 27.2 simulator, the next run did not ask, `--choose` asked again for the device (two simulators with one name were told apart by id), and Esc stopped without running anything. Not run: with Flutter or Expo, or with a real phone in the list |
 | `run` for Expo | A real Expo app with a development client, in a pnpm monorepo, on an iOS 27.2 simulator: `lazymobile run <simulator> -- --no-install` started the simulator and ran the project's own `expo run:ios --device <id>`. The app built, installed and opened on that simulator, and Metro started and reported the app's own error, a workspace package that `pnpm install` had not linked yet. Before macOS Automation was allowed for System Events, Expo stopped at the end with its own `osascript` error (-1743), and lazymobile showed it and exit code 1 as it came. Later, from a screenshot of the maintainer's own run with `--split` in Rex: Expo ran in one pane (the QR code, its key menu, the bundle at 67%) and the dashboard in the other selected the simulator and showed the app's log lines. Not run: hot reload, the app past its bundling, Android, and a physical phone. The project's files were not changed by lazymobile |
 | `run` for the rest | Not run: an iOS simulator with Flutter, an iPhone, a project with its own `run` action in `.lazymobile.json`, and React Native. Those paths are tested with fake tools only |
@@ -473,9 +474,38 @@ it with the tool you already use. It shows the exact command, then hands the ter
 lazymobile run                       # the device used here last time, else the one that is running
 lazymobile run "Pixel 9a"            # start it if it is off, then run
 lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
+lazymobile run --here                # run it inside lazymobile, with its log beside it
 lazymobile run --split               # also open the dashboard in a pane beside this one
 lazymobile run --choose              # ask again which way to run and which device
 ```
+
+There are three ways to see your tool and the device together:
+
+| | What you get | Where |
+|---|---|---|
+| `lazymobile run --here` | One window: your tool on the left, the app's log on the right, and the full dashboard a key away | Any terminal |
+| `lazymobile run --split` | Your tool here, the dashboard in a new pane beside it | Rex, tmux, Zellij |
+| `lazymobile run` and `lazymobile` | Your tool here, the dashboard in a second terminal you open | Any terminal |
+
+### Inside lazymobile: `--here`
+
+`lazymobile run --here` starts the dashboard on its run view. Your tool runs in the left pane on a
+terminal of its own, so its colours, its QR code and its keys work as they do outside lazymobile.
+The log of the app is on the right, and opens by itself once lazymobile knows the folder's app.
+
+| Key | In the run view |
+|---|---|
+| any key | goes to your tool while its pane has the keys: `r` hot reload, `ctrl+c` stops it |
+| `ctrl+]` | switch to the full dashboard (devices, logs, screenshots, bug report) and back; the tool keeps running |
+| `ctrl+o` | give the keys to the log (filter `/`, level `L`, pause `p`, copy `y`) or back to the tool; `esc` goes back too |
+| `l` | from the log, the first time: pick the app whose log to show |
+| `shift+pgup`, `shift+pgdn`, the wheel | scroll back through the tool's output; typing goes back to the end |
+| `enter` | after the tool ended: run it again |
+| `q` | from the log, the dashboard or an ended tool: quit. While the tool runs it asks, then stops it (ctrl+c, then a kill after 5 seconds) so no dev server is left behind |
+
+A click gives the keys to the pane clicked. Below 100 columns only one pane shows, the one with the
+keys. lazymobile uses the mouse, so to select text with it, hold the key your terminal uses for
+that, usually Shift (Option in some).
 
 In a terminal, `lazymobile run` asks when it cannot tell. Name several ways to run in
 `.lazymobile.json` (actions called `run dev`, `run prod`, or `run:staging`) and it lists them,
@@ -502,6 +532,8 @@ stops and says to name one.
   side by side. The first time it asks which app (press `l`, then pick it). After that it knows
   the app for the folder. A phone is selected, but its log is not opened for you. The dashboard
   only follows a run that began in the last 10 minutes and after you last used it.
+- `--here` cannot be used with `--split`, and needs a terminal. It ends with exit code 0 when you
+  quit: how the tool ended shows in its pane.
 - `--split` opens that dashboard for you, in a new pane to the right of the terminal where you ran
   it, in the same folder, before your tool starts. It works in Rex, tmux and Zellij. In any other
   terminal it stops with a message and does not run your tool, so use a second terminal there. A

@@ -71,6 +71,8 @@ type Memory struct {
 	// LatestVersion finds the newest release, such as "0.5.0", or "" when it is not known or the
 	// check is off. Nil means the dashboard does not look.
 	LatestVersion func(ctx context.Context) (string, error)
+	// Run is the tool `lazymobile run --here` runs in the dashboard, or nil.
+	Run *RunSpec
 }
 
 const (
@@ -179,6 +181,8 @@ type Model struct {
 	saved *state.View
 	// appsAsked counts the app lists asked for, so a slow one that is no longer wanted is dropped.
 	appsAsked int
+	// run is the tool running in the run view, or nil when the dashboard was opened on its own.
+	run *toolRun
 }
 
 // New returns a dashboard that has not started yet.
@@ -202,7 +206,14 @@ func Run(ctx context.Context, backend Backend, builds Builds, memory Memory) err
 	defer cancel()
 	m := New(ctx, backend, builds)
 	m.memory = memory
-	m.whatsNew()
+	if memory.Run != nil {
+		m.attachRun(*memory.Run)
+		// The tool is stopped however the dashboard ends, so no dev server is left running.
+		defer m.stopTool()
+	} else {
+		// What is new waits for a plain dashboard, rather than covering the tool as it starts.
+		m.whatsNew()
+	}
 	program := tea.NewProgram(m, tea.WithContext(ctx))
 	m.send = program.Send
 	_, err := program.Run()
@@ -282,12 +293,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, m.fitTool()
 	case tea.KeyPressMsg:
+		if m.run != nil && m.modal == nil && msg.String() == "ctrl+]" {
+			m.toggleRun()
+			return m, nil
+		}
 		if m.modal != nil {
 			return m, m.modalKey(msg)
 		}
+		if m.runShown() {
+			return m, m.runViewKey(msg)
+		}
 		return m, m.key(msg)
+	case toolChangedMsg:
+		if m.run != nil && msg.id == m.run.id {
+			return m, m.listenTool()
+		}
+	case toolEndMsg:
+		if m.run != nil && msg.id == m.run.id {
+			m.toolEnded(msg.err)
+		}
 	case tea.MouseWheelMsg:
+		if m.modal == nil && m.runShown() && m.runWheel(msg) {
+			return m, nil
+		}
 		if m.modal == nil {
 			return m, m.wheel(msg)
 		}
@@ -296,9 +326,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseClickMsg:
 		if m.modal == nil && msg.Button == tea.MouseLeft {
+			if m.runShown() {
+				m.runClick(msg.X, msg.Y)
+				break
+			}
 			m.click(msg.X, msg.Y)
 		}
 	case tea.PasteMsg:
+		if m.modal == nil && m.runShown() && m.run.onTool && m.toolRunning() {
+			m.run.session.Paste(msg.Content)
+			break
+		}
 		if m.modal != nil && m.modal.kind == modalPrompt {
 			m.modal.value += strings.TrimSpace(firstLine(msg.Content))
 			m.modal.problem = ""
@@ -1027,8 +1065,39 @@ func (m *Model) logKey(key string) tea.Cmd {
 	return nil
 }
 
+// quit ends the dashboard. While a tool runs in it, it asks first, since quitting stops the tool.
 func (m *Model) quit() tea.Cmd {
+	if m.toolRunning() {
+		title := m.runTitle()
+		m.confirm("Stop "+title+" and quit?",
+			title+" is running. Quitting stops it: ctrl+c first, then a kill if it has not ended after a few seconds. ctrl+] goes back to it instead.",
+			func(m *Model) tea.Cmd { return m.quitNow() })
+		return nil
+	}
+	return m.quitNow()
+}
+
+func (m *Model) quitNow() tea.Cmd {
 	m.saveView()
+	if m.toolRunning() {
+		// The session is taken now: the command runs outside the update loop, where m.run can change.
+		session := m.run.session
+		m.setNote("Stopping "+m.runTitle()+"…", false)
+		next := m.quitLogs()
+		return func() tea.Msg {
+			session.Stop()
+			session.Wait()
+			if next == nil {
+				return nil
+			}
+			return next()
+		}
+	}
+	return m.quitLogs()
+}
+
+// quitLogs stops the log tools and ends the dashboard.
+func (m *Model) quitLogs() tea.Cmd {
 	sessions := m.logSessions()
 	if len(sessions) == 0 {
 		return tea.Quit

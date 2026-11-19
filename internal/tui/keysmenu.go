@@ -38,6 +38,12 @@ func (m *Model) keysModal() *modal {
 		first = ctxBuilds
 	}
 	order := []keyContext{first, ctxEverywhere}
+	if m.runShown() {
+		// In the run view, its own keys come first.
+		order = []keyContext{ctxRun, first, ctxEverywhere}
+	} else if m.run != nil {
+		order = append(order, ctxRun)
+	}
 	for _, c := range []keyContext{ctxDevices, ctxLogs, ctxBuilds} {
 		if c != first && (c != ctxBuilds || m.builds != nil) {
 			order = append(order, c)
@@ -229,6 +235,23 @@ func (m *Model) runKey(a *keyAction) tea.Cmd {
 		return nil
 	}
 	m.modal = nil
+	if a.ctx == ctxRun {
+		if !m.runShown() && a.id != "run_switch" {
+			m.toggleRun()
+		}
+		// Each run action is done from the pane it belongs to, as its key would be there.
+		switch a.id {
+		case "run_again":
+			m.run.onTool = true
+		case "run_pick", "run_back":
+			m.focusRunLog()
+		}
+		return m.runViewKeyString(a.keys[0])
+	}
+	if m.runShown() {
+		// The dashboard's own actions act on the dashboard, so it is shown for them.
+		m.toggleRun()
+	}
 	switch {
 	case a.ctx == ctxDevices && m.focus != paneDevices:
 		m.focus, m.zoomed = paneDevices, false

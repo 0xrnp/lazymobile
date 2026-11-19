@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/actions"
+	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/run"
 	"github.com/0xrnp/lazymobile/internal/run/runtest"
 )
@@ -268,7 +269,7 @@ func TestRunTellsADashboardInTheFolderWhereItRuns(t *testing.T) {
 	if got.Last != "ios:simulator:"+runningSim || got.Device != got.Last || got.Started.IsZero() {
 		t.Errorf("remembered %+v", got)
 	}
-	if !strings.Contains(e.errs.String(), "run lazymobile in another terminal in this folder, or add --split. It opens on iPhone 16 Pro") {
+	if !strings.Contains(e.errs.String(), "add --here to run it inside lazymobile, or run lazymobile in another terminal in this folder (or add --split). It opens on iPhone 16 Pro") {
 		t.Errorf("the other terminal is not told about: %q", e.errs.String())
 	}
 
@@ -431,5 +432,59 @@ func TestRunListsOnlyActionsNamedAsWaysToRun(t *testing.T) {
 		if runProfile(name) {
 			t.Errorf("%q is not a way to run", name)
 		}
+	}
+}
+
+func TestRunHereOpensTheDashboardWithTheToolInsteadOfRunningIt(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	var got []HereRun
+	e.app.Terminal = true
+	e.app.Here = func(_ context.Context, _ *mobile.Manager, run HereRun) error {
+		got = append(got, run)
+		return nil
+	}
+	if code := e.run("run", "iPhone 16", "--here", "--", "--flavor", "dev"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if len(e.ran) != 0 || len(got) != 1 {
+		t.Fatalf("ran %v, here %v", e.ran, got)
+	}
+	run := got[0]
+	if strings.Join(run.Argv, " ") != "flutter run -d "+stoppedSim+" --flavor dev" || run.Dir != e.dir || run.Folder != e.dir ||
+		run.Title != "flutter run" || run.Device.ID != stoppedSim {
+		t.Errorf("here got %+v", run)
+	}
+	// The device was started first, as without --here, and the run is recorded for the dashboard to follow.
+	if !e.fake.Called("simctl boot " + stoppedSim) {
+		t.Error("the device was not started")
+	}
+	if r := e.app.State.Load().Runs[e.dir]; r.Last == "" || r.Started.IsZero() {
+		t.Errorf("the run was not recorded: %+v", r)
+	}
+}
+
+func TestRunHereNamesAPlainRunActionByItsCommand(t *testing.T) {
+	e := newRunEnv(t)
+	e.profiles("run")
+	var title string
+	e.app.Terminal = true
+	e.app.Here = func(_ context.Context, _ *mobile.Manager, run HereRun) error { title = run.Title; return nil }
+	if code := e.run("run", "iPhone 16 Pro", "--yes", "--here"); code != ExitOK || title != "make" {
+		t.Errorf("code %d, title %q, stderr %q", code, title, e.errs.String())
+	}
+}
+
+func TestRunHereNeedsATerminalAndIsNotSplit(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	e.app.Here = func(context.Context, *mobile.Manager, HereRun) error { t.Error("the dashboard opened"); return nil }
+	if code := e.run("run", "iPhone 16 Pro", "--here"); code != ExitUsage || !strings.Contains(e.errs.String(), "needs a terminal") {
+		t.Errorf("without a terminal: code %d, stderr %q", code, e.errs.String())
+	}
+	e.app.Terminal = true
+	if code := e.run("run", "iPhone 16 Pro", "--here", "--split"); code != ExitUsage || !strings.Contains(e.errs.String(), "use one") {
+		t.Errorf("with --split: code %d, stderr %q", code, e.errs.String())
+	}
+	if len(e.ran) != 0 || e.fake.Called("simctl boot") {
+		t.Errorf("something ran: %v", e.ran)
 	}
 }

@@ -91,7 +91,7 @@ func keysIn(t *testing.T, files map[string]*ast.File, funcs ...string) []string 
 func TestKeyTableMatchesTheHandlers(t *testing.T) {
 	fset := token.NewFileSet()
 	files := map[string]*ast.File{}
-	for _, name := range []string{"model.go", "builds.go"} {
+	for _, name := range []string{"model.go", "builds.go", "runview.go"} {
 		f, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -103,6 +103,7 @@ func TestKeyTableMatchesTheHandlers(t *testing.T) {
 		ctxLogs:       {"logKey"},
 		ctxBuilds:     {"buildKey"},
 		ctxEverywhere: {"keyString"},
+		ctxRun:        {"runViewKeyString"},
 	}
 	for ctx, funcs := range handlers {
 		var table []string
@@ -131,7 +132,9 @@ func TestNoPaneKeyIsHiddenByAnEverywhereKey(t *testing.T) {
 	}
 	for _, a := range keyTable {
 		for _, k := range a.keys {
-			if a.ctx != ctxEverywhere && everywhere[k] {
+			// The run view has a handler of its own, which runs instead of keyString, so the
+			// dashboard's everywhere keys do not hide its keys.
+			if a.ctx != ctxEverywhere && a.ctx != ctxRun && everywhere[k] {
 				t.Errorf("%s: %q does nothing there, it is an everywhere key", a.id, k)
 			}
 		}

@@ -49,6 +49,16 @@ type runPlan struct {
 	argv     func(d device.Device) ([]string, error)
 }
 
+// HereRun is a tool for the dashboard to run in its run view, on a device that is running.
+type HereRun struct {
+	// Dir is where the tool runs, and Folder where lazymobile run was typed.
+	Dir, Folder string
+	Argv        []string
+	// Title names the tool, such as "flutter run" or "run dev".
+	Title  string
+	Device device.Device
+}
+
 // PickItem is a line of a list the user chooses from.
 type PickItem struct {
 	Label  string
@@ -67,6 +77,7 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "")
 	split := fs.Bool("split", false, "")
+	here := fs.Bool("here", false, "")
 	choose := fs.Bool("choose", false, "")
 	profile := fs.String("profile", "", "")
 	positional, err := parse(fs, own)
@@ -78,6 +89,12 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	}
 	if *choose && !a.Terminal {
 		return usageError{"--choose needs a terminal to ask in"}
+	}
+	if *here && *split {
+		return usageError{"--here runs the tool inside lazymobile, and --split beside it: use one"}
+	}
+	if *here && (!a.Terminal || a.Here == nil) {
+		return usageError{"--here needs a terminal to show the dashboard in"}
 	}
 	// What is remembered, and what a dashboard looks up, is keyed by the folder this was typed in.
 	folder, err := a.getwd()
@@ -120,12 +137,19 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", strings.Join(argv, " "), plan.dir)
 	// A dashboard open in this folder follows the run: it selects this device and opens the app's log.
 	_ = a.State.Update(func(f *state.File) { f.RememberRunStarted(folder, d.Key(), time.Now()) })
+	if *here {
+		title := plan.name
+		if title == runAction {
+			title = filepath.Base(argv[0])
+		}
+		return a.Here(ctx, a.Manager, HereRun{Dir: plan.dir, Folder: folder, Argv: argv, Title: title, Device: d})
+	}
 	if *split {
 		if err := a.openDashboardBeside(ctx, folder); err != nil {
 			return err
 		}
 	} else {
-		fmt.Fprintf(a.Stderr, "Logs and device tools: run lazymobile in another terminal in this folder, or add --split. It opens on %s.\n", d.Name)
+		fmt.Fprintf(a.Stderr, "Logs and device tools: add --here to run it inside lazymobile, or run lazymobile in another terminal in this folder (or add --split). It opens on %s.\n", d.Name)
 	}
 	return a.runTool(ctx, plan.dir, argv)
 }

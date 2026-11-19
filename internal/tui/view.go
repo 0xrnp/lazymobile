@@ -32,9 +32,14 @@ type layout struct {
 	logs []logBox
 	// buildsHeight is the height of the builds pane under the devices, or zero without one.
 	buildsHeight int
+	// tool and runLog are the panes of the run view, and have no width elsewhere.
+	tool, runLog logBox
 }
 
 func (m *Model) layout() layout {
+	if m.runShown() {
+		return m.runLayout()
+	}
 	l := layout{bodyHeight: max(m.height-2, 0)}
 	split := m.width >= splitWidth && !m.zoomed
 	switch {
@@ -86,6 +91,14 @@ func (m *Model) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = "lazymobile"
+	if m.run != nil {
+		view.WindowTitle = "lazymobile · " + m.runTitle()
+		if m.width >= minWidth && m.height >= minHeight {
+			if cursor, ok := m.runCursor(m.layout()); ok {
+				view.Cursor = cursor
+			}
+		}
+	}
 	return view
 }
 
@@ -114,15 +127,23 @@ func (m *Model) render() string {
 // panes draws the dashboard's panes side by side.
 func (m *Model) panes(l layout) []string {
 	var left, right []string
-	if l.devicesWidth > 0 {
-		if top := l.bodyHeight - l.buildsHeight; top > 0 {
+	if m.runShown() {
+		if l.tool.width > 0 {
+			left = m.toolPane(l.tool.width, l.bodyHeight)
+		}
+		right = m.logLines(l)
+		if right == nil && l.runLog.width > 0 {
+			right = m.runLogPlaceholder(l.runLog)
+		}
+	} else {
+		if top := l.bodyHeight - l.buildsHeight; l.devicesWidth > 0 && top > 0 {
 			left = box("Devices", m.deviceLines(l.devicesWidth-2, top-2), l.devicesWidth, top, m.focus == paneDevices)
 		}
-		if l.buildsHeight > 0 {
+		if l.devicesWidth > 0 && l.buildsHeight > 0 {
 			left = append(left, box(m.buildsTitle(), m.buildLines(l.devicesWidth-2, l.buildsHeight-2), l.devicesWidth, l.buildsHeight, m.focus == paneBuilds)...)
 		}
+		right = m.logLines(l)
 	}
-	right = m.logLines(l)
 	body := make([]string, l.bodyHeight)
 	for i := range body {
 		if i < len(left) {
@@ -146,7 +167,8 @@ func (m *Model) logLines(l layout) []string {
 		}
 		visible = true
 		v := m.logPanes[i]
-		focused := m.focus == paneLogs && m.logIdx == i
+		// In the run view, a log has the keys only while the tool does not.
+		focused := m.focus == paneLogs && m.logIdx == i && !(m.runShown() && m.run.onTool)
 		drawn[i] = box(v.title(b.width, m.position(i)), v.lines(b.width-2, b.height-2, focused), b.width, b.height, focused)
 	}
 	if !visible {

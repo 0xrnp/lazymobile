@@ -16,10 +16,13 @@ const (
 	ctxLogs
 	ctxBuilds
 	ctxEverywhere
+	// ctxRun is the run view of lazymobile run --here. While the tool has the keys, only the keys
+	// with a modifier here are not the tool's.
+	ctxRun
 )
 
 func (c keyContext) String() string {
-	return [...]string{"Devices", "Logs", "Builds", "Everywhere"}[c]
+	return [...]string{"Devices", "Logs", "Builds", "Everywhere", "Run"}[c]
 }
 
 // keyAction is one thing a key does. The table below is the one place that says what the keys are:
@@ -249,6 +252,45 @@ var keyTable = []keyAction{
 		}},
 	{id: "keys", ctx: ctxEverywhere, keys: []string{"?"}, show: "?", desc: "This menu", footer: say("keys")},
 	{id: "quit", ctx: ctxEverywhere, keys: []string{"q", "ctrl+c"}, show: "q", desc: "Quit (simulators and emulators keep running)", footer: say("quit")},
+
+	// The run view.
+	{id: "run_switch", ctx: ctxRun, keys: []string{"ctrl+]"}, show: "ctrl+]", desc: "The run or the full dashboard; the tool keeps running",
+		footer: func(m *Model) string {
+			if m.run == nil {
+				return ""
+			}
+			if m.runShown() {
+				return "dashboard"
+			}
+			return "back to " + m.runTitle()
+		}, when: needsRun},
+	{id: "run_focus", ctx: ctxRun, keys: []string{"ctrl+o"}, show: "ctrl+o", desc: "Give the keys to the tool or to its log",
+		footer: func(m *Model) string {
+			if m.run != nil && m.run.onTool {
+				return "log"
+			}
+			return ""
+		}, when: needsRun},
+	{id: "run_back", ctx: ctxRun, keys: []string{"esc"}, show: "esc", desc: "From the log, give the keys back to the tool",
+		footer: func(m *Model) string { return "back to " + m.runTitle() }, when: needsRun},
+	{id: "run_scroll", ctx: ctxRun, keys: []string{"shift+pgup", "shift+pgdown", "shift+up", "shift+down"}, show: "shift+pgup",
+		desc: "Scroll back through the tool's output; the wheel does too", footer: say("scroll"), when: needsRun},
+	{id: "run_again", ctx: ctxRun, keys: []string{"enter"}, show: "enter", desc: "Run the tool again once it has ended",
+		footer: say("run again"), when: func(m *Model) string {
+			if why := needsRun(m); why != "" {
+				return why
+			}
+			if !m.run.ended {
+				return m.runTitle() + " is running"
+			}
+			return ""
+		}},
+	{id: "run_pick", ctx: ctxRun, keys: []string{"l"}, show: "l", desc: "From the log: pick the app, which opens by itself next time",
+		footer: say("pick the app"), when: needsRun},
+	{id: "run_help", ctx: ctxRun, keys: []string{"?"}, show: "?", desc: "From the log, or once the tool ended: this menu",
+		footer: say("keys"), when: needsRun},
+	{id: "run_quit", ctx: ctxRun, keys: []string{"q", "ctrl+c"}, show: "q", desc: "From the log, or once the tool ended: quit (asks first)",
+		footer: say("quit"), when: needsRun},
 }
 
 // keyByID is the action with this id.
@@ -264,6 +306,9 @@ func keyByID(id string) *keyAction {
 // footerKeys say which actions the hints under the dashboard show, in order, for what has the
 // focus.
 func (m *Model) footerKeys() []string {
+	if m.runShown() {
+		return m.runFooterKeys()
+	}
 	var ids []string
 	switch {
 	case m.focusOnLog() && m.focusedLogOpen():
@@ -288,6 +333,10 @@ func (m *Model) footerKeys() []string {
 		ids = []string{"build_load", "build_install", "build_open", "build_new", "build_cancel", "build_refresh", "tab"}
 	default:
 		ids = []string{"boot", "shutdown", "logs", "all_logs", "new", "erase", "delete", "copyid", "wifi", "refresh"}
+	}
+	if m.run != nil {
+		// The way back to the tool comes first, so it is never left out for lack of room.
+		ids = append([]string{"run_switch"}, ids...)
 	}
 	return append(ids, "keys", "quit")
 }

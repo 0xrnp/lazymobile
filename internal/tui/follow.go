@@ -60,7 +60,12 @@ func (m *Model) followRun() tea.Cmd {
 		m.setNote("Following the run on "+d.Name, false)
 		return nil
 	case app == "" || !d.Ready() || (d.Platform == device.IOS && d.Kind == device.Physical):
-		m.setNote("Following the run on "+d.Name+": press l and pick the app to see its log", false)
+		how := "press l and pick the app to see its log"
+		if m.runShown() {
+			// In the run view, l is the tool's until the log has the keys.
+			how = "ctrl+o, then l, to pick the app and see its log"
+		}
+		m.setNote("Following the run on "+d.Name+": "+how, false)
 		return nil
 	}
 	mode := logs.System

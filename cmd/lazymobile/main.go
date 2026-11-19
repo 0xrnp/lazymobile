@@ -69,17 +69,11 @@ func main() {
 		Stdout:    os.Stdout,
 		Stderr:    os.Stderr,
 		Dashboard: func(ctx context.Context, m *mobile.Manager) error {
-			// A nil interface, not a nil client, tells the dashboard there is no Expo project.
-			var builds tui.Builds
-			if client, found := project(runner); found {
-				builds = client
-			}
 			folder, _ := os.Getwd()
-			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version, Changelog: lazymobile.Changelog,
-				LatestVersion: func(ctx context.Context) (string, error) {
-					return update.Latest(ctx, update.Options{Store: store, Getenv: os.Getenv})
-				},
-			})
+			return dashboard(ctx, m, runner, store, folder, nil)
+		},
+		Here: func(ctx context.Context, m *mobile.Manager, run cli.HereRun) error {
+			return dashboard(ctx, m, runner, store, run.Folder, &tui.RunSpec{Dir: run.Dir, Argv: run.Argv, Title: run.Title, Device: run.Device})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {
@@ -136,4 +130,19 @@ func pickInTerminal(ctx context.Context, title string, items []cli.PickItem, sta
 		return 0, cli.ErrCancelled
 	}
 	return i, err
+}
+
+// dashboard opens the full-screen interface in folder, on the run view of run when it is not nil.
+func dashboard(ctx context.Context, m *mobile.Manager, runner run.Runner, store state.Store, folder string, spec *tui.RunSpec) error {
+	// A nil interface, not a nil client, tells the dashboard there is no Expo project.
+	var builds tui.Builds
+	if client, found := project(runner); found {
+		builds = client
+	}
+	return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version, Changelog: lazymobile.Changelog,
+		LatestVersion: func(ctx context.Context) (string, error) {
+			return update.Latest(ctx, update.Options{Store: store, Getenv: os.Getenv})
+		},
+		Run: spec,
+	})
 }
