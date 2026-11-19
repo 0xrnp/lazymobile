@@ -176,6 +176,7 @@ func TestCrashesAreMarkedOnEveryStream(t *testing.T) {
 		{"a React Native error on Android", ParseAndroid, "01-02 03:04:05.678  4000  4100 E ReactNativeJS: Error: boom"},
 		{"an iOS uncaught exception", ParseIOS, "2026-11-13 20:56:36.411 E  Runner[30348:6e9c9] *** Terminating app due to uncaught exception 'NSInvalidArgumentException'"},
 		{"an iOS crash type", ParseIOS, "2026-11-13 20:56:36.411 Df ReportCrash[88:1] Exception Type: EXC_BAD_ACCESS (SIGSEGV)"},
+		{"a Swift fatal error", ParseIOS, "2026-11-20 00:10:14.685 Df LMTest[5517:5d4d3a] (libswiftCore.dylib) LMTest/main.swift:34: Fatal error: LMTEST crash on purpose"},
 		{"an app's console output", ParsePlain, "Unhandled JS Exception: undefined is not a function"},
 		{"a React Native invariant", ParsePlain, "Invariant Violation: requireNativeComponent: \"RNSScreen\" was not found"},
 	}

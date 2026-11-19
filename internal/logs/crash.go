@@ -6,11 +6,14 @@ import (
 )
 
 // crashPhrases mark a crash whatever stream they come from: an Android fatal exception or signal,
-// an iOS uncaught exception or crash type, and the errors React Native stops on.
+// an iOS uncaught exception, Swift fatal error or crash type, and the errors React Native stops on.
 var crashPhrases = []string{
 	"FATAL EXCEPTION",
 	"Fatal signal ",
 	"Terminating app due to uncaught exception",
+	// Swift's runtime writes this before it stops the app: a forced unwrap of nil, an index out of
+	// range, or fatalError().
+	"Fatal error: ",
 	"Unhandled JS Exception",
 	"Invariant Violation",
 	"EXC_BAD_ACCESS",

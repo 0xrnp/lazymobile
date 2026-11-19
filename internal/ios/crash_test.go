@@ -70,6 +70,22 @@ Thread 1 crashed:
 	}
 }
 
+// macOS 27.2 sometimes appends a plain-text system profile after the JSON body. Such a report was
+// skipped, so the crash looked missing.
+func TestAReportWithASystemProfileAfterItsBodyIsRead(t *testing.T) {
+	text := ips("309", "com.apple.mobilesafari", crashSim, "now") + `
+
+System Profile:
+Network Service: Wi-Fi, AirPort, en0
+Boot Volume File System Type: apfs
+Model: Mac16,8, BootROM 20457.41.3, proc 12:0:8:4 processors, 24 GB, SMC
+`
+	report, ok := ParseCrashReport([]byte(text), "com.apple.mobilesafari", crashSim)
+	if !ok || !strings.Contains(report.Text, "EXC_CRASH (SIGABRT)") {
+		t.Errorf("read %v, report %+v", ok, report)
+	}
+}
+
 func TestOnlyACrashOfThatAppOnThatSimulatorIsTaken(t *testing.T) {
 	for name, text := range map[string]string{
 		"another app":       ips("309", "com.example.other", crashSim, "now"),

@@ -166,8 +166,9 @@ func ParseCrashReport(data []byte, bundleID, udid string) (device.CrashReport, b
 	if json.Unmarshal(first, &header) != nil || header.BugType != crashBugType || header.BundleID != bundleID {
 		return device.CrashReport{}, false
 	}
+	// Decode, not Unmarshal: some reports carry a plain-text system profile after the JSON body.
 	var body ipsBody
-	if json.Unmarshal(rest, &body) != nil || body.CoalitionName != simulatorCoalition+udid {
+	if json.NewDecoder(bytes.NewReader(rest)).Decode(&body) != nil || body.CoalitionName != simulatorCoalition+udid {
 		return device.CrashReport{}, false
 	}
 	return device.CrashReport{App: bundleID, When: body.CaptureTime, Text: crashText(header, body)}, true

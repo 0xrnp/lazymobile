@@ -40,6 +40,8 @@ them, and the dashboard shows what is new once after an upgrade.
   plain request to GitHub's public release list that carries nothing about you. Set
   `LAZYMOBILE_NO_UPDATE_CHECK=1` to turn it off (#41)
 - A simulator's log no longer shows the entries launchd and `log` write about reading it (#44)
+- A Swift fatal error (a forced unwrap of nil, an index out of range, `fatalError()`) is marked as
+  a crash in an iOS log, so `e` jumps to it and `crashes_only` keeps it
 - Building from source needs Go 1.27.4 or newer
 
 ## 0.4.0 - 2026-11-17
