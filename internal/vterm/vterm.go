@@ -28,6 +28,8 @@ const (
 	// drainWait is how long output is still read after the program ended. A program that left a
 	// child holding the terminal open would otherwise keep the session from ending.
 	drainWait = time.Second
+	// killWait is how long Stop waits for what it killed to be gone.
+	killWait = 2 * time.Second
 	// maxPending is how much typed input waits for a program that is not reading it. More is dropped.
 	maxPending = 1 << 20
 )
@@ -286,14 +288,22 @@ func (s *Session) Stop() {
 			defer close(s.reaped)
 			// The group is the program and what it started. Its id is not given to another process
 			// while any of them lives, so looking it up and killing it name the same processes.
-			deadline := time.Now().Add(StopGrace)
-			for time.Now().Before(deadline) {
-				if syscall.Kill(group, 0) != nil {
-					return
+			gone := func(within time.Duration) bool {
+				deadline := time.Now().Add(within)
+				for time.Now().Before(deadline) {
+					if syscall.Kill(group, 0) != nil {
+						return true
+					}
+					time.Sleep(50 * time.Millisecond)
 				}
-				time.Sleep(50 * time.Millisecond)
+				return false
+			}
+			if gone(StopGrace) {
+				return
 			}
 			_ = syscall.Kill(group, syscall.SIGKILL)
+			// A kill takes effect a moment after it is sent, so Wait returns once they are gone.
+			gone(killWait)
 		}()
 	})
 }
