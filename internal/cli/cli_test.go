@@ -117,6 +117,7 @@ func TestUsageMistakesExitWith2(t *testing.T) {
 		"missing device":           {"boot"},
 		"two devices":              {"shutdown", "a", "b"},
 		"list with an argument":    {"list", "extra"},
+		"mcp with an argument":     {"mcp", "extra"},
 		"install without a path":   {"install", "iPhone 16"},
 		"unknown log level":        {"logs", "iPhone 16 Pro", "--level", "loud"},
 		"dashboard with a command": {"--no-window", "frobnicate"},
