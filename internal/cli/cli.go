@@ -70,6 +70,7 @@ Usage:
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
   lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator or an Android device. --save never replaces a file
   lazymobile report <device> <app-id> [--out <folder>] [--since 5m] [--lines 200] [--json]   save a bug report in a new folder: a screenshot, the app's last log lines, its latest crash report, and the device and app version. Never replaces a folder
+  lazymobile changelog [<version>] [--all] [--json]   what changed: this version's notes, one version's, or all of them
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
@@ -115,6 +116,8 @@ type App struct {
 	Actions func() ([]actions.Action, error)
 	// State remembers app ids between runs. The zero Store remembers nothing.
 	State state.Store
+	// Changelog is the text of CHANGELOG.md, which `changelog` prints.
+	Changelog string
 	// Getwd is the folder `run` looks at. Nil means the current folder.
 	Getwd func() (string, error)
 	// RunTool runs the project's command for `run`, with the terminal. Nil runs it for real.
@@ -295,6 +298,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.crash(ctx, rest)
 	case "report":
 		return a.bugReport(ctx, rest)
+	case "changelog":
+		return a.changelog(rest)
 	case "logs":
 		return a.logs(ctx, rest)
 	case "apps":

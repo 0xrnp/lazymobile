@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
+	"github.com/0xrnp/lazymobile"
 	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/cli"
@@ -60,10 +61,11 @@ func main() {
 	store := state.Store{Path: state.DefaultPath()}
 	manager := mobile.New(runner, options, runtime.GOOS)
 	app := &cli.App{
-		Manager: manager,
-		Version: version,
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
+		Manager:   manager,
+		Version:   version,
+		Changelog: lazymobile.Changelog,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 		Dashboard: func(ctx context.Context, m *mobile.Manager) error {
 			// A nil interface, not a nil client, tells the dashboard there is no Expo project.
 			var builds tui.Builds
@@ -71,7 +73,7 @@ func main() {
 				builds = client
 			}
 			folder, _ := os.Getwd()
-			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version})
+			return tui.Run(ctx, m, builds, tui.Memory{Store: store, Folder: folder, Version: version, Changelog: lazymobile.Changelog})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {

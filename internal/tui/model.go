@@ -64,8 +64,10 @@ type Backend interface {
 type Memory struct {
 	Store  state.Store
 	Folder string
-	// Version is lazymobile's own version, written in a bug report.
-	Version string
+	// Version is lazymobile's own version, written in a bug report and compared with the last one
+	// seen to show what is new. Changelog is the text of CHANGELOG.md.
+	Version   string
+	Changelog string
 }
 
 const (
@@ -193,6 +195,7 @@ func Run(ctx context.Context, backend Backend, builds Builds, memory Memory) err
 	defer cancel()
 	m := New(ctx, backend, builds)
 	m.memory = memory
+	m.whatsNew()
 	program := tea.NewProgram(m, tea.WithContext(ctx))
 	m.send = program.Send
 	_, err := program.Run()

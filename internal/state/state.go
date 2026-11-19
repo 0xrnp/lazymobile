@@ -36,6 +36,9 @@ type File struct {
 	Views map[string]View `json:"views,omitempty"`
 	// Runs are the device `lazymobile run` last used, by folder.
 	Runs map[string]Run `json:"runs,omitempty"`
+	// SeenVersion is the newest release the dashboard was started with, so what is new is shown
+	// once after an upgrade.
+	SeenVersion string `json:"seen_version,omitempty"`
 }
 
 // Run is the device a folder's app was last run on.

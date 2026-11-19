@@ -38,7 +38,9 @@ a test built from the real output, with names and ids replaced.
    `chore/...`. If you do not have write access, fork the repository first.
 2. Keep one concern per pull request.
 3. Run `make check`. CI runs the same command on Linux and macOS.
-4. Open the pull request against `main`. Its title becomes the commit message and the line in the
+4. If people will notice the change, add a line for it under "Unreleased" in `CHANGELOG.md`. The
+   program has that file built in, for `lazymobile changelog` and for what is new after an upgrade.
+5. Open the pull request against `main`. Its title becomes the commit message and the line in the
    release notes, so write it as a short sentence in the imperative, like the recent history:
    "Show the app picker in the README".
 
@@ -49,7 +51,10 @@ Pull requests are squash merged.
 For the maintainer. Versions follow [semantic versioning](https://semver.org). Before 1.0, a minor
 version may change behaviour.
 
-1. `main` is green in CI.
+1. `main` is green in CI, and `CHANGELOG.md` has the version: rename "Unreleased" to
+   `## 0.5.0 - 2026-12-01` (the version and the day), add a new empty "Unreleased" above it, and
+   commit. The tag and the file must agree, since the dashboard shows the notes of the version it
+   was started with.
 2. Tag it and push the tag:
 
    ```sh

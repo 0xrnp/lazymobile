@@ -47,6 +47,8 @@ Every key, with `?`:
 - Connect Android phones over Wi-Fi (pairing code or address).
 - The latest crash report of an app, on a simulator or an Android emulator or phone, readable in the
   dashboard (`o`, then the app) or with `lazymobile crash`, and saved to a file with `--save`.
+- What changed: `lazymobile changelog` prints the notes of this version, and the dashboard shows
+  what is new once after an upgrade. The notes are built in, so reading them needs no network.
 - A bug report in one command, `lazymobile report`: a new folder with a screenshot, the app's last
   log lines, its latest crash report, and the device and app version, ready to attach to a ticket.
 - Live logs: filter by app, level and text. An Android app is followed across restarts. Open as
@@ -87,6 +89,7 @@ Early release. What has been run, and what has not:
 | Launching, restarting and stopping an app | A real iOS simulator (Xcode 27.2) and a real Android 16 emulator, from the commands. An app that is not installed was refused on both. Not run: an iPhone or an Android phone, other Xcode or Android versions, the dashboard key in a real terminal |
 | `--json` failures and results | The real program on macOS: a failure, a usage mistake, `id`, and `boot` and `shutdown` of a real simulator. The other commands, and `logs --json` ending in a failure, only with fake tools |
 | `logs --tail` and `--since` | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a): the last lines, a time window, one app and a level, with the command ending by itself. An iPhone is refused (it keeps no history). Not run: an Android phone, an app crash in the window |
+| What is new (`changelog`) | The real program built on macOS: `lazymobile changelog`, with a version and with `--all --json`, and the dashboard in tmux with a build whose notes had a 0.5.0 entry and a saved last version of 0.4.0: the notes opened over the dashboard and the version was saved. Not run: a real upgrade from an installed release, and a second start (tested only with a fake dashboard) |
 | Bug report (`report`) | A real iOS 27.2 simulator (Settings app) and a real Android 16 emulator (Settings app): a new folder with a screenshot, the last log lines, a crash report when there was one, and a summary. Not run: an app you built, an Android phone, a crash report on the simulator, and the app version of an installed app (the Settings apps are not in the installed list). An iPhone is refused. Found on the way: a log read within seconds of launching an app came back empty on the simulator, since the system log is written to disk a little later |
 | Crash reports (`crash`) | A real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a), from the command: a Safari crash on the simulator (from the Mac's crash reports, matched to that simulator), and on the emulator a Java crash of the Clock app and a native crash of the Bluetooth app from the crash buffer. `--save`, `--json`, a file that exists refused, an app with no crash, and an iPhone refused. The dashboard menu (`o`, then the app) on the emulator in a real terminal. The fallback to Android's dropbox, only with saved real output. Not run: an Android phone, a React Native or Flutter app's crash, a crash older than a restart |
 | Crash marking | A real crash of an Android 16 emulator's Settings app (`am crash`), streamed with `logs --json`: the report's lines were marked. The `e` keys in the dashboard, only with fake log lines. Not run: an iOS crash, a React Native error, a native signal. Their patterns come from known log formats |
@@ -326,6 +329,7 @@ lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: re
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile crash "Pixel 9a" com.example.app [--save crash.txt]   # the app's latest crash report
 lazymobile report "Pixel 9a" com.example.app [--out bug] [--since 5m] [--lines 200]   # a folder for a bug report
+lazymobile changelog [0.4.0] [--all] [--json]   # what changed in this version, one version, or all
 lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
