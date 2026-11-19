@@ -74,7 +74,10 @@ Early release. What has been run, and what has not:
 | | Tested |
 | --- | --- |
 | `run` | A real Android emulator (Pixel 9a) with Flutter 3.38.10 and a new Flutter app: `lazymobile run Pixel_9a` started the emulator, ran `flutter run -d emulator-5554`, the app opened, and `r` gave a hot reload. Flutter only was run, on Android |
-| `run` for Expo | A real Expo app with a development client, in a pnpm monorepo, on an iOS 27.2 simulator: `lazymobile run <simulator> -- --no-install` started the simulator and ran the project's own `expo run:ios --device <id>`. The app built, installed and opened on that simulator, and Metro started and reported the app's own error, a workspace package that `pnpm install` had not linked yet. Before macOS Automation was allowed for System Events, Expo stopped at the end with its own `osascript` error (-1743), and lazymobile showed it and exit code 1 as it came. Not run: hot reload, the app past that error, Android, and a physical phone. The project's files were not changed by lazymobile |
+| Dashboard following a run | A real Android 16 emulator (Pixel 9a) and the Flutter app, with the dashboard and `lazymobile run` in two tmux panes: the dashboard selected the device and said to pick the app, I picked it once, and after closing its log, a new run made the dashboard open the app's log by itself with its lines. Not run: an iOS simulator, a phone, two devices at once, and Neovim's terminal |
+| `run --split` | A real iOS 27.2 simulator and a scratch project whose `run` action is an `echo`: the dashboard opened in a new pane to the right in a real Rex terminal, in tmux 3.8 and in Zellij 0.46, each in the project's folder and with the focus left on the tool's pane (not in Zellij, which cannot), and selected the simulator with the "pick the app" note. Also found and fixed: a tmux inside Rex was split as Rex. Not run: with a Flutter or Expo build, WezTerm and Kitty |
+| `run` asking which way and which device | A real terminal (tmux 3.8) and a scratch project with two `run` actions in `.lazymobile.json`: the list appeared, `j` and Enter chose one and ran it on the one running iOS 27.2 simulator, the next run did not ask, `--choose` asked again for the device (two simulators with one name were told apart by id), and Esc stopped without running anything. Not run: with Flutter or Expo, or with a real phone in the list |
+| `run` for Expo | A real Expo app with a development client, in a pnpm monorepo, on an iOS 27.2 simulator: `lazymobile run <simulator> -- --no-install` started the simulator and ran the project's own `expo run:ios --device <id>`. The app built, installed and opened on that simulator, and Metro started and reported the app's own error, a workspace package that `pnpm install` had not linked yet. Before macOS Automation was allowed for System Events, Expo stopped at the end with its own `osascript` error (-1743), and lazymobile showed it and exit code 1 as it came. Later, from a screenshot of the maintainer's own run with `--split` in Rex: Expo ran in one pane (the QR code, its key menu, the bundle at 67%) and the dashboard in the other selected the simulator and showed the app's log lines. Not run: hot reload, the app past its bundling, Android, and a physical phone. The project's files were not changed by lazymobile |
 | `run` for the rest | Not run: an iOS simulator with Flutter, an iPhone, a project with its own `run` action in `.lazymobile.json`, and React Native. Those paths are tested with fake tools only |
 | `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a), from the command and from the dashboard key `D` in a real terminal: `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
@@ -470,7 +473,17 @@ it with the tool you already use. It shows the exact command, then hands the ter
 lazymobile run                       # the device used here last time, else the one that is running
 lazymobile run "Pixel 9a"            # start it if it is off, then run
 lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
+lazymobile run --split               # also open the dashboard in a pane beside this one
+lazymobile run --choose              # ask again which way to run and which device
 ```
+
+In a terminal, `lazymobile run` asks when it cannot tell. Name several ways to run in
+`.lazymobile.json` (actions called `run dev`, `run prod`, or `run:staging`) and it lists them,
+once, and remembers the answer for the folder. With no device named and more than one to choose from,
+it lists the simulators and emulators (the ones running first), and remembers that too. A real phone
+is listed only after the others, and is never remembered. `--profile <name>` picks a way without
+asking. Without a terminal, such as in a script, it never asks: a plain `run` action is used, or it
+stops and says to name one.
 
 - In a Flutter project (a `pubspec.yaml`) it runs `flutter run -d <device>`.
 - In an Expo project (`expo` in `package.json`) it runs the project's own `expo run:ios` or
@@ -484,6 +497,15 @@ lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
   {"actions": [{"name": "run", "command": ["make", "run-dev", "DEVICE={device_id}"]}]}
   ```
 
+- Keep the dashboard in a second terminal or split, in the same folder. When you start a run, it
+  selects that device and opens the log of the app, so the tool's output and the device's log sit
+  side by side. The first time it asks which app (press `l`, then pick it). After that it knows
+  the app for the folder. A phone is selected, but its log is not opened for you. The dashboard
+  only follows a run that began in the last 10 minutes and after you last used it.
+- `--split` opens that dashboard for you, in a new pane to the right of the terminal where you ran
+  it, in the same folder, before your tool starts. It works in Rex, tmux and Zellij. In any other
+  terminal it stops with a message and does not run your tool, so use a second terminal there. A
+  tmux or Zellij inside a Rex terminal is split as tmux or Zellij.
 - With no device named, it uses the simulator or emulator this folder was last run on, else the one
   that is running. With none or several running it asks you to name one. It never picks a real
   phone unless you name it, and never remembers one.

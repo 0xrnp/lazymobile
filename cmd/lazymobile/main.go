@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"context"
+	"errors"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -118,6 +119,21 @@ func main() {
 		},
 		Stdin:       os.Stdin,
 		Interactive: isTerminal(os.Stdin),
+		Terminal:    isTerminal(os.Stdin) && isTerminal(os.Stdout),
+		Pick:        pickInTerminal,
 	}
 	os.Exit(app.Run(context.Background(), os.Args[1:]))
+}
+
+// pickInTerminal shows a list for `lazymobile run` and returns the index chosen.
+func pickInTerminal(ctx context.Context, title string, items []cli.PickItem, start int) (int, error) {
+	list := make([]tui.PickItem, len(items))
+	for i, item := range items {
+		list[i] = tui.PickItem{Label: item.Label, Detail: item.Detail}
+	}
+	i, err := tui.Pick(ctx, title, list, start)
+	if errors.Is(err, tui.ErrCancelled) {
+		return 0, cli.ErrCancelled
+	}
+	return i, err
 }

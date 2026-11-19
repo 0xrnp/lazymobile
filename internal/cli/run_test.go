@@ -258,3 +258,158 @@ func TestAPackageWithoutExpoIsNotRunAsOne(t *testing.T) {
 		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
 	}
 }
+
+func TestRunTellsADashboardInTheFolderWhereItRuns(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	if code := e.run("run", "iPhone 16 Pro"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	got := e.app.State.Load().Runs[e.dir]
+	if got.Last != "ios:simulator:"+runningSim || got.Device != got.Last || got.Started.IsZero() {
+		t.Errorf("remembered %+v", got)
+	}
+	if !strings.Contains(e.errs.String(), "run lazymobile in another terminal in this folder, or add --split. It opens on iPhone 16 Pro") {
+		t.Errorf("the other terminal is not told about: %q", e.errs.String())
+	}
+
+	// A phone is followed by a dashboard, but is not the device used next time.
+	answer := e.fake.Answer
+	e.fake.Answer = func(command string, argv []string, opts run.Options) run.Result {
+		if strings.Contains(command, "devicectl list devices") {
+			if err := os.WriteFile(argv[len(argv)-1], []byte(phoneList), 0o600); err != nil {
+				t.Error(err)
+			}
+			return run.Result{}
+		}
+		return answer(command, argv, opts)
+	}
+	if code := e.run("run", "Someone's iPhone"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	got = e.app.State.Load().Runs[e.dir]
+	if got.Last != "ios:physical:00008000-000000000000001E" || got.Device != "ios:simulator:"+runningSim {
+		t.Errorf("after the phone: %+v", got)
+	}
+}
+
+// profiles gives the app's folder three ways to run it, as a .lazymobile.json would.
+func (e *runEnv) profiles(names ...string) {
+	e.app.Actions = func() ([]actions.Action, error) {
+		var all []actions.Action
+		for _, name := range names {
+			all = append(all, actions.Action{Name: name, Command: []string{"make", strings.ReplaceAll(name, " ", "-"), "DEVICE={device_id}"}, Dir: e.dir})
+		}
+		return all, nil
+	}
+}
+
+// picks makes the app a terminal that answers each question with the next of answers, and records
+// the titles and the lines it was asked about.
+func (e *runEnv) picks(answers ...int) *[][]string {
+	asked := &[][]string{}
+	e.app.Terminal = true
+	e.app.Pick = func(_ context.Context, title string, items []PickItem, _ int) (int, error) {
+		if len(answers) == 0 {
+			return 0, ErrCancelled
+		}
+		line := []string{title}
+		for _, item := range items {
+			line = append(line, item.Label)
+		}
+		*asked = append(*asked, line)
+		answer := answers[0]
+		answers = answers[1:]
+		return answer, nil
+	}
+	return asked
+}
+
+func TestRunAsksWhichProfileOnceAndRemembersIt(t *testing.T) {
+	e := newRunEnv(t)
+	e.profiles("run dev", "run prod")
+	asked := e.picks(1)
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitOK || len(e.ran) != 1 || e.ran[0][1] != "run-prod" {
+		t.Fatalf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+	if len(*asked) != 1 || (*asked)[0][0] != "How to run it?" || len((*asked)[0]) != 3 {
+		t.Errorf("asked %v", *asked)
+	}
+	// The second run in the folder does not ask again, and uses the same profile.
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitOK || len(e.ran) != 2 || e.ran[1][1] != "run-prod" || len(*asked) != 1 {
+		t.Errorf("second run: ran %v, asked %v", e.ran, *asked)
+	}
+	// --choose asks again.
+	e.picks(0)
+	if code := e.run("run", "iPhone 16 Pro", "--yes", "--choose"); code != ExitOK || e.ran[2][1] != "run-dev" {
+		t.Errorf("--choose: ran %v, stderr %q", e.ran, e.errs.String())
+	}
+}
+
+func TestRunProfileNamesOneWithoutAsking(t *testing.T) {
+	e := newRunEnv(t)
+	e.profiles("run dev", "run prod")
+	asked := e.picks()
+	if code := e.run("run", "iPhone 16 Pro", "--yes", "--profile", "run dev"); code != ExitOK || e.ran[0][1] != "run-dev" || len(*asked) != 0 {
+		t.Errorf("code %d, ran %v, asked %v", code, e.ran, *asked)
+	}
+	if code := e.run("run", "iPhone 16 Pro", "--yes", "--profile", "nope"); code != ExitUsage || !strings.Contains(e.errs.String(), "run dev, run prod") {
+		t.Errorf("code %d, stderr %q", code, e.errs.String())
+	}
+}
+
+func TestRunWithSeveralProfilesAndNoTerminalNeedsOneToBeChosen(t *testing.T) {
+	e := newRunEnv(t)
+	e.profiles("run dev", "run prod")
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitUsage || len(e.ran) != 0 || !strings.Contains(e.errs.String(), "--profile") {
+		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+	// A plain "run" is what a project with one has always used, so it still wins without a terminal.
+	e.profiles("run", "run prod")
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitOK || e.ran[0][1] != "run" {
+		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+}
+
+func TestRunProfilesInTheFileWinOverTheBuiltInTool(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	e.profiles("run")
+	asked := e.picks()
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitOK || e.ran[0][0] != "make" || len(*asked) != 0 {
+		t.Errorf("code %d, ran %v, asked %v", code, e.ran, *asked)
+	}
+}
+
+func TestRunAsksWhichDeviceWhenSeveralAreRunningAndRemembersIt(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	asked := e.picks(0)
+	// The fake machine has one running simulator, so also ask with --choose, which always lists them.
+	if code := e.run("run", "--choose"); code != ExitOK || len(e.ran) != 1 {
+		t.Fatalf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+	if len(*asked) != 1 || (*asked)[0][0] != "Run on which device?" || len((*asked)[0]) < 3 {
+		t.Fatalf("asked %v", *asked)
+	}
+	if !strings.Contains(e.ran[0][3], "-") {
+		t.Errorf("ran %v", e.ran[0])
+	}
+	// What was chosen is used next time without asking.
+	again := e.picks()
+	if code := e.run("run"); code != ExitOK || len(*again) != 0 || e.ran[1][3] != e.ran[0][3] {
+		t.Errorf("second run: ran %v, asked %v", e.ran, *again)
+	}
+}
+
+func TestRunStopsWhenTheUserCancelsAList(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	e.picks()
+	if code := e.run("run", "--choose"); code == ExitOK || len(e.ran) != 0 || e.fake.Called("simctl boot") {
+		t.Errorf("code %d, ran %v", code, e.ran)
+	}
+}
+
+func TestRunChooseNeedsATerminal(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	if code := e.run("run", "--choose"); code != ExitUsage || len(e.ran) != 0 {
+		t.Errorf("code %d, ran %v", code, e.ran)
+	}
+}

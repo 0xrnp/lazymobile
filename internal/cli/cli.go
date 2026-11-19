@@ -63,7 +63,7 @@ Usage:
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
-  lazymobile run [<device>] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). Its keys, such as r for hot reload, keep working
+  lazymobile run [<device>] [--profile <name>] [--choose] [--split] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). In a terminal it asks which way to run (the actions named "run", "run dev", "run prod" in .lazymobile.json) and which device when it cannot tell, and remembers the answer for the folder; --choose asks again. Its keys, such as r for hot reload, keep working
   lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
@@ -116,6 +116,15 @@ type App struct {
 	Actions func() ([]actions.Action, error)
 	// State remembers app ids between runs. The zero Store remembers nothing.
 	State state.Store
+	// Getenv reads the environment, to find the multiplexer for `run --split`. Nil means os.Getenv.
+	Getenv func(string) string
+	// Executable is the path of this program, for the dashboard that `run --split` opens. Empty
+	// means the running one.
+	Executable string
+	// Terminal is whether input and output are a terminal, where a list can be shown to choose from.
+	Terminal bool
+	// Pick shows a list in the terminal and returns the index chosen, or ErrCancelled.
+	Pick func(ctx context.Context, title string, items []PickItem, start int) (int, error)
 	// Changelog is the text of CHANGELOG.md, which `changelog` prints.
 	Changelog string
 	// Getwd is the folder `run` looks at. Nil means the current folder.

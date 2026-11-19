@@ -51,9 +51,47 @@ type UpdateCheck struct {
 
 // Run is the device a folder's app was last run on.
 type Run struct {
-	// Device is the key of the device.
+	// Device is the key of the device to use next time: a simulator or an emulator, never a phone.
 	Device  string    `json:"device"`
 	SavedAt time.Time `json:"saved_at"`
+	// Last is the key of the device of the latest run, a phone included, and Started is when that run
+	// began. A dashboard opened in the folder follows it.
+	Last    string    `json:"last,omitempty"`
+	Started time.Time `json:"started,omitzero"`
+	// Profile is the way to run that was chosen last, when there are several.
+	Profile string `json:"profile,omitempty"`
+	// Apps are the app a log was last opened for in the folder, by platform, so a followed run can
+	// open its log without being asked.
+	Apps map[device.Platform]string `json:"apps,omitempty"`
+}
+
+// RememberRunProfile records the way to run the folder's app that was chosen.
+func (f *File) RememberRunProfile(folder, profile string) {
+	if folder == "" || profile == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	run := f.Runs[folder]
+	run.Profile = profile
+	f.Runs[folder] = run
+}
+
+// RememberFolderApp records the app a log was opened for in a folder, on a platform.
+func (f *File) RememberFolderApp(folder string, platform device.Platform, app string) {
+	if folder == "" || app == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	run := f.Runs[folder]
+	if run.Apps == nil {
+		run.Apps = map[device.Platform]string{}
+	}
+	run.Apps[platform] = app
+	f.Runs[folder] = run
 }
 
 // RememberRun records the device a folder's app was run on.
@@ -64,7 +102,9 @@ func (f *File) RememberRun(folder, deviceKey string) {
 	if f.Runs == nil {
 		f.Runs = map[string]Run{}
 	}
-	f.Runs[folder] = Run{Device: deviceKey, SavedAt: time.Now()}
+	run := f.Runs[folder]
+	run.Device, run.SavedAt = deviceKey, time.Now()
+	f.Runs[folder] = run
 }
 
 // View is where the dashboard was left.
@@ -195,6 +235,20 @@ func (f *File) RememberInstall(platform device.Platform, path string) {
 	}
 	paths := slices.DeleteFunc(slices.Clone(f.Installs[platform]), func(old string) bool { return old == path })
 	f.Installs[platform] = append([]string{path}, paths...)
+}
+
+// RememberRunStarted records that a run began on the device with this key, for a dashboard in the
+// folder to follow. It keeps the device remembered for next time.
+func (f *File) RememberRunStarted(folder, deviceKey string, now time.Time) {
+	if folder == "" || deviceKey == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	run := f.Runs[folder]
+	run.Last, run.Started = deviceKey, now
+	f.Runs[folder] = run
 }
 
 // prune keeps the lists short.

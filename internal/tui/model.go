@@ -171,6 +171,10 @@ type Model struct {
 	memory Memory
 	// restored is set once the saved view has been put back, after the first device list.
 	restored bool
+	// runSeen is the start of the newest run that was followed or passed over, and followTicks counts
+	// the ticks between looks for a newer one.
+	runSeen     time.Time
+	followTicks int
 	// saved is the view last written, so an unchanged one is not written again.
 	saved *state.View
 	// appsAsked counts the app lists asked for, so a slow one that is no longer wanted is dropped.
@@ -305,7 +309,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setBuilds(msg)
 	case tickMsg:
 		m.saveView()
-		cmds := []tea.Cmd{tick()}
+		cmds := []tea.Cmd{tick(), m.followRun()}
 		interval := refreshIdle
 		if m.changing() {
 			interval = refreshBusy
@@ -378,6 +382,8 @@ func (m *Model) restore() (tea.Cmd, bool) {
 	if !ok {
 		return nil, true
 	}
+	// A run started since the dashboard was last used here is the one to follow.
+	m.runSeen = view.SavedAt
 	if len(m.listErrs) > 0 {
 		keys := []string{view.Device, logDevice(view.Log)}
 		for i := range view.More {
@@ -483,6 +489,11 @@ func (m *Model) saveView() {
 			f.Views = map[string]state.View{}
 		}
 		f.Views[m.memory.Folder] = view
+		for _, v := range m.logPanes {
+			if v.opened && v.spec.App != "" {
+				f.RememberFolderApp(m.memory.Folder, v.spec.Device.Platform, v.spec.App)
+			}
+		}
 	})
 }
 
