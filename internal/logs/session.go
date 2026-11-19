@@ -312,8 +312,17 @@ var androidTime = regexp.MustCompile(`^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$`)
 // simctl prints when the simulator does not know this computer's user.
 var toolNoise = regexp.MustCompile(`^(\[(connected|disconnected):[^\]]*\]|Exiting\.\.\.|Timestamp\s+Ty\s+Process\[PID:TID\]|getpwuid_r did not find a match for uid \d+)$`)
 
+// simulatorOwnLog matches the entries a simulator writes about the `log` process we start in it:
+// launchd_sim running it as a one-shot service and removing it, and `log` saying how it was run.
+var simulatorOwnLog = regexp.MustCompile(`^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ +\w+ +(` +
+	`launchd_sim\[\d+:[0-9a-f]+\] \[user/\d+/com\.apple\.xpc\.launchd\.oneshot\.0x[0-9a-f]+\.log(?: \[\d+\])?:\]` +
+	`|launchd_sim\[\d+:[0-9a-f]+\] \[user/\d+:\] (?:service inactive|removing service): com\.apple\.xpc\.launchd\.oneshot\.0x[0-9a-f]+\.log$` +
+	`|log\[\d+:[0-9a-f]+\] \[com\.apple\.log:\] log run noninteractively` +
+	`)`)
+
 func isToolNoise(text string) bool {
-	return toolNoise.MatchString(strings.TrimSpace(text))
+	text = strings.TrimSpace(text)
+	return toolNoise.MatchString(text) || simulatorOwnLog.MatchString(text)
 }
 
 type rawLine struct {

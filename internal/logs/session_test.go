@@ -414,3 +414,30 @@ func TestWhatTheLogToolsSayAboutThemselvesIsLeftOut(t *testing.T) {
 		}
 	}
 }
+
+func TestTheSimulatorsLinesAboutOurLogCallAreLeftOut(t *testing.T) {
+	for _, text := range []string{
+		"2026-11-19 12:12:19.313 Df launchd_sim[95815:33b6bc] [user/502/com.apple.xpc.launchd.oneshot.0x10000000.log:] internal event: WILL_SPAWN, code = 0",
+		"2026-11-19 12:12:19.314 Df launchd_sim[95815:33b6bc] [user/502/com.apple.xpc.launchd.oneshot.0x10000000.log [96405]:] xpcproxy_sim spawned with pid 96405",
+		"2026-11-19 12:12:19.328 Df launchd_sim[95815:33b6ab] [user/502/com.apple.xpc.launchd.oneshot.0x10000000.log [96405]:] Successfully spawned log[96405] because one-shot",
+		"2026-11-19 12:12:19.581 Df log[96405:0] [com.apple.log:] log run noninteractively, parent: 95815 (launchd_sim), args: 'log' 'show' '--last' '20s' '--style' 'compact'",
+		"2026-11-19 12:12:24.972 Df launchd_sim[95815:33c113] [user/502/com.apple.xpc.launchd.oneshot.0x10000000.log [96405]:] exited due to exit(0), ran for 5654ms",
+		"2026-11-19 12:12:24.972 Df launchd_sim[95815:33c113] [user/502:] service inactive: com.apple.xpc.launchd.oneshot.0x10000000.log",
+		"2026-11-19 12:12:24.972 Df launchd_sim[95815:33c113] [user/502:] removing service: com.apple.xpc.launchd.oneshot.0x10000000.log",
+	} {
+		if !isToolNoise(text) {
+			t.Errorf("%q was kept", text)
+		}
+	}
+	for _, text := range []string{
+		"2026-11-19 12:12:00.344 Df launchd_sim[95815:33b5c6] [user/502/com.apple.calaccessd [95908]:] job state = running",
+		"2026-11-19 12:12:00.793 Df launchd_sim[95815:33b5bd] [user/502/com.apple.speechmaintenanced:] service state: spawning",
+		"2026-11-19 12:12:00.217 E  launchd_sim[95815:33b5bd] [pid/96199 [com.apple.migra]:] Failed to bootstrap path: path = /x",
+		"2026-11-19 12:12:00.100 Df MyApp[96300:33b5bd] [user/502/com.apple.xpc.launchd.oneshot.0x10000000.log:] my own message",
+		"2026-11-19 12:12:24.972 Df launchd_sim[95815:33c113] [user/502:] removing service: com.example.worker",
+	} {
+		if isToolNoise(text) {
+			t.Errorf("a line the simulator logged for another reason %q was left out", text)
+		}
+	}
+}
