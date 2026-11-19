@@ -73,7 +73,9 @@ Early release. What has been run, and what has not:
 
 | | Tested |
 | --- | --- |
-| `run` | A real Android emulator (Pixel 9a) with Flutter 3.38.10 and a new Flutter app: `lazymobile run Pixel_9a` started the emulator, ran `flutter run -d emulator-5554`, the app opened, and `r` gave a hot reload. Not run: an iOS simulator or an iPhone, a project with its own `run` action in `.lazymobile.json`, or React Native and Expo. Those paths are tested with fake tools only |
+| `run` | A real Android emulator (Pixel 9a) with Flutter 3.38.10 and a new Flutter app: `lazymobile run Pixel_9a` started the emulator, ran `flutter run -d emulator-5554`, the app opened, and `r` gave a hot reload. Flutter only was run, on Android |
+| `run` for Expo | A real Expo app with a development client, in a pnpm monorepo, on an iOS 27.2 simulator: `lazymobile run <simulator> -- --no-install` started the simulator and ran the project's own `expo run:ios --device <id>`. The app built, installed and opened on that simulator, and Metro started and reported the app's own error, a workspace package that `pnpm install` had not linked yet. Before macOS Automation was allowed for System Events, Expo stopped at the end with its own `osascript` error (-1743), and lazymobile showed it and exit code 1 as it came. Not run: hot reload, the app past that error, Android, and a physical phone. The project's files were not changed by lazymobile |
+| `run` for the rest | Not run: an iOS simulator with Flutter, an iPhone, a project with its own `run` action in `.lazymobile.json`, and React Native. Those paths are tested with fake tools only |
 | `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a), from the command and from the dashboard key `D` in a real terminal: `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
@@ -471,6 +473,9 @@ lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
 ```
 
 - In a Flutter project (a `pubspec.yaml`) it runs `flutter run -d <device>`.
+- In an Expo project (`expo` in `package.json`) it runs the project's own `expo run:ios` or
+  `expo run:android` with `--device <device>`. It uses the copy in `node_modules/.bin`, here or in a
+  folder above for a monorepo, and downloads nothing. A flag such as `--no-install` goes after `--`.
 - For anything else, or for your own flavors and env files, add an action named `run` to
   `.lazymobile.json` (see "Project settings"). Its command is shown and needs `--yes`, because the
   file can come from a repository someone else wrote. `{device_id}` is replaced by the device:

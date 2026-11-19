@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -117,8 +118,17 @@ func (a *App) planRun(extra []string) (runPlan, error) {
 			return append([]string{"flutter", "run", "-d", d.TargetID()}, extra...), nil
 		}}, nil
 	}
+	if hasExpo(dir) {
+		bin, err := findBin(dir, "expo")
+		if err != nil {
+			return runPlan{}, err
+		}
+		return runPlan{dir: dir, argv: func(d device.Device) ([]string, error) {
+			return append([]string{bin, "run:" + string(d.Platform), "--device", d.TargetID()}, extra...), nil
+		}}, nil
+	}
 	return runPlan{}, apperr.New(apperr.NotFound, "Cannot tell how to run the app in %s", dir).
-		WithHint("lazymobile run knows Flutter projects (a pubspec.yaml). For another tool, add an action named %q to %s, for example {\"name\": \"run\", \"command\": [\"npx\", \"expo\", \"run:ios\", \"--device\", \"{device_id}\"]}.",
+		WithHint("lazymobile run knows Flutter and Expo projects (a pubspec.yaml, or expo in package.json). For another tool, add an action named %q to %s, for example {\"name\": \"run\", \"command\": [\"npx\", \"expo\", \"run:ios\", \"--device\", \"{device_id}\"]}.",
 			runAction, actions.ConfigFile)
 }
 
@@ -213,4 +223,39 @@ func (a *App) runTool(ctx context.Context, dir string, argv []string) error {
 		return e
 	}
 	return apperr.New(apperr.CommandFailed, "%s could not start: %v", argv[0], err)
+}
+
+// hasExpo reports whether the package.json in dir lists expo as a dependency.
+func hasExpo(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Dependencies    map[string]json.RawMessage `json:"dependencies"`
+		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	}
+	if json.Unmarshal(data, &pkg) != nil {
+		return false
+	}
+	_, inDeps := pkg.Dependencies["expo"]
+	_, inDev := pkg.DevDependencies["expo"]
+	return inDeps || inDev
+}
+
+// findBin is the project's own copy of a tool, in node_modules/.bin of dir or a folder above it (a
+// monorepo keeps one at the top). It is not looked for on the PATH or downloaded, so the project's
+// version runs.
+func findBin(dir, name string) (string, error) {
+	for folder := dir; ; folder = filepath.Dir(folder) {
+		path := filepath.Join(folder, "node_modules", ".bin", name)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+		if folder == filepath.Dir(folder) {
+			break
+		}
+	}
+	return "", apperr.New(apperr.ToolMissing, "%s is not installed in %s", name, dir).
+		WithHint("Install the project's packages first, for example with pnpm install, npm install or yarn.")
 }

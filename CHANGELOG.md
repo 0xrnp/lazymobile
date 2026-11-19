@@ -7,7 +7,8 @@ them, and the dashboard shows what is new once after an upgrade.
 
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
-  tool you already use (`flutter run`, or the action named `run` in `.lazymobile.json`). Its keys,
+  tool you already use (`flutter run`, the project's own `expo run:ios` or `run:android`, or the
+  action named `run` in `.lazymobile.json`). Its keys,
   such as hot reload, keep working. The device is remembered for the folder (#42)
 - `lazymobile report <device> <app-id>`, and "Save a bug report" in the dashboard's app menu: a new
   folder with a screenshot, the app's last log lines, its latest crash report, and the device and

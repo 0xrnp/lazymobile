@@ -123,7 +123,7 @@ func TestRunNeverPicksARealPhoneOnItsOwn(t *testing.T) {
 func TestRunSaysWhatItDoesNotKnow(t *testing.T) {
 	e := newRunEnv(t)
 	if code := e.run("run"); code != ExitFailure || len(e.ran) != 0 ||
-		!strings.Contains(e.errs.String(), "Flutter") || !strings.Contains(e.errs.String(), ".lazymobile.json") {
+		!strings.Contains(e.errs.String(), "Flutter and Expo") || !strings.Contains(e.errs.String(), ".lazymobile.json") {
 		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
 	}
 }
@@ -202,5 +202,59 @@ func TestRunDoesNotRememberARealPhone(t *testing.T) {
 	}
 	if code := e.run("run"); code != ExitOK || e.ran[1][3] != runningSim {
 		t.Errorf("the phone was remembered: code %d, ran %v", code, e.ran)
+	}
+}
+
+// expoProject writes a package.json that lists expo, and the project's own expo tool in the folder
+// above it, as a monorepo keeps it.
+func expoProject(t *testing.T, e *runEnv, withTool bool) string {
+	t.Helper()
+	root := t.TempDir()
+	app := filepath.Join(root, "apps", "shop")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "package.json"), []byte(`{"dependencies": {"expo": "~54.0.0", "react-native": "0.81.0"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "node_modules", ".bin", "expo")
+	if withTool {
+		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.dir = app
+	return bin
+}
+
+func TestRunRunsAnExpoProjectWithItsOwnExpoOnTheDevice(t *testing.T) {
+	e := newRunEnv(t)
+	bin := expoProject(t, e, true)
+	if code := e.run("run", "iPhone 16 Pro", "--", "--no-install"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if len(e.ran) != 1 || strings.Join(e.ran[0], " ") != bin+" run:ios --device "+runningSim+" --no-install" || e.where[0] != e.dir {
+		t.Errorf("ran %v in %v", e.ran, e.where)
+	}
+}
+
+func TestRunDoesNotDownloadExpoWhenTheProjectHasNone(t *testing.T) {
+	e := newRunEnv(t)
+	expoProject(t, e, false)
+	if code := e.run("run", "iPhone 16 Pro"); code != ExitFailure || len(e.ran) != 0 || !strings.Contains(e.errs.String(), "expo is not installed") {
+		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+}
+
+func TestAPackageWithoutExpoIsNotRunAsOne(t *testing.T) {
+	e := newRunEnv(t, "package.json")
+	if err := os.WriteFile(filepath.Join(e.dir, "package.json"), []byte(`{"dependencies": {"react-native": "0.81.0"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("run", "iPhone 16 Pro"); code != ExitFailure || len(e.ran) != 0 || !strings.Contains(e.errs.String(), "Cannot tell") {
+		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
 	}
 }
