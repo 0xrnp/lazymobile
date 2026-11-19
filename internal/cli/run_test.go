@@ -413,3 +413,23 @@ func TestRunChooseNeedsATerminal(t *testing.T) {
 		t.Errorf("code %d, ran %v", code, e.ran)
 	}
 }
+
+func TestRunListsOnlyActionsNamedAsWaysToRun(t *testing.T) {
+	e := newRunEnv(t)
+	// run-tests is how a project names its tests for the R key, not a way to run the app.
+	e.profiles("run-tests", "run dev")
+	asked := e.picks()
+	if code := e.run("run", "iPhone 16 Pro", "--yes"); code != ExitOK || len(*asked) != 0 || e.ran[0][1] != "run-dev" {
+		t.Errorf("code %d, ran %v, asked %v, stderr %q", code, e.ran, *asked, e.errs.String())
+	}
+	for _, name := range []string{"run", "Run", "run dev", "run:prod"} {
+		if !runProfile(name) {
+			t.Errorf("%q is a way to run", name)
+		}
+	}
+	for _, name := range []string{"run-tests", "runner", "rerun", "run_e2e"} {
+		if runProfile(name) {
+			t.Errorf("%q is not a way to run", name)
+		}
+	}
+}

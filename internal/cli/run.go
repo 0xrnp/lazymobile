@@ -20,13 +20,14 @@ import (
 )
 
 // runProfile reports whether an action of .lazymobile.json is a way to run the app: one named "run",
-// or "run dev", "run:dev" or "run-dev". Each is a profile to choose from, such as a flavor.
+// or "run dev" or "run:dev". Each is a profile to choose from, such as a flavor. A name such as
+// "run-tests" is an ordinary action, since projects already use names like that for other things.
 func runProfile(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	if lower == "run" {
 		return true
 	}
-	for _, prefix := range []string{"run ", "run:", "run-"} {
+	for _, prefix := range []string{"run ", "run:"} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
