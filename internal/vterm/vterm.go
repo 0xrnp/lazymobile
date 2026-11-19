@@ -329,6 +329,12 @@ func (s *Session) SendKey(k uv.KeyEvent) {
 	}
 }
 
+// SendRaw sends bytes to the program as they are, for a key the emulator does not encode, such as
+// an arrow with Shift, which a real terminal sends as ESC [ 1 ; 2 D.
+func (s *Session) SendRaw(data []byte) {
+	s.input.push(data)
+}
+
 // SendMouse sends a mouse event, encoded the way the program asked for. Nothing is sent when the
 // program did not ask for the mouse.
 func (s *Session) SendMouse(m uv.MouseEvent) {

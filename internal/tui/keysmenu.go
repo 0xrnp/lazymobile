@@ -243,8 +243,13 @@ func (m *Model) runKey(a *keyAction) tea.Cmd {
 		switch a.id {
 		case "run_again":
 			m.run.onTool, m.run.logZoomed = true, false
-		case "run_pick", "run_back", "run_resize", "run_zoom":
+		case "run_pick", "run_back":
 			m.focusRunLog()
+		case "run_resize", "run_zoom":
+			// With the log hidden there is no line to move, and the log is not brought up to say so.
+			if !m.logHidden() {
+				m.focusRunLog()
+			}
 		}
 		return m.runViewKeyString(a.keys[0])
 	}

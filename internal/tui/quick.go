@@ -36,26 +36,57 @@ type quickAction struct {
 	key   string
 	label func(m *Model, d device.Device) string
 	do    func(m *Model, d device.Device) tea.Cmd
+	// runOnly leaves the item out of the dashboard's menu, since it is about the run view.
+	runOnly bool
+	// stays keeps the menu open, so a key such as + can be pressed again.
+	stays bool
+	// needsLine leaves the item out when there is no line between two panes to move.
+	needsLine bool
 }
 
 var quickActions = []quickAction{
-	{"s", func(*Model, device.Device) string { return "Screenshot: save it here and copy it" },
-		(*Model).screenshotAndCopy},
-	{"r", func(m *Model, d device.Device) string {
+	{key: "s", label: func(*Model, device.Device) string { return "Screenshot: save it here and copy it" },
+		do: (*Model).screenshotAndCopy},
+	{key: "r", label: func(m *Model, d device.Device) string {
 		if m.recording != nil {
 			return "Stop recording " + m.recording.device.Name + ", save and copy the video"
 		}
 		return "Record the screen"
-	}, (*Model).toggleRecording},
-	{"c", func(*Model, device.Device) string {
+	}, do: (*Model).toggleRecording},
+	{key: "c", label: func(*Model, device.Device) string {
 		return fmt.Sprintf("Copy the app's log for AI (the last %d lines)", aiLines)
-	}, (*Model).copyForAI},
-	{"b", func(*Model, device.Device) string { return "Save a bug report: screenshot, log, crash, versions" },
-		(*Model).quickReport},
-	{"o", func(*Model, device.Device) string { return "The app: launch, restart, crash report, permissions" },
-		(*Model).pickAppAction},
-	{"t", func(*Model, device.Device) string { return "Open a link in the app" }, (*Model).openLink},
-	{"m", func(*Model, device.Device) string { return "Switch dark and light mode" }, (*Model).toggleAppearance},
+	}, do: (*Model).copyForAI},
+	{key: "b", label: func(*Model, device.Device) string { return "Save a bug report: screenshot, log, crash, versions" },
+		do: (*Model).quickReport},
+	{key: "o", label: func(*Model, device.Device) string { return "The app: launch, restart, crash report, permissions" },
+		do: (*Model).pickAppAction},
+	{key: "t", label: func(*Model, device.Device) string { return "Open a link in the app" }, do: (*Model).openLink},
+	{key: "m", label: func(*Model, device.Device) string { return "Switch dark and light mode" }, do: (*Model).toggleAppearance},
+	{key: "l", runOnly: true, label: func(m *Model, _ device.Device) string {
+		switch {
+		case m.logHidden():
+			return "Show the log beside the tool"
+		case m.width < splitWidth:
+			return "Hide the log on wider screens (one pane shows at this width)"
+		}
+		return "Hide the log: the tool gets the whole width"
+	}, do: func(m *Model, _ device.Device) tea.Cmd { return m.toggleLog() }},
+	{key: "+", runOnly: true, stays: true, needsLine: true, label: func(*Model, device.Device) string { return "Wider log (again to go on)" },
+		do: func(m *Model, _ device.Device) tea.Cmd { return m.moveRunLine(resizeStep) }},
+	{key: "-", runOnly: true, stays: true, needsLine: true, label: func(*Model, device.Device) string { return "Narrower log (again to go on)" },
+		do: func(m *Model, _ device.Device) tea.Cmd { return m.moveRunLine(-resizeStep) }},
+}
+
+// quickItems are the items of the quick menu on the dashboard or in the run view.
+func (m *Model) quickItems() []quickAction {
+	var items []quickAction
+	for _, a := range quickActions {
+		if a.runOnly && !m.runShown() || a.needsLine && (m.width < splitWidth || m.logHidden()) {
+			continue
+		}
+		items = append(items, a)
+	}
+	return items
 }
 
 // quickDevice is the device the quick menu acts on: the run's in the run view, the selected one on
@@ -92,17 +123,20 @@ func (m *Model) quickMenu() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	items := make([]string, len(quickActions))
-	for i, a := range quickActions {
+	actions := m.quickItems()
+	items := make([]string, len(actions))
+	for i, a := range actions {
 		items[i] = a.key + "  " + a.label(m, d)
 	}
 	m.modal = &modal{
 		kind: modalChoice, title: "Quick actions · " + d.Name, items: items,
-		onChoose: func(m *Model, index int) tea.Cmd { return quickActions[index].do(m, d) },
+		onChoose: func(m *Model, index int) tea.Cmd { return actions[index].do(m, d) },
 		onKey: func(m *Model, key string, _ int) tea.Cmd {
-			for _, a := range quickActions {
-				if a.key == key {
-					m.modal = nil
+			for _, a := range actions {
+				if a.key == key || key == "=" && a.key == "+" {
+					if !a.stays {
+						m.modal = nil
+					}
 					return a.do(m, d)
 				}
 			}

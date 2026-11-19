@@ -91,7 +91,7 @@ func TestQuickMenuHintIsOnTheFooterWithTheResizeKeys(t *testing.T) {
 	r := startRun(t, memoryIn(t), pixel, pixel)
 	r.wantScreen("ctrl+p quick")
 	r.key(ctrlO)
-	r.wantScreen("ctrl+p quick", "+ - resize")
+	r.wantScreen("ctrl+p quick", "shift+←→ resize")
 	h := start(t, pixel)
 	h.wantScreen("ctrl+p quick")
 }

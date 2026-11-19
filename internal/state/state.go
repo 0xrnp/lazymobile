@@ -66,6 +66,21 @@ type Run struct {
 	// LogShare is how much of the width the log takes beside the tool in lazymobile run --here, in
 	// thousandths, once it was moved. Zero is the default.
 	LogShare int `json:"log_share,omitempty"`
+	// LogHidden is whether the log was hidden beside the tool in lazymobile run --here.
+	LogHidden bool `json:"log_hidden,omitempty"`
+}
+
+// RememberRunLogHidden records whether the log was hidden beside the tool.
+func (f *File) RememberRunLogHidden(folder string, hidden bool) {
+	if folder == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	run := f.Runs[folder]
+	run.LogHidden = hidden
+	f.Runs[folder] = run
 }
 
 // RememberRunSplit records how much of the width the log took beside the tool, in thousandths.

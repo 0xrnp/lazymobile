@@ -100,6 +100,12 @@ type runHarness struct {
 
 func startRun(t *testing.T, memory Memory, d device.Device, devices ...device.Device) *runHarness {
 	t.Helper()
+	return startRunWith(t, memory, nil, d, devices...)
+}
+
+// startRunWith is startRun, with change called on the run's spec before it starts.
+func startRunWith(t *testing.T, memory Memory, change func(*RunSpec), d device.Device, devices ...device.Device) *runHarness {
+	t.Helper()
 	r := &runHarness{}
 	spec := RunSpec{Dir: "/work/app", Argv: []string{"flutter", "run", "-d", d.TargetID()}, Title: "flutter run", Device: d,
 		Start: func(dir string, argv []string, cols, rows int) (ToolSession, error) {
@@ -112,6 +118,9 @@ func startRun(t *testing.T, memory Memory, d device.Device, devices ...device.De
 			r.tools = append(r.tools, tool)
 			return tool, nil
 		}}
+	if change != nil {
+		change(&spec)
+	}
 	backend := &fakeBackend{devices: devices, fail: map[string]error{}}
 	h := &harness{t: t, backend: backend, clock: clockStart}
 	h.m = New(context.Background(), backend, nil)
@@ -582,7 +591,242 @@ func TestRunningAgainFromTheMenuShowsBothPanes(t *testing.T) {
 
 func TestTheHintsSayHowToResizeFromEitherPane(t *testing.T) {
 	r := startRun(t, memoryIn(t), pixel, pixel)
-	r.wantScreen("ctrl+o log, then + - to resize")
+	r.wantScreen("ctrl+o log", "shift+←→ resize")
 	r.key(ctrlO)
-	r.wantScreen("+ - resize", "z full width")
+	r.wantScreen("shift+←→ resize", "z full width")
+}
+
+var (
+	shiftLeft  = tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift}
+	shiftRight = tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift}
+)
+
+func TestShiftArrowsMoveTheLineFromEitherPaneAndNeverReachTheTool(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	// The tool has the keys, and the line moves anyway: the log gets wider by 4 columns a press.
+	r.key(shiftLeft)
+	r.key(shiftLeft)
+	if tool, log := r.paneWidths(); tool != 64 || log != 56 {
+		t.Errorf("after two shift+left: panes %d and %d", tool, log)
+	}
+	r.key(shiftRight)
+	if tool, log := r.paneWidths(); tool != 68 || log != 52 {
+		t.Errorf("after shift+right: panes %d and %d", tool, log)
+	}
+	if got := r.tool().sent(); len(got) != 0 {
+		t.Errorf("the tool got %q", got)
+	}
+	// And from the log's side, with the same result.
+	r.key(ctrlO)
+	r.key(shiftRight)
+	if tool, log := r.paneWidths(); tool != 72 || log != 48 {
+		t.Errorf("from the log: panes %d and %d", tool, log)
+	}
+	// The tool is told the new width of its pane.
+	if cols := r.tool().cols; cols != 70 {
+		t.Errorf("the tool has %d columns", cols)
+	}
+}
+
+func TestHidingTheLogGivesTheToolTheWholeWidthAndIsRemembered(t *testing.T) {
+	memory := memoryIn(t)
+	r := startRun(t, memory, pixel, pixel)
+	r.key(ctrlP)
+	r.wantScreen("l  Hide the log: the tool gets the whole width")
+	r.press("l")
+	if tool, log := r.paneWidths(); tool != 120 || log != 0 {
+		t.Errorf("hidden: panes %d and %d", tool, log)
+	}
+	if cols := r.tool().cols; cols != 118 {
+		t.Errorf("the tool has %d columns", cols)
+	}
+	r.wantNoScreen("Log · Pixel 9a")
+	r.wantScreen("ctrl+o log", "ctrl+p quick")
+	r.wantNoScreen("shift+←→")
+	// The tool keeps the keys, and the arrows have no line to move.
+	r.key(shiftLeft)
+	r.wantScreen("The log is hidden")
+	if tool, _ := r.paneWidths(); tool != 120 {
+		t.Errorf("the tool pane is %d wide", tool)
+	}
+
+	// ctrl+o shows the log by itself, and back.
+	r.key(ctrlO)
+	if tool, log := r.paneWidths(); tool != 0 || log != 120 {
+		t.Errorf("the log by itself: panes %d and %d", tool, log)
+	}
+	r.press("z")
+	r.wantScreen("already takes the whole width")
+	r.key(ctrlO)
+	if tool, _ := r.paneWidths(); tool != 120 {
+		t.Errorf("back on the tool: pane %d", tool)
+	}
+
+	// The next run in the folder opens hidden, until it is shown again.
+	again := startRun(t, memory, pixel, pixel)
+	if tool, log := again.paneWidths(); tool != 120 || log != 0 {
+		t.Errorf("the next run: panes %d and %d", tool, log)
+	}
+	again.key(ctrlP)
+	again.wantScreen("l  Show the log beside the tool")
+	again.press("l")
+	if tool, log := again.paneWidths(); tool != 72 || log != 48 {
+		t.Errorf("shown again: panes %d and %d", tool, log)
+	}
+	third := startRun(t, memory, pixel, pixel)
+	if _, log := third.paneWidths(); log != 48 {
+		t.Errorf("after showing it the next run hides it: log %d", log)
+	}
+}
+
+func TestHidingTheLogFromTheLogSideGoesBackToTheTool(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.key(ctrlO)
+	r.key(ctrlP)
+	r.press("l")
+	if !r.m.run.onTool {
+		t.Error("the log was hidden but the keys stayed on it")
+	}
+}
+
+func TestNoLogStartsHiddenWithoutRemembering(t *testing.T) {
+	memory := memoryIn(t)
+	r := startRunWith(t, memory, func(s *RunSpec) { s.NoLog = true }, pixel, pixel)
+	if tool, log := r.paneWidths(); tool != 120 || log != 0 {
+		t.Errorf("--no-log: panes %d and %d", tool, log)
+	}
+	// The flag is for that run: the folder does not remember it.
+	next := startRun(t, memory, pixel, pixel)
+	if _, log := next.paneWidths(); log != 48 {
+		t.Errorf("the next run has a log of %d columns", log)
+	}
+}
+
+func TestQuickMenuResizesWhileStayingOpenAndTheDashboardHasNoViewItems(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.key(ctrlP)
+	r.wantScreen("+  Wider log", "-  Narrower log")
+	r.press("+", "+", "=")
+	if r.m.modal == nil {
+		t.Fatal("the menu closed")
+	}
+	if tool, log := r.paneWidths(); tool != 60 || log != 60 {
+		t.Errorf("after three +: panes %d and %d", tool, log)
+	}
+	r.press("-")
+	if tool, log := r.paneWidths(); tool != 64 || log != 56 {
+		t.Errorf("after -: panes %d and %d", tool, log)
+	}
+	r.press("esc")
+	if r.m.modal != nil {
+		t.Error("esc did not close the menu")
+	}
+	// The dashboard's menu is about the device only.
+	r.key(ctrlBracket)
+	r.key(ctrlP)
+	r.wantScreen("Quick actions")
+	r.wantNoScreen("Hide the log", "Wider log")
+}
+
+func TestTheToolIsToldItsWidthInEveryModeOfTheRunView(t *testing.T) {
+	r := startRunWith(t, memoryIn(t), func(s *RunSpec) { s.NoLog = true }, pixel, pixel)
+	cols := func() int { return r.tool().cols }
+	// Hidden: the whole width, whether the tool or the log has the keys, and zoom changes nothing.
+	if cols() != 118 {
+		t.Errorf("hidden at 120: %d columns", cols())
+	}
+	r.key(ctrlO)
+	r.press("z")
+	r.key(ctrlO)
+	if cols() != 118 {
+		t.Errorf("hidden after ctrl+o and z: %d columns", cols())
+	}
+	// Narrow, hidden or not, one pane shows and the tool has the width of the screen.
+	r.m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
+	if cols() != 88 {
+		t.Errorf("hidden at 90: %d columns", cols())
+	}
+	r.key(ctrlP)
+	r.wantScreen("Show the log beside the tool")
+	r.press("esc")
+	// Back to a wide screen, the log is shown again by the menu, and the tool gets its pane.
+	r.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	r.key(ctrlP)
+	r.press("l")
+	if cols() != 70 {
+		t.Errorf("shown at 120: %d columns", cols())
+	}
+}
+
+func TestOnANarrowScreenTheMenuSaysOnePaneShowsAlready(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
+	r.key(ctrlP)
+	r.wantScreen("Hide the log on wider screens (one pane shows at this width)")
+	r.wantNoScreen("Wider log")
+}
+
+func TestTheLogMenuSavesWhatWasToggledEvenInANoLogRun(t *testing.T) {
+	memory := memoryIn(t)
+	r := startRunWith(t, memory, func(s *RunSpec) { s.NoLog = true }, pixel, pixel)
+	if memory.Store.Load().Runs[memory.Folder].LogHidden {
+		t.Error("--no-log was remembered")
+	}
+	r.key(ctrlP)
+	r.press("l")
+	if _, log := r.paneWidths(); log != 48 || memory.Store.Load().Runs[memory.Folder].LogHidden {
+		t.Errorf("shown from a --no-log run: log %d, saved hidden %v", log, memory.Store.Load().Runs[memory.Folder].LogHidden)
+	}
+	r.key(ctrlP)
+	r.press("l")
+	if !memory.Store.Load().Runs[memory.Folder].LogHidden {
+		t.Error("hiding was not remembered")
+	}
+}
+
+func TestResizeItemsAreOfferedOnlyWhereThereIsALineToMove(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.key(ctrlP)
+	r.wantScreen("+  Wider log")
+	r.press("esc")
+	r.key(ctrlP)
+	r.press("l")
+	r.key(ctrlP)
+	r.wantScreen("Show the log beside the tool")
+	r.wantNoScreen("Wider log", "Narrower log")
+}
+
+func TestKeysMenuResizeWithTheLogHiddenDoesNotPullUpTheLog(t *testing.T) {
+	r := startRun(t, memoryIn(t), pixel, pixel)
+	r.key(ctrlP)
+	r.press("l")
+	r.chooseInMenu("run_resize")
+	if !r.m.run.onTool {
+		t.Error("the keys moved to the log")
+	}
+	if tool, log := r.paneWidths(); tool != 120 || log != 0 {
+		t.Errorf("panes %d and %d", tool, log)
+	}
+}
+
+func TestAHiddenLogIsSaidAtTheStart(t *testing.T) {
+	r := startRunWith(t, memoryIn(t), func(s *RunSpec) { s.NoLog = true }, pixel, pixel)
+	r.wantScreen("The log is hidden")
+	// Showing it does not wipe a different note.
+	r.m.setNote("something else", true)
+	r.key(ctrlP)
+	r.press("l")
+	r.wantScreen("something else")
+}
+
+func TestTheFollowNoteSaysHowToGetTheHiddenLogBack(t *testing.T) {
+	memory := memoryIn(t)
+	if err := memory.Store.Update(func(f *state.File) {
+		f.RememberRunStarted(memory.Folder, pixel.Key(), clockStart.Add(-time.Second))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := startRunWith(t, memory, func(s *RunSpec) { s.NoLog = true }, pixel, pixel)
+	r.run(r.m.followRun())
+	r.wantScreen("Following the run on Pixel 9a: the log is hidden: ctrl+p, then l, shows it beside the tool")
 }

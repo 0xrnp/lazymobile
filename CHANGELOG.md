@@ -13,7 +13,9 @@ them, and the dashboard shows what is new once after an upgrade.
   answers for the folder (#42)
 - `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
   the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running.
-  Drag the line between the panes, or press `+` and `-` from the log, to resize them (#42)
+  Drag the line between the panes, or press `shift+←` and `shift+→` from either pane, to resize
+  them (these two keys are lazymobile's, so a tool cannot receive them). `--no-log`, or `ctrl+p`
+  then `l`, hides the log so the tool has the whole width (#42)
 - `ctrl+p` opens a quick menu on the dashboard and in the run view: `s` saves a screenshot and copies
   it as a picture to paste into a chat, `r` starts and stops a screen recording and copies the video
   as a file, `c` copies the newest 200 lines of the open log, as its filter shows them, as text to

@@ -30,6 +30,8 @@ type RunSpec struct {
 	// Title names the tool in the pane's border, such as "flutter run".
 	Title  string
 	Device device.Device
+	// NoLog starts with the log hidden, so the tool has the whole width.
+	NoLog bool
 	// Start runs the tool on a terminal of cols by rows. Nil runs it in a pseudo-terminal; tests
 	// give a fake.
 	Start func(dir string, argv []string, cols, rows int) (ToolSession, error)
@@ -78,6 +80,9 @@ type toolRun struct {
 	// the line between the panes is being dragged.
 	logShare  int
 	logZoomed bool
+	// logHidden gives the tool the whole width, as on a narrow screen: ctrl+o shows the log by
+	// itself and back.
+	logHidden bool
 	dragging  bool
 	// grab is where the line was taken, from the log's left border: 0 on it, -1 on the tool's right
 	// border, so a drag moves the line by as much as the mouse.
@@ -98,7 +103,7 @@ type (
 // runKeysOwn are the keys the run view keeps while the tool has the keys. Every other key goes to
 // the tool.
 var runKeysOwn = map[string]bool{
-	"ctrl+]": true, "ctrl+o": true, "ctrl+p": true,
+	"ctrl+]": true, "ctrl+o": true, "ctrl+p": true, "shift+left": true, "shift+right": true,
 	"shift+up": true, "shift+down": true, "shift+pgup": true, "shift+pgdown": true,
 }
 
@@ -107,7 +112,12 @@ var runKeysOwn = map[string]bool{
 func (m *Model) attachRun(spec RunSpec) {
 	m.run = &toolRun{spec: spec, shown: true, onTool: true}
 	if m.memory.Folder != "" {
-		m.run.logShare = m.memory.Store.Load().Runs[m.memory.Folder].LogShare
+		saved := m.memory.Store.Load().Runs[m.memory.Folder]
+		m.run.logShare, m.run.logHidden = saved.LogShare, saved.LogHidden
+	}
+	m.run.logHidden = m.run.logHidden || spec.NoLog
+	if m.run.logHidden {
+		m.setNote("The log is hidden. ctrl+o shows it by itself, ctrl+p then l beside the tool", false)
 	}
 	// The run is followed at the first look, not a tick later.
 	m.followTicks = followEvery - 1
@@ -138,7 +148,7 @@ func (m *Model) runTitle() string {
 // runPaneWidths are the widths of the tool's pane and the log's pane in the run view. Below the
 // split width only one shows, the one with the keys.
 func (m *Model) runPaneWidths() (tool, log int) {
-	if m.width >= splitWidth {
+	if m.width >= splitWidth && !m.logHidden() {
 		if m.run != nil && m.run.logZoomed && !m.run.onTool {
 			return 0, m.width
 		}
@@ -149,6 +159,9 @@ func (m *Model) runPaneWidths() (tool, log int) {
 	}
 	return m.width, 0
 }
+
+// logHidden is whether the run view shows only one pane because the log was hidden.
+func (m *Model) logHidden() bool { return m.run != nil && m.run.logHidden }
 
 // sideBySide are the widths of the tool's pane and the log's pane when both show.
 func (m *Model) sideBySide() (tool, log int) {
@@ -170,6 +183,10 @@ func (m *Model) setLogWidth(log int) {
 // moveRunLine widens the log by step columns, or narrows it with a negative step, and tells the
 // tool its new size.
 func (m *Model) moveRunLine(step int) tea.Cmd {
+	if m.logHidden() {
+		m.setNote("The log is hidden: ctrl+p, then l, shows it beside the tool", false)
+		return nil
+	}
 	if m.width < splitWidth {
 		m.setNote("Only one pane is shown. Widen the terminal to see both", false)
 		return nil
@@ -178,6 +195,25 @@ func (m *Model) moveRunLine(step int) tea.Cmd {
 	_, log := m.sideBySide()
 	m.setLogWidth(log + step)
 	m.saveRunSplit()
+	return m.fitTool()
+}
+
+// toggleLog hides the log, so the tool has the whole width, or shows it beside the tool again. The
+// tool is told its new width, and the folder remembers the choice.
+func (m *Model) toggleLog() tea.Cmd {
+	r := m.run
+	r.logHidden = !r.logHidden
+	r.logZoomed = false
+	if r.logHidden {
+		r.onTool = true
+		m.setNote("The log is hidden. ctrl+o shows it by itself, ctrl+p then l beside the tool", false)
+	} else if strings.HasPrefix(m.note, "The log is hidden") {
+		m.setNote("", false)
+	}
+	if m.memory.Folder != "" {
+		folder, hidden := m.memory.Folder, r.logHidden
+		_ = m.memory.Store.Update(func(f *state.File) { f.RememberRunLogHidden(folder, hidden) })
+	}
 	return m.fitTool()
 }
 
@@ -213,7 +249,7 @@ func (m *Model) runDragEnd() tea.Cmd {
 // same while the dashboard or the log is shown, so switching never makes the tool redraw.
 func (m *Model) toolSize() (cols, rows int) {
 	width := m.width
-	if m.width >= splitWidth {
+	if m.width >= splitWidth && !m.logHidden() {
 		width, _ = m.sideBySide()
 	}
 	return max(width-2, 20), max(m.height-4, 5)
@@ -369,6 +405,10 @@ func (m *Model) runViewKeyString(key string) tea.Cmd {
 		return nil
 	case "ctrl+p":
 		return m.quickMenu()
+	case "shift+left":
+		return m.moveRunLine(resizeStep)
+	case "shift+right":
+		return m.moveRunLine(-resizeStep)
 	case "ctrl+o":
 		if r.onTool {
 			m.focusRunLog()
@@ -417,7 +457,7 @@ func (m *Model) runViewKeyString(key string) tea.Cmd {
 	case "-":
 		return m.moveRunLine(-resizeStep)
 	case "z":
-		if m.width < splitWidth {
+		if m.width < splitWidth || r.logHidden {
 			m.setNote("The log already takes the whole width", false)
 			return nil
 		}
@@ -582,20 +622,28 @@ func (m *Model) runFooterKeys() []string {
 	r := m.run
 	switch {
 	case r.onTool && m.toolRunning():
-		return []string{"run_focus", "run_switch", "run_quick", "run_scroll"}
+		return slices.Concat([]string{"run_focus"}, m.resizeKeys(false), []string{"run_switch", "run_quick", "run_scroll"})
 	case r.onTool:
 		return []string{"run_again", "run_focus", "run_switch", "run_quit"}
 	}
-	// With one pane on the screen there is no line to move.
-	var resize []string
-	if m.width >= splitWidth {
-		resize = []string{"run_resize", "run_zoom"}
-	}
+	resize := m.resizeKeys(true)
 	if m.runLogSlot() < 0 {
 		// The last two are what is kept when the line is too short, so they are the keys and quit.
 		return slices.Concat([]string{"run_pick", "run_back"}, resize, []string{"run_switch", "run_quick", "run_help", "run_quit"})
 	}
 	return slices.Concat([]string{"run_back"}, resize, []string{"run_switch", "run_quick", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"})
+}
+
+// resizeKeys are the hints for moving the line between the panes. With one pane on the screen there
+// is no line to move.
+func (m *Model) resizeKeys(withZoom bool) []string {
+	if m.width < splitWidth || m.logHidden() {
+		return nil
+	}
+	if withZoom {
+		return []string{"run_line", "run_zoom"}
+	}
+	return []string{"run_line"}
 }
 
 func needsRun(m *Model) string {

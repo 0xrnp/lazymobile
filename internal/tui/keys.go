@@ -36,7 +36,9 @@ type keyAction struct {
 	keys []string
 	// show is how the keys are written in the menu.
 	show string
-	desc string
+	// hintKey is how the keys are written in the hints, when keys[0] is not it.
+	hintKey string
+	desc    string
 	// footer is the short label for the hints under the dashboard, or "" to leave the action out.
 	// It is a function because some labels depend on what is open.
 	footer func(m *Model) string
@@ -268,9 +270,6 @@ var keyTable = []keyAction{
 		}, when: needsRun},
 	{id: "run_focus", ctx: ctxRun, keys: []string{"ctrl+o"}, show: "ctrl+o", desc: "Give the keys to the tool or to its log",
 		footer: func(m *Model) string {
-			if m.run != nil && m.run.onTool && m.width >= splitWidth {
-				return "log, then + - to resize"
-			}
 			if m.run != nil && m.run.onTool {
 				return "log"
 			}
@@ -294,8 +293,10 @@ var keyTable = []keyAction{
 		}},
 	{id: "run_pick", ctx: ctxRun, keys: []string{"l"}, show: "l", desc: "From the log: pick the app, which opens by itself next time",
 		footer: say("pick the app"), when: needsRun},
+	{id: "run_line", ctx: ctxRun, keys: []string{"shift+left", "shift+right"}, show: "shift+←→", hintKey: "shift+←→",
+		desc: "Move the line between the panes, from either pane", footer: say("resize"), when: needsRun},
 	{id: "run_resize", ctx: ctxRun, keys: []string{"+", "=", "-"}, show: "+ -", desc: "From the log: widen or narrow it, or drag the line",
-		footer: say("- resize"), when: needsRun},
+		when: needsRun},
 	{id: "run_zoom", ctx: ctxRun, keys: []string{"z"}, show: "z", desc: "From the log: show it at full width, again to undo",
 		footer: say("full width"), when: needsRun},
 	{id: "run_help", ctx: ctxRun, keys: []string{"?"}, show: "?", desc: "From the log, or once the tool ended: this menu",
@@ -366,7 +367,11 @@ func (m *Model) hintsLine(width int) string {
 			continue
 		}
 		if label := a.footer(m); label != "" {
-			parts = append(parts, a.keys[0]+" "+label)
+			key := a.keys[0]
+			if a.hintKey != "" {
+				key = a.hintKey
+			}
+			parts = append(parts, key+" "+label)
 		}
 	}
 	// One column of margin on the left, one so the line does not touch the edge.

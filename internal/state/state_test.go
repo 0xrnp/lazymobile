@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -189,5 +190,32 @@ func TestRunsAreRememberedPerFolderAndKeptShort(t *testing.T) {
 	got := store.Load().Runs
 	if len(got) != maxViews || got["/empty"].Device != "" || got[""].Device != "" {
 		t.Errorf("%d runs kept: %v", len(got), got)
+	}
+}
+
+func TestTheRunSplitAndTheHiddenLogAreRememberedApartAndWithoutLosingTheRest(t *testing.T) {
+	var f File
+	f.RememberRunStarted("/work/app", "emulator-5554", time.Unix(100, 0))
+	f.RememberRunSplit("/work/app", 450)
+	f.RememberRunLogHidden("/work/app", true)
+	run := f.Runs["/work/app"]
+	if run.LogShare != 450 || !run.LogHidden || run.Last != "emulator-5554" {
+		t.Errorf("run = %+v", run)
+	}
+	f.RememberRunLogHidden("/work/app", false)
+	if run := f.Runs["/work/app"]; run.LogShare != 450 || run.LogHidden {
+		t.Errorf("run = %+v", run)
+	}
+	// An empty folder is left alone, and an old file without the fields reads as the defaults.
+	f.RememberRunLogHidden("", true)
+	if len(f.Runs) != 1 {
+		t.Errorf("runs = %v", f.Runs)
+	}
+	var old File
+	if err := json.Unmarshal([]byte(`{"runs":{"/work/app":{"device":"x"}}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if run := old.Runs["/work/app"]; run.LogShare != 0 || run.LogHidden {
+		t.Errorf("old run = %+v", run)
 	}
 }

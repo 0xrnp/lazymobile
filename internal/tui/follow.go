@@ -64,6 +64,9 @@ func (m *Model) followRun() tea.Cmd {
 		if m.runShown() {
 			// In the run view, l is the tool's until the log has the keys.
 			how = "ctrl+o, then l, to pick the app and see its log"
+			if m.logHidden() {
+				how = "the log is hidden: ctrl+p, then l, shows it beside the tool"
+			}
 		}
 		m.setNote("Following the run on "+d.Name+": "+how, false)
 		return nil

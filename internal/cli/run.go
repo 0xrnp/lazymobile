@@ -57,6 +57,8 @@ type HereRun struct {
 	// Title names the tool, such as "flutter run" or "run dev".
 	Title  string
 	Device device.Device
+	// NoLog starts with the log hidden, so the tool has the whole width.
+	NoLog bool
 }
 
 // PickItem is a line of a list the user chooses from.
@@ -78,6 +80,7 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	yes := fs.Bool("yes", false, "")
 	split := fs.Bool("split", false, "")
 	here := fs.Bool("here", false, "")
+	noLog := fs.Bool("no-log", false, "")
 	choose := fs.Bool("choose", false, "")
 	profile := fs.String("profile", "", "")
 	positional, err := parse(fs, own)
@@ -92,6 +95,9 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	}
 	if *here && *split {
 		return usageError{"--here runs the tool inside lazymobile, and --split beside it: use one"}
+	}
+	if *noLog && !*here {
+		return usageError{"--no-log hides the log beside the tool that --here runs: add --here"}
 	}
 	if *here && (!a.Terminal || a.Here == nil) {
 		return usageError{"--here needs a terminal to show the dashboard in"}
@@ -142,7 +148,7 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 		if title == runAction {
 			title = filepath.Base(argv[0])
 		}
-		return a.Here(ctx, a.Manager, HereRun{Dir: plan.dir, Folder: folder, Argv: argv, Title: title, Device: d})
+		return a.Here(ctx, a.Manager, HereRun{Dir: plan.dir, Folder: folder, Argv: argv, Title: title, Device: d, NoLog: *noLog})
 	}
 	if *split {
 		if err := a.openDashboardBeside(ctx, folder); err != nil {

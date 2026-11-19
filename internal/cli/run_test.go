@@ -488,3 +488,28 @@ func TestRunHereNeedsATerminalAndIsNotSplit(t *testing.T) {
 		t.Errorf("something ran: %v", e.ran)
 	}
 }
+
+func TestRunHereNoLogIsPassedOnAndNeedsHere(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	var got []HereRun
+	e.app.Terminal = true
+	e.app.Here = func(_ context.Context, _ *mobile.Manager, run HereRun) error {
+		got = append(got, run)
+		return nil
+	}
+	if code := e.run("run", "iPhone 16", "--here", "--no-log"); code != ExitOK || len(got) != 1 || !got[0].NoLog {
+		t.Fatalf("code %d, stderr %q, here %+v", code, e.errs.String(), got)
+	}
+	got = nil
+	if code := e.run("run", "iPhone 16", "--here"); code != ExitOK || len(got) != 1 || got[0].NoLog {
+		t.Errorf("without --no-log: code %d, here %+v", code, got)
+	}
+	// Without --here there is no log beside the tool to hide, and nothing is booted or run.
+	before := len(e.ran)
+	if code := e.run("run", "iPhone 16", "--no-log"); code != ExitUsage || !strings.Contains(e.errs.String(), "add --here") {
+		t.Errorf("--no-log alone: code %d, stderr %q", code, e.errs.String())
+	}
+	if len(e.ran) != before {
+		t.Errorf("something ran: %v", e.ran)
+	}
+}

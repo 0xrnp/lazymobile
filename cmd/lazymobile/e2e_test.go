@@ -246,6 +246,12 @@ func ctrl(r rune) uv.KeyPressEvent { return uv.KeyPressEvent{Code: r, Mod: uv.Mo
 
 var esc = uv.KeyPressEvent{Code: uv.KeyEscape}
 
+// What a terminal sends for shift+left and shift+right. The test terminal does not encode them.
+const (
+	shiftLeft  = "\x1b[1;2D"
+	shiftRight = "\x1b[1;2C"
+)
+
 // line is the column of the line between the run view's two panes, or -1 when one pane shows.
 func (sc *screen) line() int {
 	top := []rune(sc.row(0))
@@ -275,7 +281,7 @@ func TestE2ERunHereGivesKeysToTheToolAndSaysHowToMove(t *testing.T) {
 	if took := time.Since(began); took > 5*time.Second {
 		t.Errorf("the tool showed after %v", took)
 	}
-	sc.wait(2*time.Second, "ctrl+o log, then + - to resize", "ctrl+] dashboard")
+	sc.wait(2*time.Second, "shift+←→ resize", "ctrl+] dashboard")
 
 	// Keys reach the tool, and how long one takes to show is a bottleneck check.
 	began = time.Now()
@@ -288,11 +294,24 @@ func TestE2ERunHereGivesKeysToTheToolAndSaysHowToMove(t *testing.T) {
 	sc.wait(2*time.Second, "got key [q]", "got key [+]", "got key [z]")
 
 	// The log side says how to resize, and the keys do it.
-	sc.press(ctrl('o'))
-	sc.wait(2*time.Second, "+ - resize", "z full width")
+	// The line moves from the tool's own pane, with a key that never reaches the tool.
 	before := sc.line()
-	sc.press(char('+'), char('+'))
+	sc.s.SendRaw([]byte(shiftLeft + shiftLeft))
 	deadline := time.Now().Add(2 * time.Second)
+	for sc.line() != before-8 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := sc.line(); got != before-8 {
+		t.Errorf("after two shift+left the line is at %d, was %d", got, before)
+	}
+	sc.s.SendRaw([]byte(shiftRight + shiftRight))
+	waitFor(t, 2*time.Second, "the line to come back", func() bool { return sc.line() == before })
+
+	// The log side says how to resize too, and its own keys do it.
+	sc.press(ctrl('o'))
+	sc.wait(2*time.Second, "shift+←→ resize", "z full width")
+	sc.press(char('+'), char('+'))
+	deadline = time.Now().Add(2 * time.Second)
 	for sc.line() != before-8 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -396,12 +415,12 @@ func TestE2EAtEveryWidthTheHintsFitAndOnePaneShowsWhenNarrow(t *testing.T) {
 				t.Errorf("at %d columns the line is at %d", cols, sc.line())
 			}
 			// Resizing is offered only where there is a line to move.
-			if resize := strings.Contains(sc.row(-1), "+ - to resize"); resize == (cols < 100) {
+			if resize := strings.Contains(sc.row(-1), "shift+←→ resize"); resize == (cols < 100) {
 				t.Errorf("the tool's hints at %d columns: %q", cols, sc.row(-1))
 			}
 			sc.press(ctrl('o'))
 			sc.wait(2*time.Second, "esc back to tool.sh")
-			if resize := strings.Contains(sc.row(-1), "+ - resize"); resize == (cols < 100) {
+			if resize := strings.Contains(sc.row(-1), "shift+←→ resize"); resize == (cols < 100) {
 				t.Errorf("the log's hints at %d columns: %q", cols, sc.row(-1))
 			}
 		})
@@ -564,5 +583,52 @@ func TestE2EQuickMenuCopiesTheLogForAI(t *testing.T) {
 		if !strings.Contains(clip, want) {
 			t.Errorf("the clipboard lacks %q:\n%s", want, clip)
 		}
+	}
+}
+
+func TestE2EHidingTheLogGivesTheToolTheWholeWidthAndTheFlagStartsThatWay(t *testing.T) {
+	w := newWorld(t)
+	sc := w.runHere(140, 36)
+	if sc.line() == -1 {
+		t.Fatal("the log should show to begin with")
+	}
+	sc.openQuick()
+	sc.wait(2*time.Second, "Hide the log: the tool gets the whole width")
+	sc.press(char('l'))
+	waitFor(t, 2*time.Second, "the log to go", func() bool { return sc.line() == -1 && !strings.Contains(sc.text(), "Log ·") })
+	// The tool has the whole width: it was told, and the keys still reach it.
+	sc.press(char('k'))
+	sc.wait(2*time.Second, "got key [k]")
+	if strings.Contains(sc.row(-1), "shift+←→") {
+		t.Errorf("a hint for a line that is not there: %q", sc.row(-1))
+	}
+	sc.press(ctrl('o'))
+	sc.wait(2*time.Second, "Log · Pixel Test")
+	sc.press(ctrl('o'))
+	sc.wait(2*time.Second, "fake tool on emulator-5554")
+	sc.press(ctrl(']'), char('q'))
+	sc.wait(2*time.Second, "Stop tool.sh and quit?")
+	sc.press(char('y'))
+	<-sc.s.Done()
+
+	// It is remembered, and the menu brings the log back.
+	again := w.runHere(140, 36)
+	if again.line() != -1 {
+		t.Errorf("the next run shows the log: the line is at %d", again.line())
+	}
+	again.openQuick()
+	again.wait(2*time.Second, "Show the log beside the tool")
+	again.press(char('l'))
+	waitFor(t, 2*time.Second, "the log to come back", func() bool { return again.line() != -1 })
+	again.press(ctrl(']'), char('q'))
+	again.wait(2*time.Second, "quit?")
+	again.press(char('y'))
+	<-again.s.Done()
+
+	// The flag hides it for one run without changing what is remembered.
+	flagged := w.start(140, 36, "run", "Pixel_Test", "--yes", "--here", "--no-log")
+	flagged.wait(10*time.Second, "fake tool on emulator-5554", "running")
+	if flagged.line() != -1 || strings.Contains(flagged.text(), "Log ·") {
+		t.Errorf("--no-log shows the log: the line is at %d", flagged.line())
 	}
 }

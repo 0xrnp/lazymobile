@@ -73,7 +73,7 @@ func main() {
 			return dashboard(ctx, m, runner, store, folder, nil)
 		},
 		Here: func(ctx context.Context, m *mobile.Manager, run cli.HereRun) error {
-			return dashboard(ctx, m, runner, store, run.Folder, &tui.RunSpec{Dir: run.Dir, Argv: run.Argv, Title: run.Title, Device: run.Device})
+			return dashboard(ctx, m, runner, store, run.Folder, &tui.RunSpec{Dir: run.Dir, Argv: run.Argv, Title: run.Title, Device: run.Device, NoLog: run.NoLog})
 		},
 		Builds: func() cli.BuildLister {
 			if client, found := project(runner); found {
