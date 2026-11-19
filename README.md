@@ -450,7 +450,7 @@ it with the tool you already use. It shows the exact command, then hands the ter
 `r` for hot reload and the other keys work as before.
 
 ```sh
-lazymobile run                       # the one simulator or emulator that is running
+lazymobile run                       # the device used here last time, else the one that is running
 lazymobile run "Pixel 9a"            # start it if it is off, then run
 lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
 ```
@@ -464,8 +464,9 @@ lazymobile run "iPhone 17" -- --flavor dev     # flags after -- go to your tool
   {"actions": [{"name": "run", "command": ["make", "run-dev", "DEVICE={device_id}"]}]}
   ```
 
-- With no device named, it uses the one simulator or emulator that is running. With none or
-  several running it asks you to name one. It never picks a real phone unless you name it.
+- With no device named, it uses the simulator or emulator this folder was last run on, else the one
+  that is running. With none or several running it asks you to name one. It never picks a real
+  phone unless you name it, and never remembers one.
 
 ## For agents (MCP)
 

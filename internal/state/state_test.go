@@ -167,3 +167,27 @@ func TestDefaultPathFollowsXDG(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+func TestRunsAreRememberedPerFolderAndKeptShort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := Store{Path: path}
+	if err := store.Update(func(f *File) { f.RememberRun("/work", "ios:simulator:SIM-1") }); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Load().Runs["/work"].Device; got != "ios:simulator:SIM-1" {
+		t.Errorf("got %q", got)
+	}
+	if err := store.Update(func(f *File) {
+		f.RememberRun("", "x")
+		f.RememberRun("/empty", "")
+		for i := range maxViews + 5 {
+			f.RememberRun(fmt.Sprintf("/folder-%d", i), "android:emulator:Pixel")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := store.Load().Runs
+	if len(got) != maxViews || got["/empty"].Device != "" || got[""].Device != "" {
+		t.Errorf("%d runs kept: %v", len(got), got)
+	}
+}

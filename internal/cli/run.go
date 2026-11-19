@@ -15,6 +15,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/mobile"
+	"github.com/0xrnp/lazymobile/internal/state"
 )
 
 // runAction is the name of the action in .lazymobile.json that `lazymobile run` uses before it
@@ -121,21 +122,37 @@ func (a *App) planRun(extra []string) (runPlan, error) {
 			runAction, actions.ConfigFile)
 }
 
-// runDevice is the device that was named, or the one simulator or emulator that is running. A real
-// phone is only used when it is named, so an app never lands on one because it was plugged in.
+// runDevice is the device that was named, else the one this folder was last run on, else the one
+// simulator or emulator that is running. A real phone is only used when it is named, and is not
+// remembered, so an app never lands on one because it was plugged in or used before.
 func (a *App) runDevice(ctx context.Context, plan runPlan, positional []string) (device.Device, error) {
 	if len(positional) == 1 {
-		return a.Manager.Find(ctx, positional[0])
+		d, err := a.Manager.Find(ctx, positional[0])
+		if err == nil {
+			a.rememberRun(plan.dir, d)
+		}
+		return d, err
 	}
 	all, errs := a.Manager.List(ctx)
+	fits := func(d device.Device) bool {
+		return d.Kind != device.Physical && (plan.platform == "" || plan.platform == d.Platform)
+	}
+	last := a.State.Load().Runs[plan.dir].Device
+	for _, d := range all {
+		if d.Key() == last && fits(d) {
+			fmt.Fprintf(a.Stderr, "Using %s, the device this folder was last run on\n", d.Name)
+			return d, nil
+		}
+	}
 	var running []device.Device
 	for _, d := range all {
-		if d.Kind != device.Physical && d.Ready() && (plan.platform == "" || plan.platform == d.Platform) {
+		if fits(d) && d.Ready() {
 			running = append(running, d)
 		}
 	}
 	switch len(running) {
 	case 1:
+		a.rememberRun(plan.dir, running[0])
 		return running[0], nil
 	case 0:
 		e := apperr.New(apperr.NotFound, "No simulator or emulator is running")
@@ -151,6 +168,14 @@ func (a *App) runDevice(ctx context.Context, plan runPlan, positional []string) 
 	}
 	return device.Device{}, apperr.New(apperr.InvalidState, "Several devices are running").
 		WithHint("Name one: lazymobile run <device>. Running: %s", strings.Join(names, ", "))
+}
+
+// rememberRun makes d the device `run` uses next time in folder. A real phone is not remembered.
+func (a *App) rememberRun(folder string, d device.Device) {
+	if d.Kind == device.Physical {
+		return
+	}
+	_ = a.State.Update(func(f *state.File) { f.RememberRun(folder, d.Key()) })
 }
 
 func (a *App) getwd() (string, error) {

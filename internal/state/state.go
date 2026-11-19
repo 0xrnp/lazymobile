@@ -34,6 +34,26 @@ type File struct {
 	Presets map[string][]Preset `json:"presets,omitempty"`
 	// Views are where the dashboard was left, by folder.
 	Views map[string]View `json:"views,omitempty"`
+	// Runs are the device `lazymobile run` last used, by folder.
+	Runs map[string]Run `json:"runs,omitempty"`
+}
+
+// Run is the device a folder's app was last run on.
+type Run struct {
+	// Device is the key of the device.
+	Device  string    `json:"device"`
+	SavedAt time.Time `json:"saved_at"`
+}
+
+// RememberRun records the device a folder's app was run on.
+func (f *File) RememberRun(folder, deviceKey string) {
+	if folder == "" || deviceKey == "" {
+		return
+	}
+	if f.Runs == nil {
+		f.Runs = map[string]Run{}
+	}
+	f.Runs[folder] = Run{Device: deviceKey, SavedAt: time.Now()}
 }
 
 // View is where the dashboard was left.
@@ -183,16 +203,25 @@ func (f *File) prune() {
 			f.Apps[platform] = ids[:maxApps]
 		}
 	}
-	if len(f.Views) <= maxViews {
-		return
+	if len(f.Views) > maxViews {
+		folders := make([]string, 0, len(f.Views))
+		for folder := range f.Views {
+			folders = append(folders, folder)
+		}
+		sort.Slice(folders, func(i, j int) bool { return f.Views[folders[i]].SavedAt.After(f.Views[folders[j]].SavedAt) })
+		for _, folder := range folders[maxViews:] {
+			delete(f.Views, folder)
+		}
 	}
-	folders := make([]string, 0, len(f.Views))
-	for folder := range f.Views {
-		folders = append(folders, folder)
-	}
-	sort.Slice(folders, func(i, j int) bool { return f.Views[folders[i]].SavedAt.After(f.Views[folders[j]].SavedAt) })
-	for _, folder := range folders[maxViews:] {
-		delete(f.Views, folder)
+	if len(f.Runs) > maxViews {
+		folders := make([]string, 0, len(f.Runs))
+		for folder := range f.Runs {
+			folders = append(folders, folder)
+		}
+		sort.Slice(folders, func(i, j int) bool { return f.Runs[folders[i]].SavedAt.After(f.Runs[folders[j]].SavedAt) })
+		for _, folder := range folders[maxViews:] {
+			delete(f.Runs, folder)
+		}
 	}
 }
 

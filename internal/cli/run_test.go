@@ -153,3 +153,54 @@ func TestRunDoesNotStartADeviceBeforeYes(t *testing.T) {
 		t.Errorf("code %d, ran %v", code, e.fake.Calls())
 	}
 }
+
+func TestRunRemembersTheDeviceForNextTimeInThatFolder(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	// Both simulators run, so without a memory the choice would be refused.
+	both := strings.ReplaceAll(simctlList, `"Shutdown"`, `"Booted"`)
+	answer := e.fake.Answer
+	e.fake.Answer = func(command string, argv []string, opts run.Options) run.Result {
+		if strings.Contains(command, "simctl list devices") {
+			return runtest.Out(both)
+		}
+		return answer(command, argv, opts)
+	}
+	if code := e.run("run"); code != ExitFailure {
+		t.Fatalf("with two running and nothing remembered: code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("run", "iPhone 16"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("run"); code != ExitOK || len(e.ran) != 2 || e.ran[1][3] != stoppedSim ||
+		!strings.Contains(e.errs.String(), "last run on") {
+		t.Errorf("the device was not remembered: code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+	// Another folder has its own memory.
+	e.dir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(e.dir, "pubspec.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("run"); code != ExitFailure {
+		t.Errorf("another folder used the memory: code %d, ran %v", code, e.ran)
+	}
+}
+
+func TestRunDoesNotRememberARealPhone(t *testing.T) {
+	e := newRunEnv(t, "pubspec.yaml")
+	answer := e.fake.Answer
+	e.fake.Answer = func(command string, argv []string, opts run.Options) run.Result {
+		if strings.Contains(command, "devicectl list devices") {
+			if err := os.WriteFile(argv[len(argv)-1], []byte(phoneList), 0o600); err != nil {
+				t.Error(err)
+			}
+			return run.Result{}
+		}
+		return answer(command, argv, opts)
+	}
+	if code := e.run("run", "Someone's iPhone"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if code := e.run("run"); code != ExitOK || e.ran[1][3] != runningSim {
+		t.Errorf("the phone was remembered: code %d, ran %v", code, e.ran)
+	}
+}
