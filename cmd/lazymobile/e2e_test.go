@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,7 +104,12 @@ const fakeClipboard = `#!/bin/sh
 // fakeXcrun has no simulators and no phones. devicectl writes its answer to the --json-output file.
 const fakeXcrun = `#!/bin/sh
 case "$1 $2" in
-"simctl list") echo '{"devices":{}}' ;;
+"simctl list")
+  # A test can give the simulators before and after delete unavailable in two files.
+  if [ -f "$FAKE_HOME/sims-before.json" ] && [ ! -f "$FAKE_HOME/sims.deleted" ]; then cat "$FAKE_HOME/sims-before.json"
+  elif [ -f "$FAKE_HOME/sims-after.json" ]; then cat "$FAKE_HOME/sims-after.json"
+  else echo '{"devices":{}}'; fi ;;
+"simctl delete") [ "$3" = unavailable ] && touch "$FAKE_HOME/sims.deleted" ;;
 "devicectl list")
   while [ $# -gt 0 ]; do
     if [ "$1" = "--json-output" ]; then echo '{"result":{"devices":[]}}' > "$2"; fi
@@ -630,5 +636,72 @@ func TestE2EHidingTheLogGivesTheToolTheWholeWidthAndTheFlagStartsThatWay(t *test
 	flagged.wait(10*time.Second, "fake tool on emulator-5554", "running")
 	if flagged.line() != -1 || strings.Contains(flagged.text(), "Log ·") {
 		t.Errorf("--no-log shows the log: the line is at %d", flagged.line())
+	}
+}
+
+func TestE2ETheDashboardShowsSimulatorSizesAndDeletesTheUnavailableOnes(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("simulators are only on a Mac")
+	}
+	w := newWorld(t)
+	usable := `{"udid": "00000000-0000-4000-8000-0000000000A1", "name": "iPhone Test", "state": "Shutdown", "isAvailable": true, "dataPathSize": 7600000000}`
+	orphans := `{"udid": "00000000-0000-4000-8000-0000000000D1", "name": "Old Phone", "state": "Shutdown", "isAvailable": false, "dataPathSize": 1854255104, "availabilityError": "runtime profile not found"},
+	  {"udid": "00000000-0000-4000-8000-0000000000D2", "name": "Old Tablet", "state": "Shutdown", "isAvailable": false, "dataPathSize": 18337792}`
+	w.write(filepath.Join(w.home, "sims-before.json"),
+		`{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-2": [`+usable+`], "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [`+orphans+`]}}`)
+	w.write(filepath.Join(w.home, "sims-after.json"), `{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-2": [`+usable+`]}}`)
+
+	sc := w.start(140, 36)
+	sc.wait(10*time.Second, "iPhone Test", "7.6 GB", "2 simulators Xcode can no longer run use 1.9 GB", "Press U to delete them.")
+	if strings.Contains(sc.text(), "Old Phone") {
+		t.Errorf("an unavailable simulator is in the list:\n%s", sc.text())
+	}
+
+	// The question names them, and no deletes nothing.
+	sc.press(char('U'))
+	sc.wait(2*time.Second, "Old Phone, iOS 27.0, 1.9 GB", "Old Tablet, iOS 27.0, 18 MB", "cannot be had back")
+	sc.press(char('n'))
+	time.Sleep(300 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(w.home, "sims.deleted")); err == nil {
+		t.Fatal("something was deleted after n")
+	}
+
+	sc.press(char('U'), char('y'))
+	sc.wait(10*time.Second, "Deleted 2 unavailable simulators, freed 1.9 GB")
+	waitFor(t, 5*time.Second, "the hint to go", func() bool { return !strings.Contains(sc.text(), "Press U to delete them.") })
+	if _, err := os.Stat(filepath.Join(w.home, "sims.deleted")); err != nil {
+		t.Error("simctl delete unavailable never ran")
+	}
+	sc.wait(2*time.Second, "iPhone Test")
+}
+
+func TestE2EListAndDeleteUnavailableFromTheCommandLine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("simulators are only on a Mac")
+	}
+	w := newWorld(t)
+	w.write(filepath.Join(w.home, "sims-before.json"),
+		`{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-0": [{"udid": "00000000-0000-4000-8000-0000000000D1", "name": "Old Phone", "state": "Shutdown", "isAvailable": false, "dataPathSize": 1854255104}]}}`)
+	w.write(filepath.Join(w.home, "sims-after.json"), `{"devices": {}}`)
+	run := func(args ...string) (string, error) {
+		cmd := exec.Command(built(t), args...)
+		cmd.Dir, cmd.Env = w.project, w.env
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	out, err := run("delete", "--unavailable")
+	if err == nil || !strings.Contains(out, "removes 1 unavailable simulator (1.9 GB)") || !strings.Contains(out, "Old Phone, iOS 27.0, 1.9 GB") {
+		t.Errorf("without --yes: err %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(filepath.Join(w.home, "sims.deleted")); statErr == nil {
+		t.Fatal("something was deleted without --yes")
+	}
+	out, err = run("delete", "--unavailable", "--yes")
+	if err != nil || strings.TrimSpace(out) != "Deleted 1 unavailable simulator, freed 1.9 GB" {
+		t.Errorf("with --yes: err %v\n%s", err, out)
+	}
+	out, err = run("delete", "--unavailable", "--yes")
+	if err != nil || !strings.Contains(out, "No unavailable simulators") {
+		t.Errorf("second time: err %v\n%s", err, out)
 	}
 }

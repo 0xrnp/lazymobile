@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -130,6 +131,18 @@ var keyTable = []keyAction{
 		footer: say("erase"), when: selectedDevice(virtualOnly)},
 	{id: "delete", ctx: ctxDevices, keys: []string{"d"}, show: "d", desc: "Delete a simulator or emulator (asks first)",
 		footer: say("delete"), when: selectedDevice(virtualOnly)},
+	{id: "unavailable", ctx: ctxDevices, keys: []string{"U"}, show: "U", desc: "Delete the simulators Xcode can no longer run (asks first)",
+		footer: func(m *Model) string {
+			if len(m.unavailable) == 0 {
+				return ""
+			}
+			return fmt.Sprintf("remove %d unavailable", len(m.unavailable))
+		}, when: func(m *Model) string {
+			if len(m.unavailable) == 0 {
+				return "There are no unavailable simulators"
+			}
+			return ""
+		}},
 	{id: "uninstall", ctx: ctxDevices, keys: []string{"u"}, show: "u", desc: "Uninstall an app (asks first)",
 		when: selectedDevice(running)},
 	{id: "app", ctx: ctxDevices, keys: []string{"o"}, show: "o", desc: "Launch, restart or stop an app",
@@ -344,7 +357,7 @@ func (m *Model) footerKeys() []string {
 	case m.focus == paneBuilds:
 		ids = []string{"build_load", "build_install", "build_open", "build_new", "build_cancel", "build_refresh", "tab"}
 	default:
-		ids = []string{"boot", "shutdown", "logs", "quick", "all_logs", "new", "erase", "delete", "copyid", "wifi", "refresh"}
+		ids = []string{"boot", "shutdown", "logs", "quick", "all_logs", "new", "erase", "delete", "copyid", "wifi", "refresh", "unavailable"}
 	}
 	if m.run != nil {
 		// The way back to the tool comes first, so it is never left out for lack of room.

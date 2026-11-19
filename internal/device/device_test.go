@@ -100,3 +100,18 @@ func TestOSLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatBytesWritesSizesAsTheFinderDoes(t *testing.T) {
+	tests := map[int64]string{
+		-5: "0 KB", 0: "0 KB", 1: "1 KB", 999: "1 KB", 1_000: "1 KB", 1_001: "2 KB", 340_000: "340 KB",
+		999_999: "1 MB", 1_000_000: "1 MB", 18_337_792: "18 MB", 340_499_999: "340 MB", 999_000_000: "999 MB",
+		1_000_000_000: "1.0 GB", 1_854_255_104: "1.9 GB", 3_700_000_000: "3.7 GB", 2_000_000_000_000: "2.0 TB",
+		// Past a hundred gigabytes the decimal goes, so a size never needs more than seven columns.
+		99_900_000_000: "99.9 GB", 99_960_000_000: "100 GB", 100_600_000_000: "101 GB", 999_400_000_000: "999 GB", 999_600_000_000: "1.0 TB",
+	}
+	for n, want := range tests {
+		if got := FormatBytes(n); got != want {
+			t.Errorf("FormatBytes(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

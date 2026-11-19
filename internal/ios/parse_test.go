@@ -2,6 +2,7 @@ package ios
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/apperr"
@@ -189,5 +190,123 @@ func TestParseDevicectlAppsRejectsUnreadableOutput(t *testing.T) {
 		if _, err := ParseDevicectlApps(text); apperr.CodeOf(err) != apperr.ParseFailed {
 			t.Errorf("ParseDevicectlApps(%q) error = %v, want parse_failed", text, err)
 		}
+	}
+}
+
+// withSize adds the folder size and an unavailable reason, as newer simctl reports them.
+func withSize(entry object, bytes int64, reason string) object {
+	entry["dataPathSize"] = bytes
+	if reason != "" {
+		entry["isAvailable"] = false
+		entry["availabilityError"] = reason
+	}
+	return entry
+}
+
+func sizedFixture() string {
+	return encode(object{"devices": object{
+		runtimePrefix + "iOS-18-2": []object{
+			withSize(sim(udidShutdown, "iPhone 16 Pro", "Shutdown"), 1_854_255_104, ""),
+			sim(udidBooted, "iPhone 16", "Booted"),
+		},
+		runtimePrefix + "iOS-27-0": []object{
+			withSize(sim("00000000-0000-4000-8000-0000000000D1", "Orphan", "Shutdown"), 18_337_792, "runtime profile not found using “System” match policy"),
+			withSize(sim("00000000-0000-4000-8000-0000000000D2", "Orphan Two", "Shutdown"), 1_000, ""),
+		},
+		runtimePrefix + "watchOS-11-2": []object{withSize(sim("00000000-0000-4000-8000-0000000000F1", "Apple Watch", "Shutdown"), 5, "gone")},
+		// Older simctl: an availability string, and no sizes at all.
+		runtimePrefix + "iOS-16-4": []any{
+			object{"udid": "00000000-0000-4000-8000-0000000000E2", "name": "Old Unavailable", "state": "Shutdown", "availability": "(unavailable, runtime profile not found)"},
+		},
+	}})
+}
+
+func TestParseSimctlReadsTheDataSize(t *testing.T) {
+	devices, err := ParseSimctl(sizedFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byName(devices)
+	if got["iPhone 16 Pro"].DataBytes != 1_854_255_104 {
+		t.Errorf("iPhone 16 Pro: %d bytes", got["iPhone 16 Pro"].DataBytes)
+	}
+	// A simctl that does not report sizes leaves it unknown, not zero bytes of data.
+	if got["iPhone 16"].DataBytes != 0 {
+		t.Errorf("iPhone 16: %d bytes", got["iPhone 16"].DataBytes)
+	}
+	if _, listed := got["Orphan"]; listed {
+		t.Error("an unavailable simulator is listed")
+	}
+}
+
+func TestParseUnavailableListsOnlyUnusableIOSSimulatorsWithTheirSizeAndReason(t *testing.T) {
+	list, err := ParseUnavailable(sizedFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Unavailable{}
+	for _, u := range list {
+		byID[u.Name] = u
+	}
+	if len(list) != 3 {
+		t.Fatalf("got %d: %+v", len(list), list)
+	}
+	orphan := byID["Orphan"]
+	if orphan.DataBytes != 18_337_792 || orphan.OSVersion != "27.0" || orphan.Platform != "iOS" || !strings.Contains(orphan.Reason, "runtime profile not found") {
+		t.Errorf("orphan = %+v", orphan)
+	}
+	if old := byID["Old Unavailable"]; old.DataBytes != 0 || old.OSVersion != "16.4" || old.Platform != "iOS" {
+		t.Errorf("old = %+v", old)
+	}
+	// An unusable watch is listed too, since deleting the unavailable ones deletes it, but it is
+	// not an iOS simulator to run.
+	if watch := byID["Apple Watch"]; watch.Platform != "watchOS" || watch.OSVersion != "11.2" || watch.DataBytes != 5 {
+		t.Errorf("watch = %+v", watch)
+	}
+	devices, _ := ParseSimctl(sizedFixture())
+	if _, listed := byName(devices)["Apple Watch"]; listed {
+		t.Error("a watch is in the device list")
+	}
+}
+
+func TestParseUnavailableKeepsEveryPlatformAndRuntimesItDoesNotKnow(t *testing.T) {
+	text := encode(object{"devices": object{
+		runtimePrefix + "tvOS-18-2":  []object{withSize(sim("T1", "Apple TV", "Shutdown"), 7, "gone")},
+		runtimePrefix + "xrOS-2-2":   []object{withSize(sim("V1", "Apple Vision Pro", "Shutdown"), 9, "gone")},
+		"some-future-runtime":        []object{withSize(sim("F1", "Future Thing", "Shutdown"), 11, "gone")},
+		runtimePrefix + "iOS-18-2":   []object{withSize(object{"udid": "N1", "state": "Shutdown", "isAvailable": false}, 13, "gone")},
+		runtimePrefix + "watchOS-11": []object{sim("W1", "Fine Watch", "Shutdown")},
+	}})
+	list, err := ParseUnavailable(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Unavailable{}
+	for _, u := range list {
+		got[u.ID] = u
+	}
+	if len(list) != 4 {
+		t.Fatalf("got %d: %+v", len(list), list)
+	}
+	if got["T1"].Platform != "tvOS" || got["V1"].Platform != "visionOS" || got["V1"].OSVersion != "2.2" {
+		t.Errorf("tv %+v, vision %+v", got["T1"], got["V1"])
+	}
+	// A runtime lazymobile does not know is still listed, without a system.
+	if f := got["F1"]; f.Platform != "" || f.OSVersion != "" || f.Name != "Future Thing" {
+		t.Errorf("future = %+v", f)
+	}
+	// A simulator without a name is named by its id, so it is not deleted unseen.
+	if got["N1"].Name != "N1" {
+		t.Errorf("unnamed = %+v", got["N1"])
+	}
+	// One that can run is not listed.
+	if _, ok := got["W1"]; ok {
+		t.Error("a usable watch is listed")
+	}
+}
+
+func TestParseUnavailableRejectsUnreadableOutput(t *testing.T) {
+	if _, err := ParseUnavailable("not json"); apperr.CodeOf(err) != apperr.ParseFailed {
+		t.Errorf("error = %v", err)
 	}
 }

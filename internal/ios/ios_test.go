@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/apperr"
@@ -793,5 +794,173 @@ func TestPhoneAppThatIsNotRunningSaysSo(t *testing.T) {
 	_, err := client(fake).AppExecutable(context.Background(), iphone, "com.example.app")
 	if apperr.CodeOf(err) != apperr.InvalidState || !strings.Contains(err.Error(), "not running") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+// unavailableSimctl answers `simctl list devices --json` with two unavailable simulators until
+// `simctl delete unavailable` runs, and with none after it, unless deleteFails.
+func unavailableSimctl(deleteFails bool) (*runtest.Fake, *bool) {
+	deleted := false
+	fake := &runtest.Fake{Answer: func(command string, _ []string, _ run.Options) run.Result {
+		switch {
+		case command == "xcrun simctl delete unavailable":
+			if deleteFails {
+				return run.Result{Code: 1, Stderr: "boom"}
+			}
+			deleted = true
+			return run.Result{}
+		case strings.HasPrefix(command, "xcrun simctl list devices"):
+			if deleted {
+				return run.Result{Stdout: encode(object{"devices": object{runtimePrefix + "iOS-18-2": []object{sim(udidBooted, "iPhone 16", "Booted")}}})}
+			}
+			return run.Result{Stdout: sizedFixture()}
+		}
+		return run.Result{Missing: true}
+	}}
+	return fake, &deleted
+}
+
+func TestUnavailableIsWhatTheLatestListingSaw(t *testing.T) {
+	fake, _ := unavailableSimctl(false)
+	c := client(fake)
+	if got := c.Unavailable(); len(got) != 0 {
+		t.Errorf("before any listing: %+v", got)
+	}
+	if _, err := c.ListSimulators(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Unavailable(); len(got) != 3 {
+		t.Errorf("after a listing: %+v", got)
+	}
+	// Asking does not run anything.
+	calls := len(fake.Calls())
+	c.Unavailable()
+	if len(fake.Calls()) != calls {
+		t.Error("Unavailable ran a command")
+	}
+}
+
+func TestDeleteUnavailableRunsOneCallAndReportsWhatWentWithItsSize(t *testing.T) {
+	fake, _ := unavailableSimctl(false)
+	c := client(fake)
+	deleted, err := c.DeleteUnavailable(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var freed int64
+	for _, u := range deleted {
+		freed += u.DataBytes
+	}
+	if len(deleted) != 3 || freed != 18_337_797 {
+		t.Errorf("deleted %+v", deleted)
+	}
+	count := 0
+	for _, call := range fake.Calls() {
+		if call == "xcrun simctl delete unavailable" {
+			count++
+		}
+		if strings.Contains(call, "simctl delete ") && call != "xcrun simctl delete unavailable" {
+			t.Errorf("a simulator was deleted by id: %s", call)
+		}
+	}
+	if count != 1 {
+		t.Errorf("delete unavailable ran %d times", count)
+	}
+	if got := c.Unavailable(); len(got) != 0 {
+		t.Errorf("still listed: %+v", got)
+	}
+}
+
+func TestDeleteUnavailableWithNothingToDeleteRunsNothing(t *testing.T) {
+	fake := &runtest.Fake{Answer: func(command string, _ []string, _ run.Options) run.Result {
+		return run.Result{Stdout: encode(object{"devices": object{runtimePrefix + "iOS-18-2": []object{sim(udidBooted, "iPhone 16", "Booted")}}})}
+	}}
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), nil)
+	if err != nil || len(deleted) != 0 || fake.Called("delete unavailable") {
+		t.Errorf("deleted %v, err %v, calls %v", deleted, err, fake.Calls())
+	}
+}
+
+func TestDeleteUnavailableSaysWhenSimctlFails(t *testing.T) {
+	fake, _ := unavailableSimctl(true)
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), nil)
+	if err == nil || len(deleted) != 0 || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("deleted %v, err %v", deleted, err)
+	}
+}
+
+// scripted answers `simctl list devices --json` with the listings in order, one per call (the last
+// one repeats), and `simctl delete unavailable` with deleteResult.
+func scripted(listings []string, deleteResult run.Result) *runtest.Fake {
+	var mu sync.Mutex
+	next := 0
+	return &runtest.Fake{Answer: func(command string, _ []string, _ run.Options) run.Result {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case command == "xcrun simctl delete unavailable":
+			return deleteResult
+		case strings.HasPrefix(command, "xcrun simctl list devices"):
+			out := listings[min(next, len(listings)-1)]
+			next++
+			if out == "" {
+				return run.Result{Code: 1, Stderr: "simctl is down"}
+			}
+			return run.Result{Stdout: out}
+		}
+		return run.Result{Missing: true}
+	}}
+}
+
+func listingOf(entries ...object) string {
+	return encode(object{"devices": object{runtimePrefix + "iOS-27-0": entries}})
+}
+
+func orphan(id, name string, bytes int64) object {
+	return withSize(sim(id, name, "Shutdown"), bytes, "runtime profile not found")
+}
+
+func TestDeleteUnavailableDeletesNothingWhenThereAreMoreThanWereShown(t *testing.T) {
+	fake := scripted([]string{listingOf(orphan("A", "Shown", 10), orphan("B", "New One", 20))}, run.Result{})
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), []string{"A"})
+	if apperr.CodeOf(err) != apperr.InvalidState || !strings.Contains(err.Error(), "New One") || len(deleted) != 0 {
+		t.Errorf("deleted %v, err %v", deleted, err)
+	}
+	if fake.Called("delete unavailable") {
+		t.Error("simctl deleted them anyway")
+	}
+	// Fewer than were shown is fine: what is deleted is only what was shown or less.
+	fake = scripted([]string{listingOf(orphan("A", "Shown", 10)), listingOf()}, run.Result{})
+	deleted, err = client(fake).DeleteUnavailable(context.Background(), []string{"A", "Gone Already"})
+	if err != nil || len(deleted) != 1 || deleted[0].ID != "A" {
+		t.Errorf("deleted %v, err %v", deleted, err)
+	}
+}
+
+func TestOnlyASimulatorThatIsNoLongerListedCountsAsDeleted(t *testing.T) {
+	// B is still listed afterwards, now usable (its runtime came back), and C is still unavailable.
+	after := listingOf(sim("B", "Back", "Shutdown"), orphan("C", "Stuck", 30))
+	fake := scripted([]string{listingOf(orphan("A", "Gone", 10), orphan("B", "Back", 20), orphan("C", "Stuck", 30)), after}, run.Result{})
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), nil)
+	if err != nil || len(deleted) != 1 || deleted[0].ID != "A" {
+		t.Errorf("deleted %+v, err %v", deleted, err)
+	}
+}
+
+func TestDeleteUnavailableSaysSoWhenItCannotCheckAfterwards(t *testing.T) {
+	// The second listing fails: nothing is claimed to be deleted.
+	fake := scripted([]string{listingOf(orphan("A", "One", 10)), ""}, run.Result{})
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), nil)
+	if err == nil || len(deleted) != 0 || !strings.Contains(err.Error(), "could not be read afterwards") {
+		t.Errorf("deleted %+v, err %v", deleted, err)
+	}
+}
+
+func TestDeleteUnavailableReportsWhatWentBeforeSimctlFailed(t *testing.T) {
+	fake := scripted([]string{listingOf(orphan("A", "Went", 10), orphan("B", "Stayed", 20)), listingOf(orphan("B", "Stayed", 20))},
+		run.Result{Code: 1, Stderr: "disk error"})
+	deleted, err := client(fake).DeleteUnavailable(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "disk error") || len(deleted) != 1 || deleted[0].ID != "A" {
+		t.Errorf("deleted %+v, err %v", deleted, err)
 	}
 }

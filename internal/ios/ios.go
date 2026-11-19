@@ -38,6 +38,12 @@ type Client struct {
 	// CrashDir is where the Mac keeps crash reports, simulators' included. Empty means
 	// ~/Library/Logs/DiagnosticReports. Tests replace it.
 	CrashDir string
+
+	mu sync.Mutex
+	// unavailable are the simulators the latest simulator listing could not use, and listed all the
+	// simulators it named, of every platform.
+	unavailable []Unavailable
+	listed      map[string]bool
 }
 
 // New returns a client that runs the real tools.
@@ -55,7 +61,72 @@ func (c *Client) ListSimulators(ctx context.Context) ([]device.Device, error) {
 	if err := apperr.FromResult(res, argv, notInstalled); err != nil {
 		return nil, err
 	}
-	return ParseSimctl(res.Stdout)
+	l, err := parseSimctl(res.Stdout)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.unavailable, c.listed = l.unavailable, l.ids
+	c.mu.Unlock()
+	return l.devices, nil
+}
+
+// Unavailable are the simulators that the latest listing found unusable, of every platform, with the
+// disk each uses. It does not run anything: it is what ListSimulators saw last, so the dashboard's
+// refreshes keep it current without a second simctl call.
+func (c *Client) Unavailable() []Unavailable {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Unavailable(nil), c.unavailable...)
+}
+
+// DeleteUnavailable deletes every simulator simctl cannot use, which frees their data. It is one
+// simctl call, and what it deletes is every unavailable simulator of every platform, not only the
+// iOS ones. So confirmed is the ids the user was shown, and nothing is deleted if there are more
+// unavailable now: the caller lists again and asks again. A nil confirmed skips that check.
+//
+// It returns the simulators that are gone, with the disk they had used. A simulator counts as gone
+// only if the listing afterwards does not have it at all, and that listing is read again after a
+// failed delete too, since simctl may have deleted some before it failed.
+func (c *Client) DeleteUnavailable(ctx context.Context, confirmed []string) ([]Unavailable, error) {
+	if _, err := c.ListSimulators(ctx); err != nil {
+		return nil, err
+	}
+	before := c.Unavailable()
+	if len(before) == 0 {
+		return nil, nil
+	}
+	if confirmed != nil {
+		shown := map[string]bool{}
+		for _, id := range confirmed {
+			shown[id] = true
+		}
+		for _, u := range before {
+			if !shown[u.ID] {
+				return nil, apperr.New(apperr.InvalidState, "The simulators that cannot run changed since they were listed (%s is new)", u.Name).
+					WithHint("Nothing was deleted. Look at the list again.")
+			}
+		}
+	}
+	argv := []string{"xcrun", "simctl", "delete", "unavailable"}
+	deleteErr := actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, deleteAction)
+	if _, err := c.ListSimulators(ctx); err != nil {
+		if deleteErr != nil {
+			return nil, deleteErr
+		}
+		return nil, apperr.New(apperr.CommandFailed, "simctl deleted the unavailable simulators, but the list could not be read afterwards").
+			WithHint("Refresh to see what is left.")
+	}
+	c.mu.Lock()
+	still := c.listed
+	c.mu.Unlock()
+	var deleted []Unavailable
+	for _, u := range before {
+		if !still[u.ID] {
+			deleted = append(deleted, u)
+		}
+	}
+	return deleted, deleteErr
 }
 
 // devicectl runs `xcrun devicectl <args>` and returns the JSON it wrote. devicectl only writes JSON

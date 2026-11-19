@@ -201,7 +201,7 @@ func Combine(names []string, entries []ADBEntry, facts map[string]Fact, info fun
 		d := device.Device{
 			ID: name, Name: avd.DisplayName, Platform: device.Android, Kind: device.Emulator,
 			State: device.Shutdown, OSVersion: ReleaseForAPI(avd.API), Model: avd.DeviceType,
-			Transport: "local", Source: "emulator",
+			Transport: "local", Source: "emulator", DataBytes: avd.DataBytes,
 		}
 		if d.Name == "" {
 			d.Name = strings.ReplaceAll(name, "_", " ")

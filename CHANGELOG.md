@@ -56,6 +56,10 @@ them, and the dashboard shows what is new once after an upgrade.
 - Switch between dark and light mode
 - Set the location and tidy the status bar
 - Grant or revoke an app's permission and clear its data
+- The disk each simulator's or emulator's data uses, in a column of the devices list, in
+  `lazymobile list` and in its JSON. Simulators Xcode can no longer run (an update removed their runtime) are counted, and
+  `U` in the dashboard or `lazymobile delete --unavailable` deletes them, after listing them with
+  their sizes and asking
 
 ### Logs
 - Mark crashes and jump between errors with `e` and `E` (#13)

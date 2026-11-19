@@ -120,6 +120,46 @@ func TestListCombinesAVDsRunningEmulatorsAndPhones(t *testing.T) {
 	}
 }
 
+func TestAnEmulatorShowsTheDiskItsFolderUses(t *testing.T) {
+	opts := sdk(t, "emulator", "adb")
+	avd(t, opts, "Pixel_9", "avd.ini.displayname=Pixel 9\n")
+	avd(t, opts, "Empty", "avd.ini.displayname=Empty\n")
+	dir := filepath.Join(opts.AVDDir(), "Pixel_9.avd")
+	// Two real files, one in a folder as the quick-boot snapshot is, and one sparse file that is a
+	// gigabyte long and uses almost nothing.
+	write(t, filepath.Join(dir, "userdata.img"), strings.Repeat("x", 200_000), 0o644)
+	write(t, filepath.Join(dir, "snapshots", "default_boot", "ram.bin"), strings.Repeat("y", 300_000), 0o644)
+	sparse, err := os.Create(filepath.Join(dir, "sparse.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sparse.Truncate(1 << 30); err != nil {
+		t.Fatal(err)
+	}
+	_ = sparse.Close()
+
+	fake := runtest.Table(map[string]run.Result{
+		"-list-avds": runtest.Out("Pixel_9\nEmpty\n"),
+		"devices -l": runtest.Out("List of devices attached\n"),
+	})
+	devices, errs := New(fake, opts).List(context.Background())
+	if len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	// Blocks are rounded up, and the files hold 500,000 bytes of data plus the small config.
+	got := find(t, devices, "Pixel_9").DataBytes
+	if got < 500_000 || got > 500_000+64*1024 {
+		t.Errorf("DataBytes = %d, want about 500 KB (the sparse gigabyte must not count)", got)
+	}
+	if empty := find(t, devices, "Empty").DataBytes; empty > 64*1024 {
+		t.Errorf("an AVD with only a config uses %d", empty)
+	}
+	// A running emulator is the same folder.
+	if running := find(t, devices, "Pixel_9"); running.State != device.Shutdown {
+		t.Errorf("state = %v", running.State)
+	}
+}
+
 func TestListShowsABootingEmulator(t *testing.T) {
 	opts := sdk(t, "emulator", "adb")
 	avd(t, opts, "Pixel_9", "")

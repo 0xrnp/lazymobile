@@ -51,6 +51,7 @@ Usage:
   lazymobile shutdown <device> [--keep-simulator-app] [--json]
   lazymobile erase <device> --yes [--json]   erase a simulator, or wipe an emulator's data
   lazymobile delete <device> --yes [--json]
+  lazymobile delete --unavailable [--yes] [--json]   delete the simulators Xcode can no longer run (an update removed their runtime). Without --yes it lists them with the disk each uses
   lazymobile uninstall <device> <app-id> --yes [--json]   remove an app and its data from a running device
   lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator or an iPhone
   lazymobile install --all | --set <name> <path> [--phones] [--json]   on every running device that can take it. Real phones only with --phones
@@ -274,6 +275,9 @@ func (a *App) run(ctx context.Context, args []string) error {
 	case "erase":
 		return a.destructive(ctx, rest, "erase", "Erased", a.Manager.Erase)
 	case "delete":
+		if slices.Contains(rest, "--unavailable") {
+			return a.deleteUnavailable(ctx, rest)
+		}
 		return a.destructive(ctx, rest, "delete", "Deleted", a.Manager.Delete)
 	case "install":
 		return a.install(ctx, rest)
@@ -380,14 +384,25 @@ func (a *App) list(ctx context.Context, args []string) error {
 		if devices == nil {
 			devices = []device.Device{}
 		}
-		return a.writeJSON(map[string]any{"devices": devices, "errors": problems})
+		unavailable := a.Manager.UnavailableSimulators()
+		if unavailable == nil {
+			unavailable = []ios.Unavailable{}
+		}
+		return a.writeJSON(map[string]any{"devices": devices, "errors": problems, "unavailable": unavailable})
 	}
 	table := tabwriter.NewWriter(a.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tOS\tKIND\tSTATE\tID")
+	fmt.Fprintln(table, "NAME\tOS\tKIND\tSTATE\tDATA\tID")
 	for _, d := range devices {
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", d.Name, d.OSLabel(), d.Kind, strings.ReplaceAll(string(d.State), "_", " "), d.TargetID())
+		data := "-"
+		if d.DataBytes > 0 {
+			data = device.FormatBytes(d.DataBytes)
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", d.Name, d.OSLabel(), d.Kind, strings.ReplaceAll(string(d.State), "_", " "), data, d.TargetID())
 	}
 	table.Flush()
+	if unavailable := a.Manager.UnavailableSimulators(); len(unavailable) > 0 {
+		fmt.Fprintf(a.Stderr, "%s. `lazymobile delete --unavailable` lists them\n", unavailableSummary(unavailable))
+	}
 	for _, err := range errs {
 		fmt.Fprintf(a.Stderr, "warning: %s\n", err)
 	}

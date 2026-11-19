@@ -81,8 +81,10 @@ type fakeBackend struct {
 	// is not among them, or that InstalledApps gives without a version, as Android does.
 	installed []device.App
 	reported  mobile.Report
-	info      []device.App
-	sessions  []*fakeSession
+	// unavailable are the simulators that cannot run, until they are deleted.
+	unavailable []ios.Unavailable
+	info        []device.App
+	sessions    []*fakeSession
 }
 
 func (f *fakeBackend) record(format string, args ...any) error {
@@ -216,6 +218,21 @@ func (f *fakeBackend) CopyText(_ context.Context, text string) error {
 }
 func (f *fakeBackend) CopyFile(_ context.Context, path string) error {
 	return f.record("copyfile %s", path)
+}
+func (f *fakeBackend) UnavailableSimulators() []ios.Unavailable {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ios.Unavailable(nil), f.unavailable...)
+}
+func (f *fakeBackend) DeleteUnavailable(_ context.Context, confirmed []string) ([]ios.Unavailable, error) {
+	if err := f.record("delete unavailable %s", strings.Join(confirmed, ",")); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	deleted := f.unavailable
+	f.unavailable = nil
+	return deleted, nil
 }
 func (f *fakeBackend) Report(_ context.Context, d device.Device, id string, opts mobile.ReportOptions) (mobile.Report, error) {
 	if err := f.record("report %s %s %s %s", d.ID, id, opts.Dir, opts.Version); err != nil {

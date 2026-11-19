@@ -57,6 +57,8 @@ type Backend interface {
 	CopyText(ctx context.Context, text string) error
 	CopyFile(ctx context.Context, path string) error
 	Report(ctx context.Context, d device.Device, app string, opts mobile.ReportOptions) (mobile.Report, error)
+	UnavailableSimulators() []ios.Unavailable
+	DeleteUnavailable(ctx context.Context, confirmed []string) ([]ios.Unavailable, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
 	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
@@ -107,6 +109,8 @@ type (
 	devicesMsg struct {
 		devices []device.Device
 		errs    []error
+		// unavailable are the simulators that cannot run, as the same listing found them.
+		unavailable []ios.Unavailable
 	}
 	tickMsg struct{}
 	// applyMsg carries the result of background work back to the model.
@@ -151,6 +155,8 @@ type Model struct {
 	settling map[string]settling
 
 	focus pane
+	// unavailable are the simulators Xcode can no longer run, which are not in the list.
+	unavailable []ios.Unavailable
 	// recording is the screen recording that runs, or nil.
 	recording *recording
 	// quitting is whether lazymobile is stopping what it started and about to exit.
@@ -250,7 +256,7 @@ func (m *Model) refresh() tea.Cmd {
 	ctx, backend := m.ctx, m.backend
 	return func() tea.Msg {
 		devices, errs := backend.List(ctx)
-		return devicesMsg{devices, errs}
+		return devicesMsg{devices, errs, backend.UnavailableSimulators()}
 	}
 }
 
@@ -397,7 +403,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) setDevices(msg devicesMsg) tea.Cmd {
 	previous, hadSelection := m.selected()
-	m.devices, m.listErrs = arrange(msg.devices), msg.errs
+	m.devices, m.listErrs, m.unavailable = arrange(msg.devices), msg.errs, msg.unavailable
 	m.loaded, m.refreshing, m.lastRefresh = true, false, m.now()
 	m.settle()
 	if m.note == refreshingNote {
@@ -883,6 +889,8 @@ func (m *Model) deviceKey(key string) tea.Cmd {
 		return m.create()
 	case "w":
 		return m.wireless()
+	case "U":
+		return m.askDeleteUnavailable()
 	}
 	return m.deviceAction(key)
 }

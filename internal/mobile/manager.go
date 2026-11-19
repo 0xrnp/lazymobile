@@ -70,6 +70,36 @@ func (m *Manager) List(ctx context.Context) ([]device.Device, []error) {
 	return device.Sort(append(iosDevices, androidDevices...)), append(iosErrs, androidErrs...)
 }
 
+// UnavailableSimulators are the simulators the latest listing found unusable, such as ones whose
+// runtime an Xcode update removed. It does not run anything, so the dashboard asks it after each
+// refresh. It is empty away from a Mac.
+func (m *Manager) UnavailableSimulators() []ios.Unavailable {
+	if m.GOOS != "darwin" || m.IOS == nil {
+		return nil
+	}
+	return m.IOS.Unavailable()
+}
+
+// ListUnavailable lists the simulators simctl cannot use, asking simctl now.
+func (m *Manager) ListUnavailable(ctx context.Context) ([]ios.Unavailable, error) {
+	if m.GOOS != "darwin" || m.IOS == nil {
+		return nil, apperr.New(apperr.Unsupported, "Simulators are only on a Mac")
+	}
+	if _, err := m.IOS.ListSimulators(ctx); err != nil {
+		return nil, err
+	}
+	return m.IOS.Unavailable(), nil
+}
+
+// DeleteUnavailable deletes every simulator simctl cannot use, and returns the ones that went.
+// confirmed are the ids the user was shown. If there are others now, nothing is deleted.
+func (m *Manager) DeleteUnavailable(ctx context.Context, confirmed []string) ([]ios.Unavailable, error) {
+	if m.GOOS != "darwin" || m.IOS == nil {
+		return nil, apperr.New(apperr.Unsupported, "Simulators are only on a Mac")
+	}
+	return m.IOS.DeleteUnavailable(ctx, confirmed)
+}
+
 // Find returns the one device query means: an id, an adb serial, a name, or a unique part of a
 // name.
 func (m *Manager) Find(ctx context.Context, query string) (device.Device, error) {

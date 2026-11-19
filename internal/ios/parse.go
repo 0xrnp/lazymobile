@@ -31,6 +31,25 @@ type simctlEntry struct {
 	State        string  `json:"state"`
 	IsAvailable  *bool   `json:"isAvailable"`
 	Availability *string `json:"availability"`
+	// DataPathSize is the size of the simulator's data folder in bytes, which newer simctl reports.
+	DataPathSize int64 `json:"dataPathSize"`
+	// AvailabilityError says why a simulator cannot be used, such as a runtime that is gone.
+	AvailabilityError string `json:"availabilityError"`
+}
+
+// Unavailable is a simulator that simctl lists but cannot run, because the runtime it was made for
+// is no longer installed, as after an Xcode update. It keeps its data folder until it is deleted.
+// It can be of any platform: `simctl delete unavailable` removes watchOS, tvOS and visionOS ones too.
+type Unavailable struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Platform is the system it was made for: "iOS", "watchOS", "tvOS" or "visionOS", or empty when
+	// simctl's runtime name is not one lazymobile knows.
+	Platform  string `json:"platform,omitempty"`
+	OSVersion string `json:"os_version,omitempty"`
+	// Reason is what simctl says is wrong with it.
+	Reason    string `json:"reason,omitempty"`
+	DataBytes int64  `json:"data_bytes,omitempty"`
 }
 
 // available handles both simctl generations: modern ones have isAvailable, older ones an
@@ -42,14 +61,43 @@ func available(isAvailable *bool, availability *string) bool {
 	return availability == nil || *availability == "(available)"
 }
 
+// listing is what one `simctl list devices --json` said.
+type listing struct {
+	devices []device.Device
+	// unavailable are the simulators that cannot run, of every platform.
+	unavailable []Unavailable
+	// ids are all the simulators listed, usable or not, of every platform.
+	ids map[string]bool
+}
+
 // ParseSimctl reads `simctl list devices --json`. Only iOS simulators are returned. Unavailable
 // ones (a runtime that is no longer installed) and other platforms are skipped.
 func ParseSimctl(text string) ([]device.Device, error) {
+	l, err := parseSimctl(text)
+	return l.devices, err
+}
+
+// ParseUnavailable reads the simulators `simctl list devices --json` says cannot be used, of every
+// platform.
+func ParseUnavailable(text string) ([]Unavailable, error) {
+	l, err := parseSimctl(text)
+	return l.unavailable, err
+}
+
+// platformName is how a simulator's system is written: simctl's "xrOS" is visionOS.
+func platformName(name string) string {
+	if name == "xrOS" {
+		return "visionOS"
+	}
+	return name
+}
+
+func parseSimctl(text string) (listing, error) {
 	var data struct {
 		Devices map[string]json.RawMessage `json:"devices"`
 	}
 	if err := json.Unmarshal([]byte(text), &data); err != nil || data.Devices == nil {
-		return nil, apperr.New(apperr.ParseFailed, "Could not read the simulator list from simctl")
+		return listing{}, apperr.New(apperr.ParseFailed, "Could not read the simulator list from simctl")
 	}
 
 	runtimes := make([]string, 0, len(data.Devices))
@@ -58,14 +106,15 @@ func ParseSimctl(text string) ([]device.Device, error) {
 	}
 	sort.Strings(runtimes)
 
-	var devices []device.Device
+	l := listing{ids: map[string]bool{}}
 	for _, runtime := range runtimes {
 		m := runtimeKey.FindStringSubmatch(runtime)
 		if m == nil {
 			m = legacyRuntimeKey.FindStringSubmatch(runtime)
 		}
-		if m == nil || m[1] != "iOS" {
-			continue
+		platform, version := "", ""
+		if m != nil {
+			platform, version = platformName(m[1]), m[2]+"."+m[3]
 		}
 		// One malformed entry must not hide the others, so each is decoded by itself.
 		var raw []json.RawMessage
@@ -74,26 +123,44 @@ func ParseSimctl(text string) ([]device.Device, error) {
 		}
 		for _, item := range raw {
 			var e simctlEntry
-			if json.Unmarshal(item, &e) != nil || e.UDID == "" || e.Name == "" || !available(e.IsAvailable, e.Availability) {
+			if json.Unmarshal(item, &e) != nil || e.UDID == "" {
+				continue
+			}
+			l.ids[e.UDID] = true
+			if !available(e.IsAvailable, e.Availability) {
+				// Every unavailable simulator is kept, whatever its system, since deleting the
+				// unavailable ones deletes them all.
+				name := e.Name
+				if name == "" {
+					name = e.UDID
+				}
+				l.unavailable = append(l.unavailable, Unavailable{
+					ID: e.UDID, Name: name, Platform: platform, OSVersion: version,
+					Reason: e.AvailabilityError, DataBytes: e.DataPathSize,
+				})
+				continue
+			}
+			if platform != "iOS" || e.Name == "" {
 				continue
 			}
 			state, known := simctlStates[e.State]
 			if !known {
 				state = device.Unknown
 			}
-			devices = append(devices, device.Device{
+			l.devices = append(l.devices, device.Device{
 				ID:        e.UDID,
 				Name:      e.Name,
 				Platform:  device.IOS,
 				Kind:      device.Simulator,
 				State:     state,
-				OSVersion: m[2] + "." + m[3],
+				OSVersion: version,
 				Transport: "local",
 				Source:    "simctl",
+				DataBytes: e.DataPathSize,
 			})
 		}
 	}
-	return devices, nil
+	return l, nil
 }
 
 var transports = map[string]string{"wired": "usb", "localNetwork": "wifi"}

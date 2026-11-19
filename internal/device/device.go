@@ -58,6 +58,8 @@ type Device struct {
 	Source string `json:"source"`
 	// Detail is something the user should know, such as "Developer Mode is off".
 	Detail string `json:"detail,omitempty"`
+	// DataBytes is how much disk a simulator's data folder uses, or 0 when it is not known.
+	DataBytes int64 `json:"data_bytes,omitempty"`
 }
 
 // Key is unique across platforms and kinds.

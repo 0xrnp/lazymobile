@@ -4,6 +4,7 @@ package android
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,6 +350,9 @@ type AVDInfo struct {
 	DisplayName string
 	API         string
 	DeviceType  string
+	// DataBytes is the disk the AVD's folder uses: its images and its quick-boot snapshot. Zero when
+	// the folder is missing.
+	DataBytes int64
 }
 
 var apiLevel = regexp.MustCompile(`android-(\d+)`)
@@ -372,7 +376,23 @@ func (o Options) AVDInfo(name string) AVDInfo {
 	} else if m := apiLevel.FindStringSubmatch(config["image.sysdir.1"]); m != nil {
 		api = m[1]
 	}
-	return AVDInfo{DisplayName: config["avd.ini.displayname"], API: api, DeviceType: config["hw.device.name"]}
+	return AVDInfo{DisplayName: config["avd.ini.displayname"], API: api, DeviceType: config["hw.device.name"], DataBytes: diskUsage(dir)}
+}
+
+// diskUsage is the disk the files under dir take, as `du` counts it, so a sparse image is not
+// counted at its full length. Unreadable entries add nothing.
+func diskUsage(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() {
+			total += blocksUsed(info)
+		}
+		return nil
+	})
+	return total
 }
 
 // normalizeArch names a CPU the way the SDK does.

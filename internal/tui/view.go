@@ -254,6 +254,13 @@ func (m *Model) deviceLines(width, height int) []string {
 	if len(m.devices) == 0 && len(m.listErrs) == 0 {
 		lines = append(lines, "", " No devices yet.", "", dim.Render(" Press n to create a simulator or emulator,"), dim.Render(" or connect a phone with a cable."))
 	}
+	if len(m.unavailable) > 0 {
+		lines = append(lines, "")
+		for _, part := range strings.Split(ansi.Wordwrap(unavailableLine(m.unavailable), max(width-4, 10), " "), "\n") {
+			lines = append(lines, " "+yellow.Render(part))
+		}
+		lines = append(lines, dim.Render(" Press U to delete them."))
+	}
 	for _, err := range m.listErrs {
 		lines = append(lines, "")
 		for i, part := range strings.Split(ansi.Wordwrap(firstLine(err.Error()), max(width-4, 10), " "), "\n") {
@@ -303,6 +310,9 @@ func deviceDetails(d device.Device, width int) []string {
 		about += ", " + d.OSLabel()
 	}
 	rows = append(rows, [2]string{"Kind", about})
+	if d.DataBytes > 0 {
+		rows = append(rows, [2]string{"Data", device.FormatBytes(d.DataBytes) + " on disk"})
+	}
 	if d.Model != "" {
 		rows = append(rows, [2]string{"Model", d.Model})
 	}
@@ -327,17 +337,29 @@ func (m *Model) deviceRow(d device.Device, width int, selected bool) string {
 		state = d.Transport
 	}
 
-	const stateWidth, osWidth = 13, 11
+	const stateWidth, osWidth, sizeWidth = 13, 11, 7
 	nameWidth := width - 4 - stateWidth - 1
 	showOS := width >= 44
 	if showOS {
 		nameWidth -= osWidth + 1
+	}
+	// The disk a simulator's data uses, for the ones simctl says. A column of its own when it fits.
+	showSize := width >= 52
+	if showSize {
+		nameWidth -= sizeWidth + 1
 	}
 	text := fit(d.Name, max(nameWidth, 4))
 	if showOS {
 		text += " " + fit(d.OSLabel(), osWidth)
 	}
 	text += " " + fit(state, stateWidth)
+	if showSize {
+		size := ""
+		if d.DataBytes > 0 {
+			size = device.FormatBytes(d.DataBytes)
+		}
+		text += " " + strings.Repeat(" ", max(sizeWidth-ansi.StringWidth(size), 0)) + size
+	}
 
 	if selected && m.focus == paneDevices {
 		return " " + stateMark(d, busy) + " " + chosen.Render(text)
