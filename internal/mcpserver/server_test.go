@@ -1,8 +1,12 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +28,19 @@ const simctlList = `{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-2": 
   {"udid": "00000000-0000-4000-8000-0000000000A2", "name": "iPhone 16 Pro", "state": "Booted", "isAvailable": true}
 ]}}`
 
+// screen is what the fake simctl saves as a screenshot: a PNG taller than a model is shown.
+var screen = func() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 600, 1700))
+	for i := range img.Pix {
+		img.Pix[i] = 200
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}()
+
 // connect serves the tools over memory, with two simulators and no Android SDK.
 func connect(t *testing.T) (*mcp.ClientSession, *runtest.Fake, state.Store) {
 	t.Helper()
@@ -37,7 +54,7 @@ func connect(t *testing.T) (*mcp.ClientSession, *runtest.Fake, state.Store) {
 			}
 			return run.Result{}
 		case strings.Contains(command, "simctl io"):
-			if err := os.WriteFile(argv[len(argv)-1], []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+			if err := os.WriteFile(argv[len(argv)-1], screen, 0o644); err != nil {
 				t.Error(err)
 			}
 			return run.Result{}
@@ -52,8 +69,10 @@ func connect(t *testing.T) (*mcp.ClientSession, *runtest.Fake, state.Store) {
 		SDKFallbacks: []string{}, JavaFallbacks: []string{},
 	}
 	store := state.Store{Path: filepath.Join(t.TempDir(), "state.json")}
+	manager := mobile.New(fake, options, "darwin")
+	manager.IOS.CrashDir = t.TempDir()
 	s := &Server{
-		Manager: mobile.New(fake, options, "darwin"),
+		Manager: manager,
 		Doctor:  func(context.Context) doctor.Report { return doctor.Report{OS: "darwin"} },
 		State:   store,
 		Version: "test",
@@ -147,15 +166,89 @@ func TestLaunchRemembersTheApp(t *testing.T) {
 	}
 }
 
-func TestScreenshotReturnsTheImage(t *testing.T) {
-	session, _, _ := connect(t)
-	res := call(t, session, "screenshot", map[string]any{"device": "iPhone 16 Pro"})
+func screenshotOf(t *testing.T, session *mcp.ClientSession, args map[string]any) *mcp.ImageContent {
+	t.Helper()
+	res := call(t, session, "screenshot", args)
 	if res.IsError || len(res.Content) != 1 {
 		t.Fatalf("got %q", textOf(res))
 	}
-	image, ok := res.Content[0].(*mcp.ImageContent)
-	if !ok || image.MIMEType != "image/png" || !strings.HasPrefix(string(image.Data), "\x89PNG") {
-		t.Errorf("got %#v", res.Content[0])
+	img, ok := res.Content[0].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("got %#v", res.Content[0])
+	}
+	return img
+}
+
+func TestScreenshotIsScaledForTheModel(t *testing.T) {
+	session, _, _ := connect(t)
+	img := screenshotOf(t, session, map[string]any{"device": "iPhone 16 Pro"})
+	if img.MIMEType != "image/jpeg" {
+		t.Fatalf("type %s", img.MIMEType)
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(img.Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Width != 300 || cfg.Height != 850 {
+		t.Errorf("got %dx%d, want 300x850", cfg.Width, cfg.Height)
+	}
+}
+
+func TestScreenshotAtFullSizeIsThePNG(t *testing.T) {
+	session, _, _ := connect(t)
+	img := screenshotOf(t, session, map[string]any{"device": "iPhone 16 Pro", "full_size": true})
+	if img.MIMEType != "image/png" || !bytes.Equal(img.Data, screen) {
+		t.Errorf("got %s of %d bytes", img.MIMEType, len(img.Data))
+	}
+}
+
+func TestFitForModelKeepsWhatIsAlreadySmall(t *testing.T) {
+	var small bytes.Buffer
+	if err := png.Encode(&small, image.NewRGBA(image.Rect(0, 0, 100, maxEdge))); err != nil {
+		t.Fatal(err)
+	}
+	for name, in := range map[string][]byte{"small": small.Bytes(), "unreadable": []byte("\x89PNG\r\n\x1a\n")} {
+		if out, mime := fitForModel(in); mime != "image/png" || !bytes.Equal(out, in) {
+			t.Errorf("%s: changed to %s", name, mime)
+		}
+	}
+}
+
+func TestShrinkAveragesEachBlock(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	copy(src.Pix, []uint8{0, 0, 0, 255, 100, 0, 0, 255, 0, 200, 0, 255, 0, 0, 40, 255})
+	got := shrink(src, 2).Pix
+	if want := []uint8{25, 50, 10, 255}; !bytes.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestCrashReportSaysWhereReportsAreWhenThereIsNone(t *testing.T) {
+	session, _, _ := connect(t)
+	res := call(t, session, "crash_report", map[string]any{"device": "iPhone 16 Pro", "app": "com.example.app"})
+	if out := textOf(res); !res.IsError || !strings.Contains(out, "No crash of com.example.app") || !strings.Contains(out, "crash reports are in") {
+		t.Errorf("error %v, text %q", res.IsError, out)
+	}
+}
+
+func TestSetStatusBar(t *testing.T) {
+	for mode, want := range map[string]string{"clean": "override", "reset": "clear"} {
+		session, fake, _ := connect(t)
+		res := call(t, session, "set_status_bar", map[string]any{"device": "iPhone 16 Pro", "mode": mode})
+		if res.IsError || !fake.Called("simctl status_bar 00000000-0000-4000-8000-0000000000A2 "+want) {
+			t.Errorf("%s: text %q, calls %v", mode, textOf(res), fake.Calls())
+		}
+	}
+	session, _, _ := connect(t)
+	if res := call(t, session, "set_status_bar", map[string]any{"device": "iPhone 16 Pro", "mode": "tidy"}); !res.IsError {
+		t.Errorf("tidy was accepted: %q", textOf(res))
+	}
+}
+
+func TestServerTellsTheModelHowToStart(t *testing.T) {
+	session, _, _ := connect(t)
+	if got := session.InitializeResult().Instructions; !strings.Contains(got, "list_devices") {
+		t.Errorf("instructions %q", got)
 	}
 }
 

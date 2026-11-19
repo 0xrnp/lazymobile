@@ -22,8 +22,10 @@ make build    # ./lazymobile
 ```
 
 The tests answer for `xcrun`, `adb`, `emulator` and `eas` with fakes, so they run anywhere and never
-touch a real device or an Expo account. A fix for a parsing or tool-output problem should come with
-a test built from the real output, with names and ids replaced.
+touch a real device or an Expo account. A change to the MCP server or to what it calls should also
+pass `make devices` on a real simulator and emulator (see Development in the README). A fix for a
+parsing or tool-output problem should come with a test built from the real output, with names and
+ids replaced.
 
 ## How the code is arranged
 

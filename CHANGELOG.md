@@ -32,6 +32,12 @@ them, and the dashboard shows what is new once after an upgrade.
 ### For agents
 - `lazymobile mcp` serves the device commands to a coding agent over MCP (stdio). Nothing that
   erases data is served (#43)
+- The MCP server sends screenshots scaled to at most 1568 pixels as JPEG, about 20 times smaller
+  than the PNG (`full_size` for the PNG), and serves `crash_report` and `set_status_bar`. It tells
+  the agent how to start: list the devices, prefer a simulator, and read one app's log
+- `docs/coding-agents.md`: setting up Claude Code, Cursor, Codex and VS Code, what to ask an
+  agent, and a skill file (`skills/lazymobile/SKILL.md`) for agents that use the commands with
+  `--json`
 
 ### Other
 - `lazymobile changelog` prints these notes, and the dashboard shows what is new once after an

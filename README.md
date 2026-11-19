@@ -59,8 +59,9 @@ Every key, with `?`:
   tool you already use (`flutter run`, or your own command), with its keys such as hot reload
   working as before.
 - The same features as plain commands, with `--json`, for scripts and coding agents.
-- An MCP server for coding agents, with `lazymobile mcp`: boot, install, launch, screenshot and read
-  logs, without the commands that erase data.
+- An MCP server for coding agents in Claude Code, Cursor, Codex and others, with `lazymobile mcp`:
+  boot, install, launch, screenshot, and read logs and crash reports, without the commands that
+  erase data. See [docs/coding-agents.md](docs/coding-agents.md).
 - `lazymobile doctor` says what is missing and how to install it. `doctor --fix` shows the command for each fix and runs it only after you say yes. It also checks `idevicesyslog` when an iPhone is connected, and the Expo login inside an Expo project.
 - One binary. It calls the tools you already have (`xcrun`, `adb`, `emulator`, `eas`).
 
@@ -83,6 +84,7 @@ Early release. What has been run, and what has not:
 | `run` for Expo | A real Expo app with a development client, in a pnpm monorepo, on an iOS 27.2 simulator: `lazymobile run <simulator> -- --no-install` started the simulator and ran the project's own `expo run:ios --device <id>`. The app built, installed and opened on that simulator, and Metro started and reported the app's own error, a workspace package that `pnpm install` had not linked yet. Before macOS Automation was allowed for System Events, Expo stopped at the end with its own `osascript` error (-1743), and lazymobile showed it and exit code 1 as it came. Later, from a screenshot of the maintainer's own run with `--split` in Rex: Expo ran in one pane (the QR code, its key menu, the bundle at 67%) and the dashboard in the other selected the simulator and showed the app's log lines. Not run: hot reload, the app past its bundling, Android, and a physical phone. The project's files were not changed by lazymobile |
 | `run` for the rest | Not run: an iOS simulator with Flutter, an iPhone, a project with its own `run` action in `.lazymobile.json`, and React Native. Those paths are tested with fake tools only |
 | `dev` (reverse, menu, reload) | A real Android 16 emulator (Pixel 9a), from the command and from the dashboard key `D` in a real terminal: `adb reverse` was set (checked with `adb reverse --list`), and the menu and reload keys were accepted by adb. Not run: a React Native app on it, so that the menu opening and the reload happening were not seen. A simulator and an iPhone are refused (no way to send a key) |
+| MCP server (`mcp`) | The built program over stdio, driven by a test script through every tool, on a real iOS 27.2 simulator and a real Android 16 emulator (Pixel 9a), with a small test app built for each: `boot` (the emulator from off), `install`, `list_apps`, `launch`, `screenshot` (603x1311 and 540x1212 JPEGs, and the PNG with `full_size`), `read_logs` with each filter, `set_permission` both ways, `set_appearance`, `set_location`, `set_status_bar`, `open_link` with the app's own scheme, a deep link that crashes the app read back with `crash_report` and `crashes_only`, `stop`, and refusals (an app not installed, a path that does not exist, a device that is off, a bad level or mode). Twice in a row on each, with no failure. Real clients: Claude Code 2.1 called the tools, described the screenshot and found a crash's file and line through the server, and through the skill with the commands. Codex 0.170 loaded the server's config; no model ran. `shutdown` stopped the emulator through the server. Not run: Cursor (its CLI was not logged in), VS Code, a phone |
 | Unit tests | Full suite on macOS, with fake `xcrun`, `adb`, `emulator` and `eas`. CI runs it on Ubuntu and macOS |
 | Listing devices, `doctor`, opening the dashboard | Real Xcode 27.2 and Android SDK on macOS |
 | Android emulator boot, shut down and logs (`logcat`) | A real emulator on macOS |
@@ -554,20 +556,20 @@ stops and says to name one.
 
 ## For agents (MCP)
 
-`lazymobile mcp` serves the device commands as MCP tools over stdio. With Claude Code:
+`lazymobile mcp` lets a coding agent boot a device, install and launch the app, take a screenshot,
+and read the app's log and crash report. With Claude Code:
 
 ```sh
 claude mcp add lazymobile -- lazymobile mcp
 ```
 
-The tools are `list_devices`, `list_apps`, `doctor`, `boot`, `shutdown`, `install`, `launch`,
-`stop`, `open_link`, `screenshot` (returned as an image), `read_logs`, `set_appearance`,
-`set_location` and `set_permission`. `read_logs` reads what is already logged and returns the last
-lines (200 by default), filtered by app, level, text or crashes. Nothing that erases data is
-served: erase, delete, uninstall and clear data stay on the command line, behind `--yes`.
+In Cursor, add `"lazymobile": { "command": "lazymobile", "args": ["mcp"] }` under `mcpServers` in
+`.cursor/mcp.json`. Nothing that erases data is served: erase, delete, uninstall and clear data
+stay on the command line, behind `--yes`.
 
-`read_logs` returns text written by apps and the device, so an agent should treat it as data, not
-as instructions.
+[docs/coding-agents.md](docs/coding-agents.md) has the setup for Codex, VS Code and other
+clients, the list of tools, what to ask an agent, and a skill file for agents that use the commands
+instead.
 
 ## Troubleshooting
 
@@ -605,6 +607,20 @@ make build    # ./lazymobile
 The tests use fake tools, so they run anywhere and never touch a real device or an Expo account.
 A fix for a parsing or tool-output problem should come with a test built from the real output,
 with names and ids replaced.
+
+`make devices` is the exception: it drives `lazymobile mcp` through its tools on a real simulator
+and emulator, with a small app it builds from `cmd/lazymobile/testdata/testapp` (Xcode for iOS, the
+Android SDK and a JDK for Android). Name the devices it may use:
+
+```sh
+LAZYMOBILE_TEST_IOS=<simulator id> LAZYMOBILE_TEST_ANDROID=<emulator name> make devices
+```
+
+It installs the app, crashes it on purpose and removes it again, and refuses a real phone.
+Afterwards it puts the appearance back, resets the status bar, clears a simulator's location, and
+shuts down a device it started. Left behind: the location of an emulator (it cannot forget one),
+Android's permission for demo status bars, the crash in Android's own crash records, and a
+Simulator window that `boot` opened. If the test is stopped by its time limit, nothing is put back.
 
 The name follows the convention of lazygit and lazydocker. This project is not affiliated with
 them.
