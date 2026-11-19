@@ -266,8 +266,11 @@ var keyTable = []keyAction{
 		}, when: needsRun},
 	{id: "run_focus", ctx: ctxRun, keys: []string{"ctrl+o"}, show: "ctrl+o", desc: "Give the keys to the tool or to its log",
 		footer: func(m *Model) string {
-			if m.run != nil && m.run.onTool {
+			if m.run != nil && m.run.onTool && m.width >= splitWidth {
 				return "log, then + - to resize"
+			}
+			if m.run != nil && m.run.onTool {
+				return "log"
 			}
 			return ""
 		}, when: needsRun},

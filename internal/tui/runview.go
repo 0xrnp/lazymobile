@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -595,10 +596,16 @@ func (m *Model) runFooterKeys() []string {
 		return []string{"run_focus", "run_switch", "run_scroll"}
 	case r.onTool:
 		return []string{"run_again", "run_focus", "run_switch", "run_quit"}
-	case m.runLogSlot() < 0:
-		return []string{"run_pick", "run_back", "run_resize", "run_zoom", "run_switch", "run_quit"}
 	}
-	return []string{"run_back", "run_resize", "run_zoom", "run_switch", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"}
+	// With one pane on the screen there is no line to move.
+	var resize []string
+	if m.width >= splitWidth {
+		resize = []string{"run_resize", "run_zoom"}
+	}
+	if m.runLogSlot() < 0 {
+		return slices.Concat([]string{"run_pick", "run_back"}, resize, []string{"run_switch", "run_quit"})
+	}
+	return slices.Concat([]string{"run_back"}, resize, []string{"run_switch", "log_filter", "log_level", "log_pause", "log_copy", "log_line", "log_wrap", "log_clear", "run_help", "run_quit"})
 }
 
 func needsRun(m *Model) string {

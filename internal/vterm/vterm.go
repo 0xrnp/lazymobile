@@ -329,6 +329,16 @@ func (s *Session) SendKey(k uv.KeyEvent) {
 	}
 }
 
+// SendMouse sends a mouse event, encoded the way the program asked for. Nothing is sent when the
+// program did not ask for the mouse.
+func (s *Session) SendMouse(m uv.MouseEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.emu.SendMouse(m)
+	}
+}
+
 // Paste sends text as a paste.
 func (s *Session) Paste(text string) {
 	s.mu.Lock()
