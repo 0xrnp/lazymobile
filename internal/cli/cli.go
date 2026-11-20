@@ -62,6 +62,7 @@ Usage:
   lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
+  lazymobile push <device> <app-id> [--title <text>] [--body <text>] [--payload <file>] [--json]   send a test push notification to an app on an iOS simulator
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
   lazymobile run [<device>] [--profile <name>] [--choose] [--here [--no-log] | --split] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). In a terminal it asks which way to run (the actions named "run", "run dev", "run prod" in .lazymobile.json) and which device when it cannot tell, and remembers the answer for the folder; --choose asks again. Its keys, such as r for hot reload, keep working. --here runs it inside the dashboard (--no-log gives the tool the whole width; ctrl+p, then l, shows the log): ctrl+] switches between the run and the full dashboard
@@ -69,7 +70,7 @@ Usage:
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
-  lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator or an Android device. --save never replaces a file
+  lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator, an Android device or a connected iPhone. --save never replaces a file
   lazymobile report <device> <app-id> [--out <folder>] [--since 5m] [--lines 200] [--json]   save a bug report in a new folder: a screenshot, the app's last log lines, its latest crash report, and the device and app version. Never replaces a folder
   lazymobile changelog [<version>] [--all] [--json]   what changed: this version's notes, one version's, or all of them
   lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
@@ -77,6 +78,7 @@ Usage:
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
   lazymobile doctor [--fix [--yes]] [--json]       what is installed, what is missing, and how to fix it
+  lazymobile completion zsh|bash|fish   the shell completion script: commands, flags, device names and app ids
   lazymobile mcp                   serve the device commands to an agent over MCP (stdio). Nothing that erases data
   lazymobile version
 
@@ -297,6 +299,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.location(ctx, rest)
 	case "statusbar":
 		return a.statusBar(ctx, rest)
+	case "push":
+		return a.push(ctx, rest)
 	case "action":
 		return a.action(ctx, rest)
 	case "run":
@@ -325,6 +329,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.doctor(ctx, rest)
 	case "builds":
 		return a.builds(ctx, rest)
+	case "completion":
+		return a.completion(rest)
+	case "__complete":
+		return a.complete(ctx, rest)
 	case "mcp":
 		if len(rest) > 0 {
 			return usageError{"mcp takes no arguments"}
@@ -710,6 +718,36 @@ func (a *App) statusBar(ctx context.Context, args []string) error {
 		return a.done(*asJSON, result{Action: "statusbar_clean", Device: d}, "The status bar of "+d.Name+" is tidy for a screenshot")
 	}
 	return a.done(*asJSON, result{Action: "statusbar_reset", Device: d}, "The status bar of "+d.Name+" is back to normal")
+}
+
+func (a *App) push(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("push", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	title := fs.String("title", "", "")
+	body := fs.String("body", "", "")
+	payloadFile := fs.String("payload", "", "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
+	if err != nil {
+		return err
+	}
+	var payload []byte
+	if *payloadFile != "" {
+		if *title != "" || *body != "" {
+			return usageError{"push takes --payload, or --title and --body, not both"}
+		}
+		if payload, err = os.ReadFile(*payloadFile); err != nil {
+			return apperr.New(apperr.NotFound, "Cannot read the payload: %v", err)
+		}
+	} else {
+		if *title == "" && *body == "" {
+			*title, *body = "lazymobile", "A test notification"
+		}
+		payload = ios.AlertPayload(*title, *body)
+	}
+	if err := a.Manager.SendPush(ctx, d, app, payload); err != nil {
+		return err
+	}
+	return a.done(*asJSON, result{Action: "push", Device: d, App: app}, fmt.Sprintf("Sent a push notification to %s on %s", app, d.Name))
 }
 
 func (a *App) link(ctx context.Context, args []string) error {

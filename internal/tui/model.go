@@ -50,6 +50,8 @@ type Backend interface {
 	ClearLocation(ctx context.Context, d device.Device) error
 	SetStatusBar(ctx context.Context, d device.Device, clean bool) error
 	OpenLink(ctx context.Context, d device.Device, link string) error
+	SendPush(ctx context.Context, d device.Device, id string, payload []byte) error
+	AppUsage(ctx context.Context, d device.Device, id string, pid int) (device.Usage, error)
 	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
@@ -371,7 +373,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setBuilds(msg)
 	case tickMsg:
 		m.saveView()
-		cmds := []tea.Cmd{tick(), m.followRun()}
+		cmds := []tea.Cmd{tick(), m.followRun(), m.sampleUsages()}
 		interval := refreshIdle
 		if m.changing() {
 			interval = refreshBusy
@@ -1085,6 +1087,8 @@ func (m *Model) logKey(key string) tea.Cmd {
 		if v.session != nil {
 			v.session.Stop()
 		}
+	case "M":
+		return m.toggleUsage(v)
 	case "X":
 		m.closeLog(slot)
 	case "r":

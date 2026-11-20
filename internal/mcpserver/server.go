@@ -16,6 +16,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
+	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/state"
@@ -91,8 +92,8 @@ func (s *Server) New() *mcp.Server {
 		Description: "Read what a running simulator, emulator or Android phone has already logged, and return the last lines. " +
 			"Pass app to keep only that app's lines. Does not follow the log. A physical iPhone has no log history to read."}, s.readLogs)
 	mcp.AddTool(server, &mcp.Tool{Name: "crash_report", Annotations: readOnly,
-		Description: "Return the latest crash report of an app on a simulator or an Android device. " +
-			"An Android device must be running; a physical iPhone is not supported."}, s.crashReport)
+		Description: "Return the latest crash report of an app on a simulator, an Android device or an iPhone. " +
+			"An Android device must be running, and an iPhone connected: its reports are copied from it, which takes a few seconds."}, s.crashReport)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "set_appearance", Annotations: notDestructive,
 		Description: "Switch a device to dark or light mode."}, s.setAppearance)
@@ -103,6 +104,9 @@ func (s *Server) New() *mcp.Server {
 		Description: "Grant or revoke a permission, such as camera, location or photos, for an app."}, s.setPermission)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_status_bar", Annotations: notDestructive,
 		Description: "Make a simulator's or emulator's status bar tidy for screenshots (a fixed time, full battery), or put it back."}, s.setStatusBar)
+	mcp.AddTool(server, &mcp.Tool{Name: "send_push", Annotations: notDestructive,
+		Description: "Send a test push notification to an app on a booted iOS simulator, as if it came from Apple. " +
+			"The app must have asked for notifications and been allowed. Android is refused: its pushes come through Firebase."}, s.sendPush)
 	return server
 }
 
@@ -462,4 +466,32 @@ func (s *Server) setStatusBar(ctx context.Context, _ *mcp.CallToolRequest, in st
 		return text("The status bar of " + d.Name + " is tidy for a screenshot")
 	}
 	return text("The status bar of " + d.Name + " is back to normal")
+}
+
+type pushArgs struct {
+	Device  string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	App     string `json:"app" jsonschema:"the iOS bundle id, such as com.example.app"`
+	Title   string `json:"title,omitempty" jsonschema:"the notification's title"`
+	Body    string `json:"body,omitempty" jsonschema:"the notification's text"`
+	Payload string `json:"payload,omitempty" jsonschema:"a whole payload as JSON, such as {\"aps\": {\"badge\": 3}}, in place of title and body"`
+}
+
+func (s *Server) sendPush(ctx context.Context, _ *mcp.CallToolRequest, in pushArgs) (*mcp.CallToolResult, any, error) {
+	payload := []byte(in.Payload)
+	switch {
+	case in.Payload != "" && (in.Title != "" || in.Body != ""):
+		return nil, nil, apperr.New(apperr.Usage, "Give payload, or title and body, not both")
+	case in.Payload == "" && in.Title == "" && in.Body == "":
+		payload = ios.AlertPayload("lazymobile", "A test notification")
+	case in.Payload == "":
+		payload = ios.AlertPayload(in.Title, in.Body)
+	}
+	d, err := s.Manager.Find(ctx, in.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.Manager.SendPush(ctx, d, in.App, payload); err != nil {
+		return nil, nil, err
+	}
+	return text("Sent a push notification to " + in.App + " on " + d.Name)
 }

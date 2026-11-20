@@ -203,6 +203,7 @@ var keyTable = []keyAction{
 	{id: "log_save", ctx: ctxLogs, keys: []string{"S"}, show: "S", desc: "Save what is shown to a file", footer: say("save"), when: needsLog},
 	{id: "log_stop", ctx: ctxLogs, keys: []string{"x"}, show: "x", desc: "Stop the stream", footer: say("stop"), when: needsLog},
 	{id: "log_restart", ctx: ctxLogs, keys: []string{"r"}, show: "r", desc: "Restart the stream, or launch a waiting one", footer: say("restart"), when: needsLog},
+	{id: "log_usage", ctx: ctxLogs, keys: []string{"M"}, show: "M", desc: "Show the app's CPU and memory in the heading, or hide them", when: needsLog},
 	{id: "log_close", ctx: ctxLogs, keys: []string{"X"}, show: "X", desc: "Close this log", footer: say("close"), when: needsLog},
 
 	// Builds.

@@ -53,6 +53,8 @@ type logView struct {
 	// would launch its app again. r starts it.
 	parked bool
 	endErr error
+	// usage is the CPU and memory of the app, when shown.
+	usage appUsage
 }
 
 func (v *logView) passes(line logs.Line) bool {
@@ -271,6 +273,9 @@ func (v *logView) heading(withConsole, withVersion bool, position string) string
 	}
 	if v.filter != "" {
 		parts = append(parts, fmt.Sprintf("%q", v.filter))
+	}
+	if v.usage.on {
+		parts = append(parts, v.usage.label())
 	}
 	switch {
 	case v.parked:

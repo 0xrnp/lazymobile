@@ -50,7 +50,7 @@ func (m *Manager) Report(ctx context.Context, d device.Device, app string, opts 
 	case !d.Ready():
 		return Report{}, apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
 	case d.Platform == device.IOS && d.Kind == device.Physical:
-		return Report{}, apperr.New(apperr.Unsupported, "A report from an iPhone is not supported yet: it has no screenshot or crash report here").
+		return Report{}, apperr.New(apperr.Unsupported, "A report from an iPhone is not supported yet: lazymobile cannot take its screenshot").
 			WithHint("Use a simulator, an emulator or an Android phone.")
 	case !logs.ValidAppID(app):
 		return Report{}, apperr.New(apperr.Usage, "%s does not look like an app id", app)

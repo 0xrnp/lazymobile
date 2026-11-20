@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/0xrnp/lazymobile/internal/actions"
+	"github.com/0xrnp/lazymobile/internal/apperr"
+	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/run"
 	"github.com/0xrnp/lazymobile/internal/run/runtest"
@@ -124,7 +126,7 @@ func TestRunNeverPicksARealPhoneOnItsOwn(t *testing.T) {
 func TestRunSaysWhatItDoesNotKnow(t *testing.T) {
 	e := newRunEnv(t)
 	if code := e.run("run"); code != ExitFailure || len(e.ran) != 0 ||
-		!strings.Contains(e.errs.String(), "Flutter and Expo") || !strings.Contains(e.errs.String(), ".lazymobile.json") {
+		!strings.Contains(e.errs.String(), "Flutter, Expo and React Native") || !strings.Contains(e.errs.String(), ".lazymobile.json") {
 		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
 	}
 }
@@ -242,6 +244,24 @@ func TestRunRunsAnExpoProjectWithItsOwnExpoOnTheDevice(t *testing.T) {
 	}
 }
 
+func TestExpoIsGivenTheDeviceNameItMatchesOnAndroid(t *testing.T) {
+	// expo run:android --device matches a name (Expo 54, resolveFromNameAsync), and run:ios a name
+	// or UDID.
+	for _, tc := range []struct {
+		d    device.Device
+		want string
+	}{
+		{device.Device{ID: runningSim, Platform: device.IOS, Kind: device.Simulator}, runningSim},
+		{device.Device{ID: "Pixel_9a", Serial: "emulator-5554", Platform: device.Android, Kind: device.Emulator}, "Pixel_9a"},
+		{device.Device{ID: "R5CT", Model: "SM_S911B", Platform: device.Android, Kind: device.Physical}, "SM_S911B"},
+		{device.Device{ID: "R5CT", Platform: device.Android, Kind: device.Physical}, "Device R5CT"},
+	} {
+		if got := toolDevice("expo", tc.d); strings.Join(got, " ") != "--device "+tc.want {
+			t.Errorf("%s: %q, want --device %s", tc.d.ID, got, tc.want)
+		}
+	}
+}
+
 func TestRunDoesNotDownloadExpoWhenTheProjectHasNone(t *testing.T) {
 	e := newRunEnv(t)
 	expoProject(t, e, false)
@@ -250,13 +270,147 @@ func TestRunDoesNotDownloadExpoWhenTheProjectHasNone(t *testing.T) {
 	}
 }
 
-func TestAPackageWithoutExpoIsNotRunAsOne(t *testing.T) {
-	e := newRunEnv(t, "package.json")
-	if err := os.WriteFile(filepath.Join(e.dir, "package.json"), []byte(`{"dependencies": {"react-native": "0.81.0"}}`), 0o600); err != nil {
+// writeProject writes package.json and an empty file for each of the others, such as a lock file
+// or node_modules/.bin/react-native, in e's folder.
+func (e *runEnv) writeProject(t *testing.T, packageJSON string, others ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(e.dir, "package.json"), []byte(packageJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code := e.run("run", "iPhone 16 Pro"); code != ExitFailure || len(e.ran) != 0 || !strings.Contains(e.errs.String(), "Cannot tell") {
+	for _, name := range others {
+		path := filepath.Join(e.dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunRunsAReactNativeProjectWithItsOwnCLI(t *testing.T) {
+	e := newRunEnv(t)
+	e.writeProject(t, `{"dependencies": {"react-native": "0.81.0"}}`, "node_modules/.bin/react-native")
+	bin := filepath.Join(e.dir, "node_modules", ".bin", "react-native")
+	if code := e.run("run", "iPhone 16 Pro", "--", "--scheme", "Dev"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if len(e.ran) != 1 || strings.Join(e.ran[0], " ") != bin+" run-ios --udid "+runningSim+" --scheme Dev" {
+		t.Errorf("ran %v", e.ran)
+	}
+}
+
+func TestRunOffersThePackageScriptsThatRunTheApp(t *testing.T) {
+	e := newRunEnv(t)
+	e.writeProject(t, `{"scripts": {
+		"ios": "APP_ENV=dev expo run:ios",
+		"ios:release": "pnpm prebuild && expo run:ios --configuration Release",
+		"ios:mine": "expo run:ios --device 'My iPhone'",
+		"android": "expo run:android",
+		"start": "expo start",
+		"test": "jest"
+	}, "dependencies": {"expo": "~54.0.0"}}`, "pnpm-lock.yaml")
+	asked := e.picks(1)
+	// The device is an iPhone simulator, so the android script is not offered.
+	if code := e.run("run", "iPhone 16 Pro", "--", "--no-bundler"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if want := []string{"How to run it?", "pnpm run ios", "pnpm run ios:release"}; len(*asked) != 1 || strings.Join((*asked)[0], "|") != strings.Join(want, "|") {
+		t.Errorf("asked %q, want %q", *asked, want)
+	}
+	if len(e.ran) != 1 || strings.Join(e.ran[0], " ") != "pnpm run ios:release --device "+runningSim+" --no-bundler" {
+		t.Errorf("ran %v", e.ran)
+	}
+	// A script runs whatever it says, so its text is shown, not only its name.
+	if !strings.Contains(e.errs.String(), "The script is `pnpm prebuild && expo run:ios --configuration Release`") {
+		t.Errorf("the script was not shown: %q", e.errs.String())
+	}
+	// The choice is remembered for the folder, and needs no --yes: it is the project's own script.
+	if code := e.run("run", "iPhone 16 Pro"); code != ExitOK || len(e.ran) != 2 || e.ran[1][2] != "ios:release" || len(*asked) != 1 {
+		t.Errorf("second run: code %d, ran %v, asked %v", code, e.ran, *asked)
+	}
+}
+
+func TestAProjectWithOnlyAnIOSScriptRunsOnAndroidWithItsOwnTool(t *testing.T) {
+	e := newRunEnv(t)
+	e.writeProject(t, `{"scripts": {"ios": "expo run:ios"}, "dependencies": {"expo": "~54.0.0"}}`, "node_modules/.bin/expo")
+	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Serial: "emulator-5554", Platform: device.Android, Kind: device.Emulator, State: device.Booted}
+	plans, err := e.app.runPlans(e.dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range plans {
+		names = append(names, p.name+" "+string(p.platform))
+	}
+	if strings.Join(names, ", ") != "npm run ios ios, expo run android" {
+		t.Fatalf("plans: %v", names)
+	}
+	// The ios script never runs on an Android device, even when it is chosen.
+	if _, err := plans[0].argv(emulator); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("the ios script on an emulator: %v", err)
+	}
+	kept := plansFor(plans, device.Android)
+	if len(kept) != 1 {
+		t.Fatalf("for Android: %d plans", len(kept))
+	}
+	argv, err := kept[0].argv(emulator)
+	if want := filepath.Join(e.dir, "node_modules", ".bin", "expo") + " run:android --device Pixel_9a"; err != nil || strings.Join(argv, " ") != want {
+		t.Errorf("%q, %v; want %s", argv, err, want)
+	}
+}
+
+func TestRunGivesNpmTheDeviceAfterDashes(t *testing.T) {
+	e := newRunEnv(t)
+	e.writeProject(t, `{"scripts": {"dev": "flutter run --flavor dev"}}`)
+	if code := e.run("run", "iPhone 16 Pro"); code != ExitOK || len(e.ran) != 1 || strings.Join(e.ran[0], " ") != "npm run dev -- -d "+runningSim {
 		t.Errorf("code %d, ran %v, stderr %q", code, e.ran, e.errs.String())
+	}
+}
+
+func TestScriptTool(t *testing.T) {
+	for script, want := range map[string]string{
+		"expo run:ios":                           "expo ios",
+		"npx expo run:android --variant debug":   "expo android",
+		"react-native run-ios --scheme Dev":      "react-native ios",
+		"yarn build && react-native run-android": "react-native android",
+		"flutter run -t lib/main_dev.dart":       "flutter ",
+		"expo start":                             "",
+		"expo run:ios && echo done":              "",
+		"expo run:ios --device 'My iPhone'":      "",
+		"flutter run -d emulator-5554":           "",
+		"react-native run-ios --udid=ABC":        "",
+		"expo run:ios | tee build.log":           "",
+		"jest":                                   "",
+	} {
+		tool, platform, ok := scriptTool(script)
+		got := ""
+		if ok {
+			got = tool + " " + string(platform)
+		}
+		if got != want {
+			t.Errorf("%q: %q, want %q", script, got, want)
+		}
+	}
+}
+
+func TestPackageManager(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "apps", "shop")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := packageManager(app, packageJSON{}); got != "npm" {
+		t.Errorf("no lock file: %s", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, "yarn.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := packageManager(app, packageJSON{}); got != "yarn" {
+		t.Errorf("a lock file at the top of a monorepo: %s", got)
+	}
+	if got := packageManager(app, packageJSON{PackageManager: "pnpm@9.12.0"}); got != "pnpm" {
+		t.Errorf("the packageManager field: %s", got)
 	}
 }
 

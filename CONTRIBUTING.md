@@ -8,8 +8,8 @@ Bug reports, fixes and ideas are welcome.
 - A small fix or a typo: send a pull request.
 - Anything bigger: open an issue first, so we can agree on the shape before you write code.
 
-The most useful thing you can test is anything the Status table in the README lists as "fake tools
-only". If you have the hardware, say what you ran and what happened.
+The most useful thing you can test is anything [docs/tested.md](docs/tested.md) lists as "fake tools
+only" or "not run". If you have the hardware, say what you ran and what happened.
 
 ## Set up
 

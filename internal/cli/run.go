@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,6 +45,10 @@ type runPlan struct {
 	// fromFile is whether the command comes from .lazymobile.json, which a repository someone else
 	// wrote can set, so it is shown and needs --yes.
 	fromFile bool
+	// from is the file the way was found in, shown when there are several to choose from.
+	from string
+	// script is the text of the package.json script the plan runs, shown before it runs.
+	script string
 	// platform limits the plan to one platform. Empty means both.
 	platform device.Platform
 	argv     func(d device.Device) ([]string, error)
@@ -111,6 +116,14 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(positional) == 1 {
+		// A named device leaves out the ways to run on the other platform, such as an ios script.
+		d, err := a.Manager.Find(ctx, positional[0])
+		if err != nil {
+			return err
+		}
+		plans = plansFor(plans, d.Platform)
+	}
 	plan, err := a.chooseRunPlan(ctx, plans, folder, *profile, *choose)
 	if err != nil {
 		return err
@@ -141,6 +154,10 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", strings.Join(argv, " "), plan.dir)
+	if plan.script != "" {
+		// The script runs whatever it says, so say it, not just its name.
+		fmt.Fprintf(a.Stderr, "The script is `%s`\n", plan.script)
+	}
 	// A dashboard open in this folder follows the run: it selects this device and opens the app's log.
 	_ = a.State.Update(func(f *state.File) { f.RememberRunStarted(folder, d.Key(), time.Now()) })
 	if *here {
@@ -190,7 +207,8 @@ func splitTool(args []string) (own, tool []string) {
 }
 
 // runPlans lists the ways to run the project in folder: each profile in .lazymobile.json, in file
-// order, or else the tool the folder looks like it uses, Flutter or Expo.
+// order, else the package.json scripts that run the app, else the tool the folder looks like it uses:
+// Flutter, Expo or React Native.
 func (a *App) runPlans(folder string, extra []string) ([]runPlan, error) {
 	var all []actions.Action
 	if a.Actions != nil {
@@ -204,7 +222,7 @@ func (a *App) runPlans(folder string, extra []string) ([]runPlan, error) {
 		if !runProfile(chosen.Name) {
 			continue
 		}
-		plans = append(plans, runPlan{name: chosen.Name, dir: chosen.Dir, fromFile: true, platform: chosen.Platform,
+		plans = append(plans, runPlan{name: chosen.Name, dir: chosen.Dir, fromFile: true, from: actions.ConfigFile, platform: chosen.Platform,
 			argv: func(d device.Device) ([]string, error) {
 				argv, err := chosen.Resolve(d, "")
 				return append(argv, extra...), err
@@ -214,25 +232,68 @@ func (a *App) runPlans(folder string, extra []string) ([]runPlan, error) {
 		// What the project wrote down is how it is run. The built-in tools are only a guess.
 		return plans, nil
 	}
+	if plans = scriptPlans(folder, extra); len(plans) > 0 {
+		// A project with an ios script and no android one still runs on Android with its own tool.
+		if missing := uncovered(plans); missing != "" {
+			for _, p := range builtInPlans(folder, extra) {
+				p.platform = missing
+				plans = append(plans, p)
+			}
+		}
+		return plans, nil
+	}
+	if plans = builtInPlans(folder, extra); len(plans) == 0 {
+		return nil, apperr.New(apperr.NotFound, "Cannot tell how to run the app in %s", folder).
+			WithHint("lazymobile run knows Flutter, Expo and React Native projects, and package.json scripts that run one of them. For another tool, add an action named \"run\" to %s, for example {\"name\": \"run\", \"command\": [\"make\", \"run-dev\", \"DEVICE={device_id}\"]}. Add \"run dev\" and \"run prod\" for flavors.",
+				actions.ConfigFile)
+	}
+	return plans, nil
+}
+
+// uncovered is the platform none of plans runs on, or "" when they cover both.
+func uncovered(plans []runPlan) device.Platform {
+	has := map[device.Platform]bool{}
+	for _, p := range plans {
+		if p.platform == "" {
+			return ""
+		}
+		has[p.platform] = true
+	}
+	switch {
+	case !has[device.IOS]:
+		return device.IOS
+	case !has[device.Android]:
+		return device.Android
+	}
+	return ""
+}
+
+// builtInPlans runs a Flutter, Expo or React Native project with its own tool.
+func builtInPlans(folder string, extra []string) []runPlan {
+	var plans []runPlan
+	pkg, _ := readPackage(folder)
 	if _, err := os.Stat(filepath.Join(folder, "pubspec.yaml")); err == nil {
-		plans = append(plans, runPlan{name: "flutter run", dir: folder, argv: func(d device.Device) ([]string, error) {
+		plans = append(plans, runPlan{name: "flutter run", dir: folder, from: "pubspec.yaml", argv: func(d device.Device) ([]string, error) {
 			return append([]string{"flutter", "run", "-d", d.TargetID()}, extra...), nil
 		}})
-	} else if hasExpo(folder) {
-		plans = append(plans, runPlan{name: "expo run", dir: folder, argv: func(d device.Device) ([]string, error) {
+	} else if pkg.has("expo") {
+		plans = append(plans, runPlan{name: "expo run", dir: folder, from: "package.json", argv: func(d device.Device) ([]string, error) {
 			bin, err := findBin(folder, "expo")
 			if err != nil {
 				return nil, err
 			}
-			return append([]string{bin, "run:" + string(d.Platform), "--device", d.TargetID()}, extra...), nil
+			return append([]string{bin, "run:" + string(d.Platform), "--device", expoDevice(d)}, extra...), nil
+		}})
+	} else if pkg.has("react-native") {
+		plans = append(plans, runPlan{name: "react-native run", dir: folder, from: "package.json", argv: func(d device.Device) ([]string, error) {
+			bin, err := findBin(folder, "react-native")
+			if err != nil {
+				return nil, err
+			}
+			return append(append([]string{bin, "run-" + string(d.Platform)}, reactNativeDevice(d)...), extra...), nil
 		}})
 	}
-	if len(plans) == 0 {
-		return nil, apperr.New(apperr.NotFound, "Cannot tell how to run the app in %s", folder).
-			WithHint("lazymobile run knows Flutter and Expo projects (a pubspec.yaml, or expo in package.json). For another tool, add an action named \"run\" to %s, for example {\"name\": \"run\", \"command\": [\"npx\", \"expo\", \"run:ios\", \"--device\", \"{device_id}\"]}. Add \"run dev\" and \"run prod\" for flavors.",
-				actions.ConfigFile)
-	}
-	return plans, nil
+	return plans
 }
 
 // chooseRunPlan is the way to run that was named with --profile, else the only one, else the one
@@ -273,7 +334,10 @@ func (a *App) chooseRunPlan(ctx context.Context, plans []runPlan, folder, name s
 	}
 	items := make([]PickItem, len(plans))
 	for i, p := range plans {
-		items[i] = PickItem{Label: p.name, Detail: "from " + actions.ConfigFile}
+		items[i] = PickItem{Label: p.name}
+		if p.from != "" {
+			items[i].Detail = "from " + p.from
+		}
 	}
 	start := max(last, index(runAction), 0)
 	chosen, err := a.Pick(ctx, "How to run it?", items, start)
@@ -440,22 +504,165 @@ func (a *App) runTool(ctx context.Context, dir string, argv []string) error {
 	return apperr.New(apperr.CommandFailed, "%s could not start: %v", argv[0], err)
 }
 
-// hasExpo reports whether the package.json in dir lists expo as a dependency.
-func hasExpo(dir string) bool {
+// plansFor keeps the plans that can run on platform, unless that leaves none, so that the error
+// about the device comes from where it always has.
+func plansFor(plans []runPlan, platform device.Platform) []runPlan {
+	var kept []runPlan
+	for _, p := range plans {
+		if p.platform == "" || p.platform == platform {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return plans
+	}
+	return kept
+}
+
+// packageJSON is what run reads from a package.json.
+type packageJSON struct {
+	Dependencies    map[string]json.RawMessage `json:"dependencies"`
+	DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	Scripts         map[string]string          `json:"scripts"`
+	PackageManager  string                     `json:"packageManager"`
+}
+
+func readPackage(dir string) (packageJSON, error) {
+	var pkg packageJSON
 	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
-		return false
+		return pkg, err
 	}
-	var pkg struct {
-		Dependencies    map[string]json.RawMessage `json:"dependencies"`
-		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
-	}
-	if json.Unmarshal(data, &pkg) != nil {
-		return false
-	}
-	_, inDeps := pkg.Dependencies["expo"]
-	_, inDev := pkg.DevDependencies["expo"]
+	return pkg, json.Unmarshal(data, &pkg)
+}
+
+// has reports whether the package lists name as a dependency.
+func (p packageJSON) has(name string) bool {
+	_, inDeps := p.Dependencies[name]
+	_, inDev := p.DevDependencies[name]
 	return inDeps || inDev
+}
+
+// scriptPlans are the package.json scripts that end by running the app with Expo, React Native or
+// Flutter, by name. Such a script is how the project is usually run, with its flavor, env file or
+// entry file, so it is offered before lazymobile's own guess. The device is added at the end of the
+// script, the way `npm run ios -- --device <id>` would. A script that names its own device is left
+// out, since it would not run on the one chosen.
+func scriptPlans(folder string, extra []string) []runPlan {
+	pkg, err := readPackage(folder)
+	if err != nil {
+		return nil
+	}
+	manager := packageManager(folder, pkg)
+	var names []string
+	for name := range pkg.Scripts {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var plans []runPlan
+	for _, name := range names {
+		tool, platform, ok := scriptTool(pkg.Scripts[name])
+		if !ok {
+			continue
+		}
+		script := []string{manager, "run", name}
+		if manager == "npm" {
+			// npm keeps the flags after the script's name for itself unless they follow --.
+			script = append(script, "--")
+		}
+		plans = append(plans, runPlan{name: strings.Join(script[:3], " "), dir: folder, from: "package.json", script: pkg.Scripts[name], platform: platform,
+			argv: func(d device.Device) ([]string, error) {
+				if platform != "" && platform != d.Platform {
+					return nil, apperr.New(apperr.Unsupported, "The %q script is for %s, and %s is %s", name, platform, d.Name, d.Platform)
+				}
+				return append(append(slices.Clone(script), toolDevice(tool, d)...), extra...), nil
+			}})
+	}
+	return plans
+}
+
+// scriptTool is the tool the last command of a script runs the app with, and the platform it runs
+// on (empty for both). ok is false for a script that does something else, or names its own device.
+func scriptTool(script string) (tool string, platform device.Platform, ok bool) {
+	last := script
+	for _, sep := range []string{"&&", "||", ";"} {
+		if i := strings.LastIndex(last, sep); i >= 0 {
+			last = last[i+len(sep):]
+		}
+	}
+	words := strings.Fields(last)
+	for _, w := range words {
+		if strings.ContainsAny(w, "|>") || slices.Contains([]string{"--device", "--udid", "--simulator", "-d", "--device-id", "--deviceId"}, strings.SplitN(w, "=", 2)[0]) {
+			return "", "", false
+		}
+	}
+	for i := 0; i+1 < len(words); i++ {
+		switch command := words[i] + " " + words[i+1]; command {
+		case "expo run:ios", "react-native run-ios":
+			return words[i], device.IOS, true
+		case "expo run:android", "react-native run-android":
+			return words[i], device.Android, true
+		case "flutter run":
+			return words[i], "", true
+		}
+	}
+	return "", "", false
+}
+
+// toolDevice are the flags that point tool at d.
+func toolDevice(tool string, d device.Device) []string {
+	switch tool {
+	case "flutter":
+		return []string{"-d", d.TargetID()}
+	case "react-native":
+		return reactNativeDevice(d)
+	case "expo":
+		return []string{"--device", expoDevice(d)}
+	}
+	return []string{"--device", d.TargetID()}
+}
+
+// expoDevice is how `expo run` finds d. On iOS that is the UDID. On Android it is a name, not the
+// adb serial: an emulator's AVD name, and a phone's model as adb lists it (Pixel_7).
+func expoDevice(d device.Device) string {
+	switch {
+	case d.Platform == device.IOS:
+		return d.TargetID()
+	case d.Kind == device.Emulator:
+		return d.ID
+	case d.Model != "":
+		return d.Model
+	}
+	return "Device " + d.TargetID()
+}
+
+// reactNativeDevice points the React Native CLI at d: run-ios takes the UDID, and run-android the
+// adb serial (its older --deviceId is deprecated).
+func reactNativeDevice(d device.Device) []string {
+	if d.Platform == device.IOS {
+		return []string{"--udid", d.TargetID()}
+	}
+	return []string{"--device", d.TargetID()}
+}
+
+// packageManager is the one the project uses: the packageManager field of package.json, else the
+// one whose lock file is in folder or a folder above it (a monorepo keeps it at the top), else npm.
+func packageManager(folder string, pkg packageJSON) string {
+	known := []string{"pnpm", "yarn", "bun", "npm"}
+	if name, _, _ := strings.Cut(pkg.PackageManager, "@"); slices.Contains(known, name) {
+		return name
+	}
+	locks := [][2]string{{"pnpm-lock.yaml", "pnpm"}, {"yarn.lock", "yarn"}, {"bun.lock", "bun"}, {"bun.lockb", "bun"}, {"package-lock.json", "npm"}}
+	for dir := folder; ; dir = filepath.Dir(dir) {
+		for _, lock := range locks {
+			if _, err := os.Stat(filepath.Join(dir, lock[0])); err == nil {
+				return lock[1]
+			}
+		}
+		if dir == filepath.Dir(dir) {
+			return "npm"
+		}
+	}
 }
 
 // findBin is the project's own copy of a tool, in node_modules/.bin of dir or a folder above it (a

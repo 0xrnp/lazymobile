@@ -118,7 +118,7 @@ func TestLatestCrashTakesTheNewestReportOfTheSimulator(t *testing.T) {
 	}
 }
 
-func TestLatestCrashSaysWhenThereIsNoneAndRefusesAnIPhone(t *testing.T) {
+func TestLatestCrashSaysWhenThereIsNoneAndNeedsAnIPhoneConnected(t *testing.T) {
 	c := New(runtest.Table(nil))
 	c.CrashDir = t.TempDir()
 	sim := device.Device{ID: crashSim, Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator}
@@ -127,8 +127,8 @@ func TestLatestCrashSaysWhenThereIsNoneAndRefusesAnIPhone(t *testing.T) {
 		t.Errorf("error = %v, want not_found", err)
 	}
 	phone := device.Device{ID: "00008150-0001", Name: "iPhone", Platform: device.IOS, Kind: device.Physical}
-	if _, err := c.LatestCrash(context.Background(), phone, "com.example.app"); apperr.CodeOf(err) != apperr.Unsupported {
-		t.Errorf("error = %v, want unsupported", err)
+	if _, err := c.LatestCrash(context.Background(), phone, "com.example.app"); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("error = %v, want invalid_state", err)
 	}
 }
 

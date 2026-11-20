@@ -5,6 +5,7 @@ package device
 import (
 	"sort"
 	"strings"
+	"time"
 )
 
 // Platform is the operating system family of a device.
@@ -207,4 +208,14 @@ func (a App) VersionLabel() string {
 		return "(" + a.Build + ")"
 	}
 	return ""
+}
+
+// Usage is what an app's process has used: its CPU time since it started, and the memory it holds
+// now. Two samples give its CPU use in between.
+type Usage struct {
+	// PID is the app's process, which the next sample can start from.
+	PID int
+	CPU time.Duration
+	// Memory is the resident memory, in bytes.
+	Memory int64
 }

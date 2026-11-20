@@ -38,6 +38,9 @@ type Client struct {
 	// CrashDir is where the Mac keeps crash reports, simulators' included. Empty means
 	// ~/Library/Logs/DiagnosticReports. Tests replace it.
 	CrashDir string
+	// PhoneCrashDir is where the crash reports copied from iPhones are kept, a folder per phone.
+	// Empty means lazymobile's folder in the user's cache folder. Tests replace it.
+	PhoneCrashDir string
 
 	mu sync.Mutex
 	// unavailable are the simulators the latest simulator listing could not use, and listed all the

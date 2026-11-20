@@ -245,6 +245,24 @@ func TestSetStatusBar(t *testing.T) {
 	}
 }
 
+func TestSendPush(t *testing.T) {
+	session, fake, _ := connect(t)
+	res := call(t, session, "send_push", map[string]any{"device": "iPhone 16 Pro", "app": "com.example.app", "body": "Hi"})
+	if res.IsError || !fake.Called("simctl push 00000000-0000-4000-8000-0000000000A2 com.example.app -") {
+		t.Errorf("text %q, calls %v", textOf(res), fake.Calls())
+	}
+	for name, args := range map[string]map[string]any{
+		"both":            {"device": "iPhone 16 Pro", "app": "com.example.app", "body": "Hi", "payload": `{"aps": {}}`},
+		"no aps":          {"device": "iPhone 16 Pro", "app": "com.example.app", "payload": `{"badge": 1}`},
+		"a shut-down sim": {"device": "iPhone 16", "app": "com.example.app"},
+	} {
+		session, fake, _ := connect(t)
+		if res := call(t, session, "send_push", args); !res.IsError || fake.Called("simctl push") {
+			t.Errorf("%s was accepted: %q", name, textOf(res))
+		}
+	}
+}
+
 func TestServerTellsTheModelHowToStart(t *testing.T) {
 	session, _, _ := connect(t)
 	if got := session.InitializeResult().Instructions; !strings.Contains(got, "list_devices") {

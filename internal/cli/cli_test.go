@@ -1034,3 +1034,33 @@ func TestCrashUsage(t *testing.T) {
 		t.Errorf("code %d, stderr %q", code, e.errs.String())
 	}
 }
+
+func TestPush(t *testing.T) {
+	e := newEnv(t)
+	const booted = "00000000-0000-4000-8000-0000000000A2"
+	if code := e.run("push", "iPhone 16 Pro", "com.example.installed", "--body", "Hi"); code != ExitOK ||
+		!e.fake.Called("simctl push "+booted+" com.example.installed -") ||
+		!strings.Contains(e.out.String(), "Sent a push notification to com.example.installed on iPhone 16 Pro") {
+		t.Errorf("push: code %d, out %q, calls %v", code, e.out.String(), e.fake.Calls())
+	}
+	payload := filepath.Join(t.TempDir(), "payload.json")
+	if err := os.WriteFile(payload, []byte(`{"aps": {"badge": 3}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("push", "iPhone 16 Pro", "com.example.installed", "--payload", payload, "--json"); code != ExitOK || e.object(t)["action"] != "push" {
+		t.Errorf("--payload: code %d, out %q", code, e.out.String())
+	}
+	for _, args := range [][]string{
+		{"push", "iPhone 16 Pro"},
+		{"push", "iPhone 16 Pro", "com.example.installed", "--payload", payload, "--title", "x"},
+	} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%q: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	// The simulator that is shut down is refused before simctl is asked.
+	const shutDown = "00000000-0000-4000-8000-0000000000A1"
+	if code := e.run("push", "iPhone 16", "com.example.installed"); code != ExitFailure || e.fake.Called("simctl push "+shutDown) || !strings.Contains(e.errs.String(), "is not running") {
+		t.Errorf("a shut-down simulator: code %d, errs %q", code, e.errs.String())
+	}
+}

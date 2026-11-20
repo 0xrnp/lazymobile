@@ -1,11 +1,24 @@
-// The app the device tests install on a simulator. It logs when it starts and when it opens a
-// link, and crashes on lazymobilee2e://crash so that crash reports can be read back.
+// The app the device tests install on a simulator. It logs when it starts, when it opens a link
+// and when a push notification arrives, and crashes on lazymobilee2e://crash so that crash reports
+// can be read back.
 import UIKit
+import UserNotifications
 
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         NSLog("LAZYMOBILE_E2E launched")
+        // Provisional permission is granted without a prompt, so a push can arrive with no one to tap Allow.
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound, .provisional]) { granted, _ in
+            NSLog("LAZYMOBILE_E2E notifications %@", granted ? "allowed" : "refused")
+        }
         return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        NSLog("LAZYMOBILE_E2E push %@", notification.request.content.body)
+        done([.banner])
     }
 }
 

@@ -7,10 +7,11 @@ them, and the dashboard shows what is new once after an upgrade.
 
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
-  tool you already use (`flutter run`, the project's own `expo run:ios` or `run:android`, or the
-  action named `run` in `.lazymobile.json`). Its keys, such as hot reload, keep working. It asks
-  which way to run (run dev, run prod) and which device when it cannot tell, and remembers the
-  answers for the folder (#42)
+  tool you already use: the actions named `run` in `.lazymobile.json`, else your `package.json`
+  scripts that run it (such as `ios` with `expo run:ios`), else `flutter run`, the project's own
+  `expo run`, or `react-native run-ios` and `run-android`. Its keys, such as hot
+  reload, keep working. It asks which way to run and which device when it cannot tell, offers only
+  the ways that fit a device you name, and remembers the answers for the folder (#42)
 - `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
   the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running.
   Drag the line between the panes, or press `shift+←` and `shift+→` from either pane, to resize
@@ -27,7 +28,9 @@ them, and the dashboard shows what is new once after an upgrade.
 - `lazymobile report <device> <app-id>`, and "Save a bug report" in the dashboard's app menu: a new
   folder with a screenshot, the app's last log lines, its latest crash report, and the device and
   app version (#39)
-- `lazymobile crash <device> <app-id>` and "Show its latest crash report" in the app menu (#37)
+- `lazymobile crash <device> <app-id>` and "Show its latest crash report" in the app menu (#37), on
+  a connected iPhone too: the report is copied from the phone with Xcode's `devicectl`, and never
+  removed from it (#38)
 
 ### For agents
 - `lazymobile mcp` serves the device commands to a coding agent over MCP (stdio). Nothing that
@@ -40,6 +43,13 @@ them, and the dashboard shows what is new once after an upgrade.
   `--json`
 
 ### Other
+- `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
+  an emulator or an Android phone (#40)
+- `lazymobile push <device> <app-id>`, "Send a test push notification" in the app menu, and
+  `send_push` for agents: a notification with a title and text, or your own payload file, to an
+  app on an iOS simulator (#34)
+- Tab completion for zsh, bash and fish: commands, flags, device names, the app ids you used and
+  files. Set it up with `lazymobile completion zsh`, `bash` or `fish` (#36)
 - `lazymobile changelog` prints these notes, and the dashboard shows what is new once after an
   upgrade (#41)
 - The dashboard says in one line when a newer version is out. It looks at most once a day, with a

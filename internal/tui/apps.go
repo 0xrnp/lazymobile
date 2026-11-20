@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/0xrnp/lazymobile/internal/device"
+	"github.com/0xrnp/lazymobile/internal/ios"
 	"github.com/0xrnp/lazymobile/internal/logs"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/state"
@@ -423,6 +424,10 @@ var (
 	saveReport = appAction{label: "Save a bug report in this folder", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		return m.saveReport(d, id)
 	}}
+	sendPush = appAction{label: "Send a test push notification…", next: func(m *Model, d device.Device, id string) tea.Cmd {
+		m.pushModal(d, id)
+		return nil
+	}}
 	clearData = appAction{label: "Clear its data…", next: func(m *Model, d device.Device, id string) tea.Cmd {
 		m.confirm("Clear the data of "+id+"?", "This erases everything "+id+" saved on "+d.Name+", as if it had just been installed. It cannot be undone.",
 			func(m *Model) tea.Cmd {
@@ -436,21 +441,38 @@ var (
 )
 
 // appActionsFor is what can be done to an app on d. An iPhone's app cannot be stopped on its own,
-// its permissions are left alone with the rest of the phone, and its crash reports stay on it. An
-// iOS simulator has no way to clear an app's data.
+// its permissions are left alone with the rest of the phone, and it has no screenshot for a bug
+// report. An iOS simulator has no way to clear an app's data, and only it can be sent a test push.
 func appActionsFor(d device.Device) []appAction {
 	actions := []appAction{launchApp, restartApp, stopApp}
 	switch {
 	case d.Platform == device.IOS && d.Kind == device.Physical:
-		return actions[:2]
+		return append(actions[:2], showCrash)
 	case d.Kind == device.Physical:
 		return append(actions, showCrash, saveReport)
 	}
 	actions = append(actions, grantPermission, revokePermission)
 	if d.Platform == device.Android {
-		actions = append(actions, clearData)
+		return append(actions, clearData, showCrash, saveReport)
 	}
-	return append(actions, showCrash, saveReport)
+	return append(actions, showCrash, saveReport, sendPush)
+}
+
+// pushModal asks for the text of a test notification, and sends it to the app.
+func (m *Model) pushModal(d device.Device, id string) {
+	m.modal = &modal{
+		kind: modalPrompt, title: "Send a test push notification to " + id,
+		body: "The text it shows. Empty sends \"A test notification\".",
+		onSubmit: func(m *Model, value string) tea.Cmd {
+			if value == "" {
+				value = "A test notification"
+			}
+			backend, payload := m.backend, ios.AlertPayload("lazymobile", value)
+			return m.act(d, "Sending a push notification to "+id+" on", "Sent a push notification to "+id+" on", nil, func(ctx context.Context) error {
+				return backend.SendPush(ctx, d, id, payload)
+			})
+		},
+	}
 }
 
 func (m *Model) appActionModal(d device.Device, id string) {

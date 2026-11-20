@@ -549,6 +549,9 @@ func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testin
 		"location of a stopped sim": m.SetLocation(ctx, stopped, 1, 2),
 		"a latitude off the globe":  m.SetLocation(ctx, simulator, 999, 2),
 		"clearing an emulator":      m.ClearLocation(ctx, emulator),
+		"a push to an emulator":     m.SendPush(ctx, emulator, "com.example.app", []byte(`{"aps": {}}`)),
+		"a push to an iPhone":       m.SendPush(ctx, iphone, "com.example.app", []byte(`{"aps": {}}`)),
+		"a push to a stopped sim":   m.SendPush(ctx, stopped, "com.example.app", []byte(`{"aps": {}}`)),
 	} {
 		if code := apperr.CodeOf(err); code != apperr.Unsupported && code != apperr.InvalidState {
 			t.Errorf("%s: %v", name, err)
@@ -703,7 +706,7 @@ func TestDevHelpersRefuseWhatTheyCannotDo(t *testing.T) {
 func TestCrashRefusesWhatItCannotRead(t *testing.T) {
 	m, fake := manager(t, "darwin")
 	ctx := context.Background()
-	phone := device.Device{ID: "00008150-0001", Name: "iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Booted}
+	phone := device.Device{ID: "00008150-0001", Name: "iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Disconnected}
 	stopped := device.Device{ID: "emulator-5554", Name: "Pixel", Platform: device.Android, Kind: device.Emulator, State: device.Shutdown}
 	simulator := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Shutdown}
 	for name, tc := range map[string]struct {
@@ -711,7 +714,7 @@ func TestCrashRefusesWhatItCannotRead(t *testing.T) {
 		app  string
 		code apperr.Code
 	}{
-		"an iPhone":                 {phone, "com.example.app", apperr.Unsupported},
+		"an iPhone not connected":   {phone, "com.example.app", apperr.InvalidState},
 		"a stopped Android device":  {stopped, "com.example.app", apperr.InvalidState},
 		"a simulator with a bad id": {simulator, "not an id; rm -rf", apperr.InvalidState},
 	} {
@@ -739,5 +742,28 @@ func TestSaveTextNeverReplacesAFile(t *testing.T) {
 	}
 	if _, err := SaveText(path, "again"); apperr.CodeOf(err) != apperr.InvalidState {
 		t.Errorf("error = %v, want invalid_state for a file that exists", err)
+	}
+}
+
+func TestAppUsageRefusesAnIPhoneAndABadIDBeforeAnyTool(t *testing.T) {
+	m, fake := manager(t, "darwin")
+	ctx := context.Background()
+	phone := device.Device{ID: "00008150-0001", Name: "iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	simulator := device.Device{ID: "SIM", Name: "iPhone 16", Platform: device.IOS, Kind: device.Simulator, State: device.Shutdown}
+	for name, tc := range map[string]struct {
+		d    device.Device
+		app  string
+		code apperr.Code
+	}{
+		"an iPhone":             {phone, "com.example.app", apperr.Unsupported},
+		"a stopped simulator":   {simulator, "com.example.app", apperr.InvalidState},
+		"an id that is not one": {simulator, "x; rm -rf /", apperr.InvalidState},
+	} {
+		if _, err := m.AppUsage(ctx, tc.d, tc.app, 0); apperr.CodeOf(err) != tc.code {
+			t.Errorf("%s: error = %v, want %s", name, err, tc.code)
+		}
+	}
+	if len(fake.Calls()) != 0 {
+		t.Errorf("a tool ran: %v", fake.Calls())
 	}
 }

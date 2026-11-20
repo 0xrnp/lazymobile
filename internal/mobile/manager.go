@@ -451,6 +451,39 @@ func (m *Manager) SetStatusBar(ctx context.Context, d device.Device, clean bool)
 	return m.Android.ResetStatusBar(ctx, d)
 }
 
+// SendPush delivers a test push notification to an app on a booted iOS simulator. payload is the
+// JSON Apple's push service would send: see ios.AlertPayload and ios.CheckPushPayload.
+func (m *Manager) SendPush(ctx context.Context, d device.Device, id string, payload []byte) error {
+	if d.Platform == device.Android {
+		return apperr.New(apperr.Unsupported, "A test push notification can only be sent to an iOS simulator").
+			WithHint("On Android a push comes through Firebase: send a test message from the Firebase console's Messaging page.")
+	}
+	if d.Kind == device.Simulator && !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot it first.")
+	}
+	return m.IOS.SendPush(ctx, d, id, payload)
+}
+
+// AppUsage samples the CPU time and memory of an app on a running simulator, emulator or Android
+// phone. pid is the app's process from the sample before, or 0. An iPhone's apps are measured with
+// Xcode's Instruments.
+func (m *Manager) AppUsage(ctx context.Context, d device.Device, id string, pid int) (device.Usage, error) {
+	if !logs.ValidAppID(id) {
+		return device.Usage{}, apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	switch {
+	case d.Platform == device.IOS && d.Kind == device.Physical:
+		return device.Usage{}, apperr.New(apperr.Unsupported, "Cannot read an app's CPU and memory on %s", d.Name).
+			WithHint("Xcode's Instruments shows them for an iPhone.")
+	case d.Platform == device.IOS:
+		if !d.Ready() {
+			return device.Usage{}, apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot it first.")
+		}
+		return m.IOS.AppUsage(ctx, d, id, pid)
+	}
+	return m.Android.AppUsage(ctx, d, id)
+}
+
 // ScreenshotName is a file name for a screenshot of d taken at now.
 func ScreenshotName(d device.Device, now time.Time) string { return mediaName(d, now, "png") }
 

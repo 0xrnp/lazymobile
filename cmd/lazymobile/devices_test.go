@@ -122,6 +122,15 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 	a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "opened"},
 		30*time.Second, has(hello))
 
+	if android {
+		a.refused("send_push", map[string]any{"device": id, "app": e2eApp}, "Firebase")
+	} else {
+		pushed := "LAZYMOBILE push " + run
+		a.ok("send_push", map[string]any{"device": id, "app": e2eApp, "body": pushed}, "Sent")
+		a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "push"},
+			30*time.Second, has(pushed))
+	}
+
 	crash := e2eScheme + "://crash?run=" + run
 	crashArgs := map[string]any{"device": id, "app": e2eApp}
 	// An earlier run can leave a report behind, on Android in particular, so wait for a new one.

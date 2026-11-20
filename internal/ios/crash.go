@@ -24,13 +24,12 @@ const (
 	maxCrashFiles = 300
 )
 
-// LatestCrash returns the newest crash report of an app on a simulator. A simulator's crash reports
-// are written on the Mac, with the simulator's id in them, so the simulator need not be running.
-// An iPhone keeps its reports on the phone, which this does not read.
+// LatestCrash returns the newest crash report of an app on a simulator or a connected iPhone. A
+// simulator's crash reports are written on the Mac, with the simulator's id in them, so the
+// simulator need not be running. An iPhone's are copied from the phone: see phoneCrash.
 func (c *Client) LatestCrash(ctx context.Context, d device.Device, bundleID string) (device.CrashReport, error) {
 	if d.Kind == device.Physical {
-		return device.CrashReport{}, apperr.New(apperr.Unsupported, "The crash reports of %s stay on the phone, and cannot be read yet", d.Name).
-			WithHint("Xcode's Devices and Simulators window shows them.")
+		return c.phoneCrash(ctx, d, bundleID)
 	}
 	dir := c.CrashDir
 	if dir == "" {
@@ -158,6 +157,12 @@ const simulatorCoalition = "com.apple.CoreSimulator.SimDevice."
 // ParseCrashReport reads an .ips crash report, and returns it as text when it is a crash of
 // bundleID on the simulator with id udid.
 func ParseCrashReport(data []byte, bundleID, udid string) (device.CrashReport, bool) {
+	return parseCrash(data, bundleID, func(body ipsBody) bool { return body.CoalitionName == simulatorCoalition+udid })
+}
+
+// parseCrash reads an .ips crash report, and returns it as text when it is a crash of bundleID
+// whose body is wanted.
+func parseCrash(data []byte, bundleID string, wanted func(ipsBody) bool) (device.CrashReport, bool) {
 	first, rest, found := bytes.Cut(data, []byte("\n"))
 	if !found {
 		return device.CrashReport{}, false
@@ -168,7 +173,7 @@ func ParseCrashReport(data []byte, bundleID, udid string) (device.CrashReport, b
 	}
 	// Decode, not Unmarshal: some reports carry a plain-text system profile after the JSON body.
 	var body ipsBody
-	if json.NewDecoder(bytes.NewReader(rest)).Decode(&body) != nil || body.CoalitionName != simulatorCoalition+udid {
+	if json.NewDecoder(bytes.NewReader(rest)).Decode(&body) != nil || !wanted(body) {
 		return device.CrashReport{}, false
 	}
 	return device.CrashReport{App: bundleID, When: body.CaptureTime, Text: crashText(header, body)}, true

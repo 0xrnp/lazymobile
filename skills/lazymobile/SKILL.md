@@ -64,8 +64,8 @@ lazymobile crash <id> <app-id> --json
 lazymobile logs <id> --app <app-id> --since 5m --tail 2000 --json   # keep the lines with "crash": true
 ```
 
-On an iOS simulator `crash` reads the Mac's crash reports; on Android the device must be running.
-A physical iPhone is not supported.
+On an iOS simulator `crash` reads the Mac's crash reports. On Android the device must be running,
+and an iPhone connected: its reports are copied from the phone, which takes a few seconds.
 
 ## Set up a screen
 
@@ -75,6 +75,7 @@ lazymobile appearance <id> dark --json              # or light
 lazymobile permission <id> grant camera <app-id> --json
 lazymobile location <id> 37.5665,126.978 --json     # or clear
 lazymobile statusbar <id> clean --json              # reset afterwards
+lazymobile push <id> <app-id> --body 'Order ready' --json   # iOS simulator only
 ```
 
 ## Rules

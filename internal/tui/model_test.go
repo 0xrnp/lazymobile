@@ -64,11 +64,12 @@ func (s *fakeSession) isStopped() bool {
 // fakeBackend records what the dashboard asks for.
 type fakeBackend struct {
 	// mode is the appearance every device reports.
-	mode     string
-	mu       sync.Mutex
-	calls    []string
-	devices  []device.Device
-	listErrs []error
+	mode         string
+	mu           sync.Mutex
+	calls        []string
+	usageSamples int
+	devices      []device.Device
+	listErrs     []error
 	// fail maps a call prefix, such as "boot", to the error it returns.
 	fail     map[string]error
 	noIOS    bool
@@ -191,6 +192,16 @@ func (f *fakeBackend) ClearData(_ context.Context, d device.Device, id string) e
 }
 func (f *fakeBackend) OpenLink(_ context.Context, d device.Device, link string) error {
 	return f.record("link %s %s", d.ID, link)
+}
+func (f *fakeBackend) SendPush(_ context.Context, d device.Device, id string, payload []byte) error {
+	return f.record("push %s %s %s", d.ID, id, payload)
+}
+func (f *fakeBackend) AppUsage(_ context.Context, d device.Device, id string, pid int) (device.Usage, error) {
+	if err := f.record("usage %s %s %d", d.ID, id, pid); err != nil {
+		return device.Usage{}, err
+	}
+	f.usageSamples++
+	return device.Usage{PID: 41, CPU: time.Duration(f.usageSamples) * time.Second, Memory: 180 << 20}, nil
 }
 func (f *fakeBackend) Dev(_ context.Context, d device.Device, action string, port int) error {
 	return f.record("dev %s %s %d", d.ID, action, port)
@@ -2006,11 +2017,14 @@ func TestTheLatestCrashOfAnAppIsShownFromTheAppMenu(t *testing.T) {
 	h.wantScreen("No crash of com.example.app found for iPhone 17")
 }
 
-func TestAnIPhoneOffersNoCrashReport(t *testing.T) {
+func TestAnIPhoneOffersItsCrashReportButNoBugReport(t *testing.T) {
 	h := start(t, usbPhone)
 	h.backend.installed = []device.App{{ID: "com.example.app"}}
 	h.press("o", "enter")
-	h.wantNoScreen("crash report")
+	h.wantScreen("Show its latest crash report")
+	h.wantNoScreen("Save a bug report")
+	h.press("down", "down", "enter")
+	h.wantCalls("crash "+usbPhone.ID+" com.example.app", 1)
 }
 
 func TestAppActionsNeedARunningDeviceAndSayWhenTheyFail(t *testing.T) {
@@ -2402,4 +2416,96 @@ func TestAnIPhoneOffersNoBugReport(t *testing.T) {
 	h.backend.installed = []device.App{{ID: "com.example.app"}}
 	h.press("o", "enter")
 	h.wantNoScreen("bug report")
+}
+
+func TestASimulatorsAppIsSentATestPushFromTheAppMenu(t *testing.T) {
+	h := start(t, iphone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	toPush := []string{"o", "enter", "down", "down", "down", "down", "down", "down", "down", "enter"}
+	h.press(toPush...)
+	h.wantScreen("Send a test push notification to com.example.app")
+	h.typeText("Order ready")
+	h.press("enter")
+	h.wantCalls(`push SIM-1 com.example.app {"aps":{"alert":{"body":"Order ready","title":"lazymobile"},"sound":"default"}}`, 1)
+	h.wantScreen("Sent a push notification to com.example.app on iPhone 17")
+
+	h.press(append(toPush, "enter")...)
+	h.wantCalls(`push SIM-1 com.example.app {"aps":{"alert":{"body":"A test notification","title":"lazymobile"},"sound":"default"}}`, 1)
+}
+
+func TestOnlyASimulatorsAppIsOfferedATestPush(t *testing.T) {
+	h := start(t, pixel, usbPhone)
+	h.backend.installed = []device.App{{ID: "com.example.app"}}
+	for _, d := range []device.Device{pixel, usbPhone} {
+		h.selectDevice(d)
+		h.press("o", "enter")
+		h.wantScreen("com.example.app on " + d.Name)
+		h.wantNoScreen("push notification")
+		h.press("esc")
+	}
+}
+
+func TestMShowsTheAppsCPUAndMemoryInTheLogHeading(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.wantNoScreen("CPU")
+	h.press("M")
+	h.wantCalls("usage Pixel_9a com.example.app 0", 1)
+	// One sample gives the memory; the CPU needs a second one.
+	h.wantScreen("CPU … · 180 MB")
+	h.tick(2 * time.Second)
+	// The second sample starts from the pid of the first, and 1 s of CPU in 2 s is 50%.
+	h.wantCalls("usage Pixel_9a com.example.app 41", 1)
+	h.wantScreen("CPU 50% · 180 MB")
+	h.press("M")
+	h.wantNoScreen("CPU")
+	h.tick(2 * time.Second)
+	h.wantCalls("usage", 2)
+}
+
+func TestCPUAndMemoryNeedOneAppAndStopOnAFailure(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "")
+	h.press("M")
+	h.wantScreen("Open the log of one app to see its CPU and memory")
+	h.wantCalls("usage", 0)
+
+	h = start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.backend.fail = map[string]error{"usage": apperr.New(apperr.ToolMissing, "adb was not found")}
+	h.press("M")
+	h.wantScreen("adb was not found")
+	h.wantNoScreen("CPU")
+	h.tick(2 * time.Second)
+	h.wantCalls("usage", 1)
+}
+
+func TestCPUAndMemoryWaitForAnAppThatRestarts(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.press("M")
+	h.wantScreen("CPU … · 180 MB")
+	h.backend.fail = map[string]error{"usage": apperr.New(apperr.InvalidState, "com.example.app is not running on Pixel 9a")}
+	h.tick(2 * time.Second)
+	h.wantScreen("app not running")
+	h.backend.fail = nil
+	h.tick(2 * time.Second)
+	h.wantScreen("CPU … · 180 MB")
+	h.wantCalls("usage", 3)
+}
+
+func TestASampleFromBeforeMWasPressedAgainIsDropped(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	v := h.m.logPanes[0]
+	// On, off and on again, before the first sample comes back.
+	first := h.m.toggleUsage(v)
+	h.m.toggleUsage(v)
+	second := h.m.toggleUsage(v)
+	h.run(first)
+	// The second sample is still out, so the tick starts no third one.
+	h.tick(2 * time.Second)
+	h.run(second)
+	h.wantCalls("usage", 2)
+	h.wantScreen("CPU … · 180 MB")
 }
