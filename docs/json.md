@@ -50,7 +50,7 @@ A command interrupted with Ctrl-C exits with 130 and prints nothing.
 
 - `action` is the command, except that `launch --restart` is `restart`.
 - `device` is the device as it was found, so its `state` is from before the action.
-- `app` is set for `uninstall`, `launch`, `restart`, `stop` and `push`. `url` is set for `link`. `port` is set for `dev_reverse`. `path` is set for `install` (the file given) and `screenshot` (the full path of the PNG that was saved).
+- `app` is set for `uninstall`, `launch`, `restart`, `stop`, `push`, and `install --launch`. `url` is set for `link`. `port` is set for `dev_reverse`. `path` is set for `install` (the build installed: the newest in a folder that was given) and `screenshot` (the full path of the PNG that was saved).
 - `warnings` is a list of sentences, set when the action worked but left something behind, such as
   Simulator staying open after `shutdown`.
 

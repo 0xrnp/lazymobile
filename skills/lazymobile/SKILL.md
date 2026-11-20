@@ -33,9 +33,12 @@ device id: `npx expo run:ios --device <id>`, `npx expo run:android --device <id>
 `flutter build ios --simulator`, `xcodebuild -destination id=<id>`. After those:
 
 ```sh
-lazymobile install <id> <path to .app or .apk> --json
-lazymobile launch <id> <app-id> --restart --json
+lazymobile install <id> <.app, .apk, or a folder of builds> --launch --json
 ```
+
+A folder installs the newest build in it, such as `app/build/outputs/apk/debug`, and `--launch`
+starts the app under the id the build holds (with any debug or flavor suffix), and says it in
+`app`. Without `--launch`, start it with `lazymobile launch <id> <app-id> --restart --json`.
 
 Then look at it:
 

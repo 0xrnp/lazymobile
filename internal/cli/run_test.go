@@ -335,7 +335,7 @@ func TestAProjectWithOnlyAnIOSScriptRunsOnAndroidWithItsOwnTool(t *testing.T) {
 	e := newRunEnv(t)
 	e.writeProject(t, `{"scripts": {"ios": "expo run:ios"}, "dependencies": {"expo": "~54.0.0"}}`, "node_modules/.bin/expo")
 	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Serial: "emulator-5554", Platform: device.Android, Kind: device.Emulator, State: device.Booted}
-	plans, err := e.app.runPlans(e.dir, nil)
+	plans, err := e.app.runPlans(context.Background(), e.dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

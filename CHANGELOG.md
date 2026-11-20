@@ -7,10 +7,11 @@ them, and the dashboard shows what is new once after an upgrade.
 
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
-  tool you already use: the actions named `run` in `.lazymobile.json`, else your `package.json`
-  scripts that run it (such as `ios` with `expo run:ios`), else `flutter run`, the project's own
-  `expo run`, or `react-native run-ios` and `run-android`. Its keys, such as hot
-  reload, keep working. It asks which way to run and which device when it cannot tell, offers only
+  tool you already use. A native Kotlin or Swift app is built with `./gradlew` or `xcodebuild`,
+  then installed and launched (Xcode builds on simulators). Flutter, React Native and Expo run
+  with `flutter run`, `react-native run-ios` and `run-android`, or the project's own `expo run`.
+  The actions named `run` in `.lazymobile.json` come first, then your `package.json` scripts that
+  run the app (such as `ios` with `expo run:ios`). Keys such as hot reload keep working. It asks which way to run and which device when it cannot tell, offers only
   the ways that fit a device you name, and remembers the answers for the folder (#42)
 - `lazymobile run --here` runs your tool inside lazymobile: the tool on the left, the app's log on
   the right, and `ctrl+]` to switch to the full dashboard and back while the tool keeps running.
@@ -43,6 +44,8 @@ them, and the dashboard shows what is new once after an upgrade.
   `--json`
 
 ### Other
+- `lazymobile install <device> <folder> --launch` installs the newest build in a folder, such as
+  Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
 - `lazymobile push <device> <app-id>`, "Send a test push notification" in the app menu, and

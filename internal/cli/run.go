@@ -112,7 +112,7 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	plans, err := a.runPlans(folder, extra)
+	plans, err := a.runPlans(ctx, folder, extra)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", strings.Join(argv, " "), plan.dir)
+	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", shownCommand(argv), plan.dir)
 	if plan.script != "" {
 		// The script runs whatever it says, so say it, not just its name.
 		fmt.Fprintf(a.Stderr, "The script is `%s`\n", plan.script)
@@ -208,8 +208,8 @@ func splitTool(args []string) (own, tool []string) {
 
 // runPlans lists the ways to run the project in folder: each profile in .lazymobile.json, in file
 // order, else the package.json scripts that run the app, else the tool the folder looks like it uses:
-// Flutter, Expo or React Native.
-func (a *App) runPlans(folder string, extra []string) ([]runPlan, error) {
+// Flutter, Expo, React Native, Gradle or Xcode.
+func (a *App) runPlans(ctx context.Context, folder string, extra []string) ([]runPlan, error) {
 	var all []actions.Action
 	if a.Actions != nil {
 		var err error
@@ -235,16 +235,26 @@ func (a *App) runPlans(folder string, extra []string) ([]runPlan, error) {
 	if plans = scriptPlans(folder, extra); len(plans) > 0 {
 		// A project with an ios script and no android one still runs on Android with its own tool.
 		if missing := uncovered(plans); missing != "" {
-			for _, p := range builtInPlans(folder, extra) {
-				p.platform = missing
-				plans = append(plans, p)
+			builtIn, err := a.builtInPlans(ctx, folder, extra)
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range builtIn {
+				if p.platform == "" || p.platform == missing {
+					p.platform = missing
+					plans = append(plans, p)
+				}
 			}
 		}
 		return plans, nil
 	}
-	if plans = builtInPlans(folder, extra); len(plans) == 0 {
+	plans, err := a.builtInPlans(ctx, folder, extra)
+	if err != nil {
+		return nil, err
+	}
+	if len(plans) == 0 {
 		return nil, apperr.New(apperr.NotFound, "Cannot tell how to run the app in %s", folder).
-			WithHint("lazymobile run knows Flutter, Expo and React Native projects, and package.json scripts that run one of them. For another tool, add an action named \"run\" to %s, for example {\"name\": \"run\", \"command\": [\"make\", \"run-dev\", \"DEVICE={device_id}\"]}. Add \"run dev\" and \"run prod\" for flavors.",
+			WithHint("lazymobile run knows Flutter, Expo and React Native projects, native Android projects with a gradlew, Xcode projects, and package.json scripts that run one of them. For another tool, add an action named \"run\" to %s, for example {\"name\": \"run\", \"command\": [\"make\", \"run-dev\", \"DEVICE={device_id}\"]}. Add \"run dev\" and \"run prod\" for flavors.",
 				actions.ConfigFile)
 	}
 	return plans, nil
@@ -268,8 +278,9 @@ func uncovered(plans []runPlan) device.Platform {
 	return ""
 }
 
-// builtInPlans runs a Flutter, Expo or React Native project with its own tool.
-func builtInPlans(folder string, extra []string) []runPlan {
+// builtInPlans runs a Flutter, Expo or React Native project with its own tool, and a native one
+// with Gradle or Xcode.
+func (a *App) builtInPlans(ctx context.Context, folder string, extra []string) ([]runPlan, error) {
 	var plans []runPlan
 	pkg, _ := readPackage(folder)
 	if _, err := os.Stat(filepath.Join(folder, "pubspec.yaml")); err == nil {
@@ -292,8 +303,10 @@ func builtInPlans(folder string, extra []string) []runPlan {
 			}
 			return append(append([]string{bin, "run-" + string(d.Platform)}, reactNativeDevice(d)...), extra...), nil
 		}})
+	} else {
+		return a.nativePlans(ctx, folder, extra)
 	}
-	return plans
+	return plans, nil
 }
 
 // chooseRunPlan is the way to run that was named with --profile, else the only one, else the one
@@ -680,4 +693,13 @@ func findBin(dir, name string) (string, error) {
 	}
 	return "", apperr.New(apperr.ToolMissing, "%s is not installed in %s", name, dir).
 		WithHint("Install the project's packages first, for example with pnpm install, npm install or yarn.")
+}
+
+// shownCommand is argv as the user would type it: the script itself for `sh -c`, which a native
+// build uses to build, install and launch in one command.
+func shownCommand(argv []string) string {
+	if len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" {
+		return argv[2]
+	}
+	return strings.Join(argv, " ")
 }

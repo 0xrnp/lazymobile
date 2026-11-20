@@ -53,7 +53,7 @@ Usage:
   lazymobile delete <device> --yes [--json]
   lazymobile delete --unavailable [--yes] [--json]   delete the simulators Xcode can no longer run (an update removed their runtime). Without --yes it lists them with the disk each uses
   lazymobile uninstall <device> <app-id> --yes [--json]   remove an app and its data from a running device
-  lazymobile install <device> <path> [--json]   an .apk, or an .app folder for a simulator or an iPhone
+  lazymobile install <device> <path> [--launch] [--json]   an .apk, an .app folder for a simulator or an iPhone, or a folder with builds (the newest); --launch starts the app
   lazymobile install --all | --set <name> <path> [--phones] [--json]   on every running device that can take it. Real phones only with --phones
   lazymobile launch <device> <app-id> [--restart] [--json]   open an app. --restart stops a running copy first
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
@@ -506,6 +506,7 @@ func (a *App) install(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
 	phones := fs.Bool("phones", false, "")
+	launch := fs.Bool("launch", false, "")
 	var many several
 	many.flags(fs)
 	positional, err := parse(fs, args)
@@ -515,6 +516,9 @@ func (a *App) install(ctx context.Context, args []string) error {
 	if many.wanted() {
 		if len(positional) != 1 {
 			return usageError{"install --all and --set need just a path"}
+		}
+		if *launch {
+			return usageError{"--launch goes with one device, not --all or --set"}
 		}
 		return a.installSeveral(ctx, many, positional[0], *phones, *asJSON)
 	}
@@ -528,10 +532,33 @@ func (a *App) install(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.Manager.Install(ctx, d, positional[1]); err != nil {
+	build := positional[1]
+	// A device that is off is reported before a folder is looked through.
+	if d.Ready() {
+		if build, err = mobile.BuildIn(build, d); err != nil {
+			return err
+		}
+	}
+	if err := a.Manager.Install(ctx, d, build); err != nil {
 		return err
 	}
-	return a.done(*asJSON, result{Action: "install", Device: d, Path: positional[1]}, "Installed on "+d.Name)
+	if !*launch {
+		return a.done(*asJSON, result{Action: "install", Device: d, Path: build}, "Installed on "+d.Name)
+	}
+	id, err := a.Manager.BuiltAppID(ctx, d, build)
+	if err == nil {
+		// A new build replaces the app, so a copy that was running is the old one.
+		err = a.Manager.Launch(ctx, d, id, mobile.LaunchOptions{Restart: true})
+	}
+	if err != nil {
+		// The install worked, so the failure says so: the app is on the device.
+		if e, ok := err.(*apperr.Error); ok {
+			e.Message = "Installed on " + d.Name + ", but could not launch it: " + e.Message
+		}
+		return err
+	}
+	a.rememberLaunchedBuild(d, id)
+	return a.done(*asJSON, result{Action: "install", Device: d, Path: build, App: id}, "Installed and launched "+id+" on "+d.Name)
 }
 
 func (a *App) uninstall(ctx context.Context, args []string) error {

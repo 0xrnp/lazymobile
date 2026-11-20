@@ -65,6 +65,12 @@ func newEnv(t *testing.T) *env {
 			return run.Result{}
 		case strings.HasPrefix(command, "xcode-select"):
 			return runtest.Fail(2, "no developer directory")
+		case strings.HasPrefix(command, "xcodebuild -list"):
+			return runtest.Out(`{"project": {"name": "Shop", "schemes": ["Shop", "ShopTests"]}}`)
+		case strings.HasPrefix(command, "xcodebuild -showBuildSettings"):
+			return runtest.Out(`[{"buildSettings": {"WRAPPER_EXTENSION": "app", "BUILT_PRODUCTS_DIR": "/DD/Debug-iphonesimulator", "FULL_PRODUCT_NAME": "Shop.app"}}]`)
+		case strings.HasPrefix(command, "plutil -extract CFBundleIdentifier"):
+			return runtest.Out("com.example.built\n")
 		}
 		return run.Result{Missing: true}
 	}}
@@ -283,6 +289,52 @@ func TestInstallChecksTheKindOfFile(t *testing.T) {
 	}
 	if code := e.run("install", "iPhone 16", app); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
 		t.Errorf("stopped device: code %d, stderr %q", code, e.errs.String())
+	}
+}
+
+func TestInstallLaunchesTheNewestBuildInAFolder(t *testing.T) {
+	e := newEnv(t)
+	products := filepath.Join(t.TempDir(), "Products")
+	app := filepath.Join(products, "Debug-iphonesimulator", "Shop.app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.run("install", "iPhone 16 Pro", products, "--launch"); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	if !e.fake.Called("simctl install "+runningSim+" "+app) || !e.fake.Called("simctl launch") || !e.fake.Called("com.example.built") {
+		t.Errorf("calls %q", e.fake.Calls())
+	}
+	if !strings.Contains(e.out.String(), "Installed and launched com.example.built on iPhone 16 Pro") {
+		t.Errorf("output %q", e.out.String())
+	}
+	if code := e.run("install", "--all", products, "--launch"); code != ExitUsage {
+		t.Errorf("--launch with --all: code %d", code)
+	}
+}
+
+func TestInstallOfAFolderKeepsItsChecksAndSaysWhatWasInstalled(t *testing.T) {
+	e := newEnv(t)
+	products := filepath.Join(t.TempDir(), "Products")
+	app := filepath.Join(products, "Debug-iphonesimulator", "Shop.app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A device that is off is reported first, as for a single build, before the folder is searched.
+	if code := e.run("install", "iPhone 16", t.TempDir()); code != ExitFailure || !strings.Contains(e.errs.String(), "is not running") {
+		t.Errorf("stopped device: code %d, stderr %q", code, e.errs.String())
+	}
+	answer := e.fake.Answer
+	e.fake.Answer = func(command string, argv []string, o run.Options) run.Result {
+		if strings.HasPrefix(command, "plutil -extract") {
+			return runtest.Fail(1, "no Info.plist")
+		}
+		return answer(command, argv, o)
+	}
+	e.errs.Reset()
+	if code := e.run("install", "iPhone 16 Pro", products, "--launch"); code != ExitFailure ||
+		!strings.Contains(e.errs.String(), "Installed on iPhone 16 Pro, but could not launch it") || !e.fake.Called("simctl install") {
+		t.Errorf("code %d, stderr %q", code, e.errs.String())
 	}
 }
 

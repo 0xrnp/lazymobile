@@ -63,8 +63,9 @@ Every key, with `?`:
 - For React Native on Android: reach Metro, open the developer menu, reload.
 
 **Run your app**
-- `lazymobile run` picks a device, starts it, and runs your app with Flutter, Expo, React Native,
-  your `package.json` scripts or your own command, with hot reload working as before.
+- `lazymobile run` picks a device, starts it, and runs your app: a native Kotlin or Swift app with
+  Gradle or Xcode, then installed and launched, or Flutter, React Native and Expo with their own
+  tool, hot reload included. Your `package.json` scripts and your own command work too.
 - `--here` runs it inside lazymobile with the app's log beside it. `ctrl+p` saves a screenshot or a
   recording and copies it, or copies the log to ask an AI about.
 
@@ -178,6 +179,23 @@ How it runs the app, the first that fits:
    and downloads nothing.
 5. React Native (`react-native` in `package.json`): the project's own `react-native run-ios --udid`
    or `run-android --device`.
+6. A native Android app (a `gradlew`, and a module that applies `com.android.application`):
+   `./gradlew :app:assembleDebug`, then `lazymobile install <device> app/build/outputs/apk/debug
+   --launch`, which installs the APK and starts it under the id Gradle gave it. A project with
+   product flavors names the one to build: `lazymobile run -- assembleDevDebug`. Android phones work
+   too.
+7. A native iOS app (an `.xcworkspace` or `.xcodeproj` in the folder or a folder in it, such as
+   `iosApp`; one way to run per scheme):
+   `xcodebuild -scheme <scheme> -configuration Debug -destination id=<simulator> build`, then
+   `lazymobile install <simulator> <the built .app> --launch`. It builds where Xcode does
+   (DerivedData), so a build made in Xcode is reused. Simulators only: an iPhone needs code
+   signing, so run it from Xcode. The schemes come from the project's scheme files; a project with
+   none is asked with `xcodebuild -list`, which takes a few seconds.
+
+A folder with both, such as a Kotlin Multiplatform project, offers each on its own platform. The
+build and install are one shell line, shown before it runs; to find where the app will be built,
+lazymobile first asks `xcodebuild -showBuildSettings`, which can resolve the project's Swift
+packages. `--here` shows the build in its pane and opens the app's log once it is launched.
 
 When there are several ways, such as an `ios` and an `ios:release` script, or actions named
 `run dev`, `run prod` and `run:staging`, it lists them once and remembers your answer for the folder. A device you name
@@ -267,6 +285,7 @@ lazymobile delete "iPhone 17" --yes
 lazymobile delete --unavailable [--yes]   # simulators Xcode can no longer run: lists them with their size, deletes with --yes
 lazymobile uninstall "Pixel 9a" com.example.app --yes   # the app and its data
 lazymobile install "Pixel 9a" ./app.apk   # an .app folder for a simulator or an iPhone
+lazymobile install "Pixel 9a" app/build/outputs/apk --launch   # the newest build in a folder, then start it
 lazymobile launch "Pixel 9a" com.example.app [--restart]
 lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
 lazymobile appearance "Pixel 9a" [dark|light]   # no mode shows the current one (Android 10 or newer)
