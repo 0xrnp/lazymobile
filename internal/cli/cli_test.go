@@ -56,6 +56,8 @@ func newEnv(t *testing.T) *env {
 				 "supportedDeviceTypes": [
 					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17", "name": "iPhone 17", "productFamily": "iPhone"},
 					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "name": "iPhone 17 Pro", "productFamily": "iPhone"}]}]}`)
+		case strings.Contains(command, "simctl pbpaste"):
+			return runtest.Out("copied text\n")
 		case strings.Contains(command, "simctl create"):
 			return runtest.Out("0A0A0A0A-0000-4000-8000-0000000000C1\n")
 		case strings.Contains(command, "simctl listapps"):
@@ -1212,5 +1214,52 @@ func TestNetworkNeedsAnEmulatorAndAKnownMode(t *testing.T) {
 	}
 	if code := e.run("network", "iPhone 16 Pro", "offline"); code != ExitFailure || !strings.Contains(e.errs.String(), "Network Link Conditioner") {
 		t.Errorf("simulator: code %d, errs %q", code, e.errs.String())
+	}
+}
+
+func TestMediaAddsPhotosToASimulatorAfterCheckingThem(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	photo, doc := filepath.Join(dir, "a.png"), filepath.Join(dir, "a.pdf")
+	for _, f := range []string{photo, doc} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := e.run("media", "iPhone 16 Pro", photo, "--json"); code != ExitOK || !e.fake.Called("simctl addmedia 00000000-0000-4000-8000-0000000000A2 "+photo) || e.object(t)["action"] != "media" {
+		t.Errorf("code %d, out %q, errs %q, calls %v", code, e.out.String(), e.errs.String(), e.fake.Calls())
+	}
+	for _, args := range [][]string{{"media", "iPhone 16 Pro"}, {"media", "iPhone 16 Pro", doc}, {"media", "iPhone 16 Pro", filepath.Join(dir, "missing.png")}} {
+		if code := e.run(args...); code == ExitOK {
+			t.Errorf("%q worked", args)
+		}
+	}
+	added := 0
+	for _, call := range e.fake.Calls() {
+		if strings.Contains(call, "addmedia") {
+			added++
+		}
+	}
+	if added != 1 {
+		t.Errorf("addmedia ran %d times, want once, for the good file: %v", added, e.fake.Calls())
+	}
+}
+
+func TestClipboardSetsReadsAndTakesTextFromStandardInput(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("clipboard", "iPhone 16 Pro", "hello"); code != ExitOK || !e.fake.Called("simctl pbcopy 00000000-0000-4000-8000-0000000000A2") {
+		t.Errorf("set: code %d, errs %q, calls %v", code, e.errs.String(), e.fake.Calls())
+	}
+	if code := e.run("clipboard", "iPhone 16 Pro", "--get"); code != ExitOK || strings.TrimSpace(e.out.String()) != "copied text" {
+		t.Errorf("get: code %d, out %q", code, e.out.String())
+	}
+	e.app.Stdin = strings.NewReader("from a pipe\n")
+	if code := e.run("clipboard", "iPhone 16 Pro", "-"); code != ExitOK {
+		t.Errorf("stdin: code %d, errs %q", code, e.errs.String())
+	}
+	for _, args := range [][]string{{"clipboard", "iPhone 16 Pro"}, {"clipboard", "iPhone 16 Pro", "x", "--get"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%q: code %d, want %d", args, code, ExitUsage)
+		}
 	}
 }

@@ -48,6 +48,13 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- `lazymobile media <device> <file>...` and `add_media` for agents (`A` in the dashboard) put photos and
+  videos into a simulator's or an emulator's gallery, so an app that picks a photo has one to pick. A
+  simulator also takes contacts (`.vcf`). On an emulator the file is copied into Pictures or Movies
+  and never replaces one that is there: a second `test.png` becomes `test-2.png`. A real phone is left alone
+- `lazymobile clipboard <device> <text>` (or `-` to read the text from standard input, `--get` to print
+  it), `set_clipboard` for agents and `V` in the dashboard put text on an iOS simulator's clipboard, ready
+  to paste into a field. An Android emulator has no command for it and says so
 - Screenshots of a real iPhone: `lazymobile screenshot`, `p` in the dashboard and the `screenshot` agent tool now
   work on an iPhone through Xcode's `devicectl`, while it is unlocked. Screen recording is built the same way, but
   an iPhone whose iOS does not offer it to Xcode (an iPhone 17 Pro on iOS 27.0 did not) gets a clear

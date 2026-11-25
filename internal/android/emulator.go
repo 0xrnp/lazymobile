@@ -37,7 +37,7 @@ func (c *Client) emulator(d device.Device, what string) (string, error) {
 	}
 	if d.Kind != device.Emulator {
 		return "", apperr.New(apperr.Unsupported, "Cannot %s on %s: it is not an emulator", what, d.Name).
-			WithHint("Only emulators can be told where they are, given a tidy status bar, or slowed down.")
+			WithHint("Only emulators can do this: a phone is left alone.")
 	}
 	return adb, nil
 }

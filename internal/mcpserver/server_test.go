@@ -333,3 +333,20 @@ func TestReadLogsRefusesBadArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestAddMediaAndSetClipboard(t *testing.T) {
+	photo := filepath.Join(t.TempDir(), "a.png")
+	if err := os.WriteFile(photo, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session, fake, _ := connect(t)
+	if res := call(t, session, "add_media", map[string]any{"device": "iPhone 16 Pro", "files": []string{photo}}); res.IsError || !fake.Called("simctl addmedia 00000000-0000-4000-8000-0000000000A2 "+photo) {
+		t.Errorf("add_media: %q, calls %v", textOf(res), fake.Calls())
+	}
+	if res := call(t, session, "add_media", map[string]any{"device": "iPhone 16 Pro", "files": []string{photo + ".pdf"}}); !res.IsError {
+		t.Errorf("a missing file was accepted: %q", textOf(res))
+	}
+	if res := call(t, session, "set_clipboard", map[string]any{"device": "iPhone 16 Pro", "text": "hi"}); res.IsError || !fake.Called("simctl pbcopy 00000000-0000-4000-8000-0000000000A2") {
+		t.Errorf("set_clipboard: %q, calls %v", textOf(res), fake.Calls())
+	}
+}

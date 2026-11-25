@@ -206,6 +206,12 @@ func (f *fakeBackend) AppUsage(_ context.Context, d device.Device, id string, pi
 func (f *fakeBackend) SetNetwork(_ context.Context, d device.Device, mode string) error {
 	return f.record("network %s %s", d.ID, mode)
 }
+func (f *fakeBackend) AddMedia(_ context.Context, d device.Device, paths []string) ([]string, error) {
+	return nil, f.record("media %s %s", d.ID, strings.Join(paths, ","))
+}
+func (f *fakeBackend) SetClipboard(_ context.Context, d device.Device, text string) error {
+	return f.record("clipboard %s %s", d.ID, text)
+}
 func (f *fakeBackend) AppJank(_ context.Context, d device.Device, id string, reset bool) (device.Jank, error) {
 	if err := f.record("jank %s %s reset=%v", d.ID, id, reset); err != nil {
 		return device.Jank{}, err
@@ -2557,4 +2563,25 @@ func TestTheNetworkOfAnEmulatorIsChosenFromAWindow(t *testing.T) {
 	if h.m.modal != nil {
 		t.Error("a window opened for a simulator")
 	}
+}
+
+func TestAPhotoIsAddedAndTextIsCopiedFromAskingWindows(t *testing.T) {
+	h := start(t, pixel)
+	h.press("A")
+	h.wantScreen("Add a photo or video to Pixel 9a")
+	h.typeText("/tmp/receipt.png")
+	h.press("enter")
+	h.wantCalls("media Pixel_9a /tmp/receipt.png", 1)
+
+	// The clipboard is for a simulator only.
+	h.press("V")
+	h.wantScreen("Only an iOS simulator's clipboard")
+	h.wantCalls("clipboard", 0)
+
+	h = start(t, iphone)
+	h.press("V")
+	h.wantScreen("Copy text to iPhone 17")
+	h.typeText("hello")
+	h.press("enter")
+	h.wantCalls("clipboard SIM-1 hello", 1)
 }

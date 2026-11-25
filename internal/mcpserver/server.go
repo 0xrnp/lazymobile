@@ -108,6 +108,11 @@ func (s *Server) New() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "send_push", Annotations: notDestructive,
 		Description: "Send a test push notification to an app on a booted iOS simulator, as if it came from Apple. " +
 			"The app must have asked for notifications and been allowed. Android is refused: its pushes come through Firebase."}, s.sendPush)
+	mcp.AddTool(server, &mcp.Tool{Name: "add_media", Annotations: notDestructive,
+		Description: "Put photos or videos from this computer into a simulator's or emulator's gallery, so an app that picks a photo has one to pick. " +
+			"Give full paths. A simulator also takes contacts (.vcf). A real phone is left alone."}, s.addMedia)
+	mcp.AddTool(server, &mcp.Tool{Name: "set_clipboard", Annotations: notDestructive,
+		Description: "Put text on an iOS simulator's clipboard, ready to paste into a field. An Android emulator has no command for it."}, s.setClipboard)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_network", Annotations: notDestructive,
 		Description: "Make an Android emulator's network offline, online, or slow (gsm, edge, 3g, lte, full), to test an app with no connection or a bad one. " +
 			"Always finish with online. Only emulators: a phone and an iOS simulator are refused."}, s.setNetwork)
@@ -485,6 +490,43 @@ type pushArgs struct {
 	Title   string `json:"title,omitempty" jsonschema:"the notification's title"`
 	Body    string `json:"body,omitempty" jsonschema:"the notification's text"`
 	Payload string `json:"payload,omitempty" jsonschema:"a whole payload as JSON, such as {\"aps\": {\"badge\": 3}}, in place of title and body"`
+}
+
+type mediaArgs struct {
+	Device string   `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	Files  []string `json:"files" jsonschema:"full paths of photos or videos on this computer"`
+}
+
+func (s *Server) addMedia(ctx context.Context, _ *mcp.CallToolRequest, in mediaArgs) (*mcp.CallToolResult, any, error) {
+	d, err := s.Manager.Find(ctx, in.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	placed, err := s.Manager.AddMedia(ctx, d, in.Files)
+	if err != nil {
+		return nil, nil, err
+	}
+	sentence := fmt.Sprintf("Added %d file(s) to %s", len(in.Files), d.Name)
+	if len(placed) > 0 {
+		sentence += ": " + strings.Join(placed, ", ")
+	}
+	return text(sentence)
+}
+
+type clipboardArgs struct {
+	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	Text   string `json:"text" jsonschema:"the text to copy"`
+}
+
+func (s *Server) setClipboard(ctx context.Context, _ *mcp.CallToolRequest, in clipboardArgs) (*mcp.CallToolResult, any, error) {
+	d, err := s.Manager.Find(ctx, in.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.Manager.SetClipboard(ctx, d, in.Text); err != nil {
+		return nil, nil, err
+	}
+	return text("Copied the text to the clipboard of " + d.Name)
 }
 
 type networkArgs struct {

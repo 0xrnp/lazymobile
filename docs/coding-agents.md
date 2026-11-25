@@ -108,6 +108,8 @@ An editor opened from the Dock does not get the `PATH` of your shell, so it may 
 | `set_location` | Put a simulator or emulator at a latitude and longitude |
 | `set_permission` | Grant or revoke a permission, such as camera or photos |
 | `set_status_bar` | A tidy status bar for screenshots, or the normal one back |
+| `add_media` | Put photos or videos into a simulator's or emulator's gallery, so an app that picks a photo has one |
+| `set_clipboard` | Put text on an iOS simulator's clipboard, ready to paste into a field |
 | `set_network` | Make an Android emulator offline, online or slow (gsm, edge, 3g, lte), then back to online |
 | `app_jank` | How smoothly a running Android app draws: janky frames and frame times, with an optional reset |
 | `send_push` | A test push notification to an app on an iOS simulator, with a title and text or a whole payload |

@@ -64,6 +64,8 @@ var positionals = map[string][]argSpec{
 	"push":       {deviceArg, appArg},
 	"jank":       {deviceArg, appArg},
 	"create":     {words("ios", "android")},
+	"media":      {deviceArg, fileArg},
+	"clipboard":  {deviceArg},
 	"network":    {deviceArg, words(android.NetworkModes()...)},
 	"install":    {deviceArg, fileArg},
 	"appearance": {deviceArg, words("dark", "light")},

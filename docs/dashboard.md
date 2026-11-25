@@ -19,6 +19,8 @@ Devices:
 | `U` | Delete the simulators Xcode can no longer run, such as after an update removed their runtime. The pane says how many there are and how much disk they use. It names them and asks first, then runs `xcrun simctl delete unavailable` once. A simulator that can run is never touched |
 | `o` | Pick an app, then what to do with it: launch, restart or stop it, show its latest crash report, or save a bug report (a new folder here, as `lazymobile report` makes). On a simulator or emulator also grant or revoke a permission, on an emulator clear its data (asks first), and on a simulator send a test push notification. An iPhone's apps can be launched and restarted, not stopped, and their latest crash report is copied from the phone. An iPhone has no bug report in this menu |
 | `f` | Put a simulator or emulator at a place (latitude,longitude). On a simulator, `clear` takes it off. Not for real phones |
+| `A` | Add a photo or video to a simulator or emulator: it asks for a path on this computer. Not for real phones |
+| `V` | Copy text to an iOS simulator's clipboard. Not for Android |
 | `N` | Slow down or cut off an Android emulator's network: no connection, GSM, EDGE, 3G, LTE, or back to normal. Emulators only |
 | `c` `C` | Tidy the status bar of a simulator or emulator for a screenshot (9:41, full battery and signal), or restore it. Not for real phones |
 | `m` | Switch between dark and light mode. An Android device that follows the time of day is put in dark mode. Not for an iPhone |

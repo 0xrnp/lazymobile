@@ -66,6 +66,8 @@ Usage:
   lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator or a simulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
+  lazymobile media <device> <file>...   add photos and videos (a simulator also takes contacts, .vcf) to a simulator's or emulator's library
+  lazymobile clipboard <device> <text>|- | --get   put text on a simulator's clipboard (- reads it from standard input), or print it
   lazymobile network <device> offline|online|gsm|edge|3g|lte|full [--json]   an Android emulator with no connection, or a slow one
   lazymobile push <device> <app-id> [--title <text>] [--body <text>] [--payload <file>] [--json]   send a test push notification to an app on an iOS simulator
   lazymobile jank <device> <app-id> [--reset] [--json]   how many frames an Android app drew late (janky), and how long frames took. --reset starts the count again afterwards
@@ -240,6 +242,8 @@ type result struct {
 	Appearance string `json:"appearance,omitempty"`
 	// Permission is the permission that was granted or revoked.
 	Permission string `json:"permission,omitempty"`
+	// Files is where "media" put each file on an emulator.
+	Files []string `json:"files,omitempty"`
 	// Network is the mode an emulator's network was set to.
 	Network string `json:"network,omitempty"`
 	// Location is "latitude,longitude", or "cleared".
@@ -309,6 +313,10 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.statusBar(ctx, rest)
 	case "network":
 		return a.network(ctx, rest)
+	case "media":
+		return a.media(ctx, rest)
+	case "clipboard":
+		return a.clipboard(ctx, rest)
 	case "create":
 		return a.create(ctx, rest)
 	case "push":

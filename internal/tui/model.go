@@ -53,6 +53,8 @@ type Backend interface {
 	SendPush(ctx context.Context, d device.Device, id string, payload []byte) error
 	AppUsage(ctx context.Context, d device.Device, id string, pid int) (device.Usage, error)
 	SetNetwork(ctx context.Context, d device.Device, mode string) error
+	AddMedia(ctx context.Context, d device.Device, paths []string) ([]string, error)
+	SetClipboard(ctx context.Context, d device.Device, text string) error
 	AppJank(ctx context.Context, d device.Device, id string, reset bool) (device.Jank, error)
 	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
@@ -972,6 +974,10 @@ func (m *Model) deviceAction(key string) tea.Cmd {
 		return m.statusBar(d, key == "c")
 	case "N":
 		return m.networkChoices(d)
+	case "A":
+		return m.askMedia(d)
+	case "V":
+		return m.askClipboard(d)
 	case "i":
 		return m.pickBuild(d)
 	case "R":

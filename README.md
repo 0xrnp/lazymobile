@@ -303,6 +303,8 @@ lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"   # a simulator may ask "O
 lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: reach Metro, open the dev menu, reload
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile crash "Pixel 9a" com.example.app [--save crash.txt]   # the app's latest crash report, on an iPhone too
+lazymobile media "iPhone 17" photo.png clip.mp4   # photos and videos into a simulator's or emulator's gallery
+lazymobile clipboard "iPhone 17" "text to paste"   # a simulator's clipboard; --get prints it, - reads standard input
 lazymobile network "Pixel 9a" offline|online|gsm|edge|3g|lte|full   # an emulator with no connection, or a slow one
 lazymobile create ios "Shop test" --type "iPhone 17" [--runtime 27.2]   # or: create android <name> [--image ..] [--profile pixel_9]; create --list shows the choices
 lazymobile jank "Pixel 9a" com.example.app [--reset]   # janky frames and frame times, Android

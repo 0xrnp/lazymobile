@@ -24,6 +24,8 @@ the ones marked "run" were run on a real simulator or emulator (see [tested.md](
 | Janky frames | no ([5](#5-jank-on-ios)) | no | yes | yes |
 | Offline or slow network | no ([6](#6-network-on-ios)) | no | yes | no |
 | Metro and developer menu helpers | no ([7](#7-metro-helpers)) | no | yes | yes |
+| Add photos and videos | yes | no | yes | no ([8](#8-android-phones)) |
+| Set the clipboard | yes | no | no ([9](#9-the-android-clipboard)) | no |
 | `create` | yes | no | yes | no |
 
 ## Notes
@@ -82,3 +84,10 @@ shares the Mac's localhost. No command-line route to its developer menu or reloa
 An emulator can be told where it is and given a demo status bar through its console. A phone has no
 such console, and its permissions and data are left alone like an iPhone's. Dark and light mode,
 screenshots, recordings, links, CPU, memory and jank work on a phone.
+
+### 9. The Android clipboard
+
+Android has no shell command to set the clipboard: `cmd clipboard` answers "No shell command
+implementation" (tried on an Android 16 emulator). Only an app on the device can write it, and
+lazymobile does not install one. `adb shell input text` types into the focused field, which is a
+different thing.

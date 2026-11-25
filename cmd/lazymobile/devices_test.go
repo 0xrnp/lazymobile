@@ -117,6 +117,25 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 	a.ok("set_status_bar", map[string]any{"device": id, "mode": "clean"}, "tidy")
 	a.ok("set_status_bar", map[string]any{"device": id, "mode": "reset"}, "back to normal")
 
+	// Photos go into the gallery on both. The clipboard is the simulator's alone, the network and
+	// the frame stats the emulator's.
+	photo := filepath.Join(t.TempDir(), "lazymobile-e2e-"+run+".png")
+	if err := os.WriteFile(photo, tinyPNG, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.ok("add_media", map[string]any{"device": id, "files": []string{photo}}, "Added 1 file")
+	if android {
+		adb := filepath.Join(androidSDK(t), "platform-tools", "adb")
+		t.Cleanup(func() { exec.Command(adb, "-e", "shell", "rm", "-f", "/sdcard/Pictures/"+filepath.Base(photo)).Run() })
+		a.ok("set_network", map[string]any{"device": id, "mode": "offline"}, "offline")
+		a.ok("set_network", map[string]any{"device": id, "mode": "online"}, "online")
+		a.refused("set_clipboard", map[string]any{"device": id, "text": "x"}, "cannot be set")
+	} else {
+		a.ok("set_clipboard", map[string]any{"device": id, "text": "lazymobile " + run}, "Copied")
+		a.refused("set_network", map[string]any{"device": id, "mode": "offline"}, "Network Link Conditioner")
+		a.refused("app_jank", map[string]any{"device": id, "app": e2eApp}, "Instruments")
+	}
+
 	// An iOS simulator asks "Open in ...?" before it opens a deep link, and waits for a tap that
 	// nobody gives here. So on iOS the test app is told what to do by launch arguments, and open_link
 	// is tried with a web address. Android takes the deep links.
@@ -187,6 +206,13 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 
 	a.ok("launch", map[string]any{"device": id, "app": e2eApp, "restart": true}, "Launched")
 	a.ok("stop", map[string]any{"device": id, "app": e2eApp}, "Stopped")
+
+	if android {
+		// The app runs once more, so that it has drawn frames to count.
+		a.ok("launch", map[string]any{"device": id, "app": e2eApp}, "Launched")
+		time.Sleep(3 * time.Second)
+		a.ok("app_jank", map[string]any{"device": id, "app": e2eApp, "reset": true}, `"frames"`)
+	}
 
 	a.refused("launch", map[string]any{"device": id, "app": "dev.lazymobile.missing"}, "dev.lazymobile.missing")
 	missing := filepath.Join(t.TempDir(), "missing"+filepath.Ext(appPath))
@@ -363,6 +389,11 @@ func runLazymobile(t *testing.T, args ...string) []byte {
 	}
 	return out
 }
+
+// tinyPNG is a 1 x 1 picture, enough for a gallery.
+var tinyPNG = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
+	0, 0, 0, 0x0d, 'I', 'D', 'A', 'T', 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0, 0x05, 0, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d,
+	0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xae, 0x42, 0x60, 0x82}
 
 // simctl runs xcrun simctl <verb> <simulator> ... for a step of the test.
 func simctl(t *testing.T, verb string, args ...string) {
