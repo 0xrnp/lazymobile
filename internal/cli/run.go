@@ -16,6 +16,7 @@ import (
 	"github.com/0xrnp/lazymobile/internal/actions"
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
+	"github.com/0xrnp/lazymobile/internal/mcpserver"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/state"
 )
@@ -112,54 +113,11 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	plans, err := a.runPlans(ctx, folder, extra)
+	prepared, err := a.prepareRun(ctx, runOptions{folder: folder, device: positional, profile: *profile, yes: *yes, choose: *choose, extra: extra})
 	if err != nil {
 		return err
 	}
-	if len(positional) == 1 {
-		// A named device leaves out the ways to run on the other platform, such as an ios script.
-		d, err := a.Manager.Find(ctx, positional[0])
-		if err != nil {
-			return err
-		}
-		plans = plansFor(plans, d.Platform)
-	}
-	plan, err := a.chooseRunPlan(ctx, plans, folder, *profile, *choose)
-	if err != nil {
-		return err
-	}
-	d, err := a.runDevice(ctx, plan, folder, positional, *choose)
-	if err != nil {
-		return err
-	}
-	argv, err := plan.argv(d)
-	if err != nil {
-		return err
-	}
-	if plan.fromFile && !*yes {
-		return usageError{fmt.Sprintf("%s in %s would run `%s` on %s. Add --yes to run it",
-			actions.ConfigFile, plan.dir, strings.Join(argv, " "), d.Name)}
-	}
-	if !d.Ready() {
-		fmt.Fprintf(a.Stderr, "Starting %s...\n", d.Name)
-		if err := a.Manager.Boot(ctx, d, mobile.BootOptions{Wait: true}); err != nil {
-			return err
-		}
-		// An emulator has an adb serial only once it runs, and that is what the tools want.
-		if d, err = a.Manager.Find(ctx, d.ID); err != nil {
-			return err
-		}
-		if argv, err = plan.argv(d); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", shownCommand(argv), plan.dir)
-	if plan.script != "" {
-		// The script runs whatever it says, so say it, not just its name.
-		fmt.Fprintf(a.Stderr, "The script is `%s`\n", plan.script)
-	}
-	// A dashboard open in this folder follows the run: it selects this device and opens the app's log.
-	_ = a.State.Update(func(f *state.File) { f.RememberRunStarted(folder, d.Key(), time.Now()) })
+	plan, d, argv := prepared.plan, prepared.device, prepared.argv
 	if *here {
 		title := plan.name
 		if title == runAction {
@@ -175,6 +133,113 @@ func (a *App) runProject(ctx context.Context, args []string) error {
 		fmt.Fprintf(a.Stderr, "Logs and device tools: add --here to run it inside lazymobile, or run lazymobile in another terminal in this folder (or add --split). It opens on %s.\n", d.Name)
 	}
 	return a.runTool(ctx, plan.dir, argv)
+}
+
+// runOptions say what to run, and where, for prepareRun.
+type runOptions struct {
+	// folder is where the run was asked for: what is remembered and what a dashboard looks up is
+	// keyed by it.
+	folder string
+	// device is the one device named, or none.
+	device  []string
+	profile string
+	yes     bool
+	choose  bool
+	extra   []string
+}
+
+// preparedRun is a project's tool and the running device it goes on.
+type preparedRun struct {
+	plan   runPlan
+	device device.Device
+	argv   []string
+}
+
+// prepareRun finds the way to run the project and the device, starts the device when it is off, and
+// remembers the choice for the folder. It does not start the tool.
+func (a *App) prepareRun(ctx context.Context, o runOptions) (preparedRun, error) {
+	plans, err := a.runPlans(ctx, o.folder, o.extra)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	if len(o.device) == 1 {
+		// A named device leaves out the ways to run on the other platform, such as an ios script.
+		d, err := a.Manager.Find(ctx, o.device[0])
+		if err != nil {
+			return preparedRun{}, err
+		}
+		plans = plansFor(plans, d.Platform)
+	}
+	plan, err := a.chooseRunPlan(ctx, plans, o.folder, o.profile, o.choose)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	d, err := a.runDevice(ctx, plan, o.folder, o.device, o.choose)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	argv, err := plan.argv(d)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	if plan.fromFile && !o.yes {
+		return preparedRun{}, usageError{fmt.Sprintf("%s in %s would run `%s` on %s. Add --yes to run it",
+			actions.ConfigFile, plan.dir, strings.Join(argv, " "), d.Name)}
+	}
+	if !d.Ready() {
+		fmt.Fprintf(a.Stderr, "Starting %s...\n", d.Name)
+		if err := a.Manager.Boot(ctx, d, mobile.BootOptions{Wait: true}); err != nil {
+			return preparedRun{}, err
+		}
+		// An emulator has an adb serial only once it runs, and that is what the tools want.
+		if d, err = a.Manager.Find(ctx, d.ID); err != nil {
+			return preparedRun{}, err
+		}
+		if argv, err = plan.argv(d); err != nil {
+			return preparedRun{}, err
+		}
+	}
+	fmt.Fprintf(a.Stderr, "Running `%s` in %s\n", shownCommand(argv), plan.dir)
+	if plan.script != "" {
+		// The script runs whatever it says, so say it, not just its name.
+		fmt.Fprintf(a.Stderr, "The script is `%s`\n", plan.script)
+	}
+	// A dashboard open in this folder follows the run: it selects this device and opens the app's log.
+	_ = a.State.Update(func(f *state.File) { f.RememberRunStarted(o.folder, d.Key(), time.Now()) })
+	return preparedRun{plan: plan, device: d, argv: argv}, nil
+}
+
+// prepareAgentRun is prepareRun for an agent over MCP: it never asks questions, so with several ways
+// to run or several devices it says what to name, and a command from .lazymobile.json needs yes.
+func (a *App) prepareAgentRun(ctx context.Context, req mcpserver.RunRequest) (mcpserver.PreparedRun, error) {
+	folder := req.Folder
+	if folder == "" {
+		var err error
+		if folder, err = a.getwd(); err != nil {
+			return mcpserver.PreparedRun{}, err
+		}
+	}
+	if !filepath.IsAbs(folder) {
+		return mcpserver.PreparedRun{}, usageError{"folder must be a full path"}
+	}
+	if info, err := os.Stat(folder); err != nil || !info.IsDir() {
+		return mcpserver.PreparedRun{}, apperr.New(apperr.NotFound, "There is no folder at %s", folder)
+	}
+	quiet := *a
+	quiet.Terminal, quiet.Pick = false, nil
+	o := runOptions{folder: folder, profile: req.Profile, yes: req.Yes, extra: req.Flags}
+	if req.Device != "" {
+		o.device = []string{req.Device}
+	}
+	prepared, err := quiet.prepareRun(ctx, o)
+	if err != nil {
+		return mcpserver.PreparedRun{}, err
+	}
+	title := prepared.plan.name
+	if title == runAction {
+		title = filepath.Base(prepared.argv[0])
+	}
+	return mcpserver.PreparedRun{Dir: prepared.plan.dir, Argv: prepared.argv, Device: prepared.device, Title: title}, nil
 }
 
 // openDashboardBeside opens the dashboard in a pane next to this terminal, in the folder of the run,

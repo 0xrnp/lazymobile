@@ -359,7 +359,7 @@ func (a *App) run(ctx context.Context, args []string) error {
 		if len(rest) > 0 {
 			return usageError{"mcp takes no arguments"}
 		}
-		server := mcpserver.Server{Manager: a.Manager, Doctor: a.Doctor, State: a.State, Version: a.Version}
+		server := mcpserver.Server{Manager: a.Manager, Doctor: a.Doctor, State: a.State, Version: a.Version, PrepareRun: a.prepareAgentRun}
 		return server.Run(ctx)
 	}
 	if strings.HasPrefix(command, "-") {

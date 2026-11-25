@@ -48,6 +48,13 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- Agents can run the project: `run_start`, `run_status`, `run_reload` and `run_stop` (in `lazymobile mcp`)
+  start the tool the project already uses (`flutter run`, `expo run`, a package.json script, or the
+  `run` action in `.lazymobile.json`) on a device, which is started first when it is off. The tool
+  runs on a terminal of its own, so `run_reload` sends it `r` (or `R`) like a keypress, and each
+  answer carries the last lines of its output and, once it ends, its exit code. At most three runs
+  go at once, they end with the server, and a command from `.lazymobile.json` needs `yes`, as `--yes`
+  does. Run on a real Flutter app: started, hot reloaded and stopped on an emulator
 - On Android, the app picker and `lazymobile apps` no longer call Android's own apps (Settings, Clock)
   "not in the installed list" when you have used them before. An app that is on neither list still is
 - `lazymobile media <device> <file>...` and `add_media` for agents (`A` in the dashboard) put photos and

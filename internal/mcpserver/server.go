@@ -50,10 +50,17 @@ type Server struct {
 	Doctor  func(ctx context.Context) doctor.Report
 	State   state.Store
 	Version string
+	// PrepareRun finds the project's way to run and the device for it, and starts the device when it
+	// is off. Nil turns the run tools off.
+	PrepareRun func(ctx context.Context, req RunRequest) (PreparedRun, error)
+
+	runs runStore
 }
 
 // Run serves the tools on stdin and stdout until the client disconnects.
 func (s *Server) Run(ctx context.Context) error {
+	// A project run that an agent started does not outlive the server.
+	defer s.runs.stopAll()
 	return s.New().Run(ctx, &mcp.StdioTransport{})
 }
 
@@ -113,6 +120,18 @@ func (s *Server) New() *mcp.Server {
 			"Give full paths. A simulator also takes contacts (.vcf). A real phone is left alone."}, s.addMedia)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_clipboard", Annotations: notDestructive,
 		Description: "Put text on an iOS simulator's clipboard, ready to paste into a field. An Android emulator has no command for it."}, s.setClipboard)
+	if s.PrepareRun != nil {
+		mcp.AddTool(server, &mcp.Tool{Name: "run_start", Annotations: notDestructive,
+			Description: "Run the project in a folder on a device with the tool it already uses (flutter run, react-native run-ios, expo run, a Gradle or Xcode build, or the action named run in .lazymobile.json). " +
+				"The device is started when it is off. The tool keeps going after this answers: read it with run_status, reload with run_reload, end it with run_stop. " +
+				"The command shown in the answer is what ran. A command from .lazymobile.json is only run with yes, so show it to the user first."}, s.runStart)
+		mcp.AddTool(server, &mcp.Tool{Name: "run_status", Annotations: readOnly,
+			Description: "Whether a run is going or has ended (with its exit code), and the last lines of the tool's output: build errors, \"Reloaded\", the app's own prints."}, s.runStatus)
+		mcp.AddTool(server, &mcp.Tool{Name: "run_reload", Annotations: notDestructive,
+			Description: "Hot reload a running tool by sending it r, or hot restart with restart (R, Flutter). Read the answer for what the tool said."}, s.runReload)
+		mcp.AddTool(server, &mcp.Tool{Name: "run_stop", Annotations: notDestructive,
+			Description: "End a run, as ctrl+c would."}, s.runStop)
+	}
 	mcp.AddTool(server, &mcp.Tool{Name: "set_network", Annotations: notDestructive,
 		Description: "Make an Android emulator's network offline, online, or slow (gsm, edge, 3g, lte, full), to test an app with no connection or a bad one. " +
 			"Always finish with online. Only emulators: a phone and an iOS simulator are refused."}, s.setNetwork)

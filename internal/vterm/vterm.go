@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 )
@@ -380,6 +381,35 @@ func (s *Session) Lines(back int) []string {
 		out = append(out, screen[i])
 	}
 	return out
+}
+
+// Tail is the last limit rows of everything the program drew, as plain text: what scrolled off the
+// top, then the screen, without the blank rows below the last one the program wrote. A program on
+// the alternate screen has only its screen.
+func (s *Session) Tail(limit int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rows []string
+	if !s.emu.IsAltScreen() {
+		sb := s.emu.Scrollback()
+		n := sb.Len()
+		for i := max(0, n-limit); i < n; i++ {
+			rows = append(rows, ansi.Strip(sb.Line(i).Render()))
+		}
+	}
+	for _, row := range strings.Split(s.emu.Render(), "\n") {
+		rows = append(rows, ansi.Strip(row))
+	}
+	for len(rows) > 0 && strings.TrimSpace(rows[len(rows)-1]) == "" {
+		rows = rows[:len(rows)-1]
+	}
+	for i := range rows {
+		rows[i] = strings.TrimRight(rows[i], " ")
+	}
+	if len(rows) > limit {
+		rows = rows[len(rows)-limit:]
+	}
+	return rows
 }
 
 // ScrollbackLen is how many rows can be scrolled back.

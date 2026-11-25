@@ -212,3 +212,19 @@ func TestStopKillsAChildThatOutlivesTheProgramAndIgnoresTheInterrupt(t *testing.
 		t.Errorf("the child %d was left running", pid)
 	}
 }
+
+func TestTailGivesTheLastRowsAsPlainTextIncludingWhatScrolledOff(t *testing.T) {
+	// 30 numbered lines on a 5-row screen: most of them scrolled off, and the first is in colour.
+	s := start(t, `printf '\033[31mline 1\033[0m\n'; for i in $(seq 2 30); do echo "line $i"; done`, 40, 5)
+	ended(t, s)
+	screenHas(t, s, "line 30")
+	tail := s.Tail(8)
+	if len(tail) != 8 || tail[0] != "line 23" || tail[7] != "line 30" {
+		t.Errorf("tail = %q", tail)
+	}
+	// All of it is there, with the colour taken off.
+	all := s.Tail(100)
+	if len(all) != 30 || all[0] != "line 1" {
+		t.Errorf("%d rows, first %q", len(all), all[0])
+	}
+}

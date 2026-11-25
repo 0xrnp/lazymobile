@@ -86,6 +86,13 @@ lazymobile jank <id> <app-id> [--reset] --json   # janky frames and frame times,
 lazymobile push <id> <app-id> --body 'Order ready' --json   # iOS simulator only
 ```
 
+## Run the project
+
+With the MCP server, `run_start` runs the project's own tool (`flutter run`, `expo run`, a package.json
+script) on a device and returns its first output. Read it with `run_status`, hot reload with
+`run_reload` (`restart` for a hot restart) and end it with `run_stop`. A command from `.lazymobile.json`
+needs `yes`: show it to the user first.
+
 ## Rules
 
 - Never run `erase`, `delete`, `uninstall` or `cleardata` unless the user asked for that exact
