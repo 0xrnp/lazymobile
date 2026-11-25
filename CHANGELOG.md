@@ -3,7 +3,7 @@
 What changed in each version. The program has these notes built in: `lazymobile changelog` prints
 them, and the dashboard shows what is new once after an upgrade.
 
-## 0.5.0 - 2026-11-25
+## 0.5.0 - 2026-11-26
 
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
