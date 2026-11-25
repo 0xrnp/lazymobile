@@ -302,6 +302,7 @@ lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
 lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: reach Metro, open the dev menu, reload
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile crash "Pixel 9a" com.example.app [--save crash.txt]   # the app's latest crash report, on an iPhone too
+lazymobile jank "Pixel 9a" com.example.app [--reset]   # janky frames and frame times, Android
 lazymobile push "iPhone 17" com.example.app [--title T --body B | --payload push.json]   # simulators
 lazymobile report "Pixel 9a" com.example.app [--out bug] [--since 5m] [--lines 200]   # a folder for a bug report
 lazymobile changelog [0.4.0] [--all] [--json]   # what changed in this version, one version, or all

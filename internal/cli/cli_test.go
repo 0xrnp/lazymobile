@@ -1116,3 +1116,13 @@ func TestPush(t *testing.T) {
 		t.Errorf("a shut-down simulator: code %d, errs %q", code, e.errs.String())
 	}
 }
+
+func TestJankIsRefusedOnIOSAndNeedsADeviceAndApp(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("jank", "iPhone 16 Pro", "com.example.installed"); code != ExitFailure || !strings.Contains(e.errs.String(), "Instruments") {
+		t.Errorf("iOS: code %d, errs %q", code, e.errs.String())
+	}
+	if code := e.run("jank", "iPhone 16 Pro"); code != ExitUsage {
+		t.Errorf("no app: code %d", code)
+	}
+}

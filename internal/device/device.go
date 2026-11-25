@@ -219,3 +219,17 @@ type Usage struct {
 	// Memory is the resident memory, in bytes.
 	Memory int64
 }
+
+// Jank is how smoothly an app has drawn its frames since its counters were last reset.
+type Jank struct {
+	Frames int `json:"frames"`
+	// Janky is how many frames missed their deadline.
+	Janky int `json:"janky"`
+	// Percent is Janky as a share of Frames, as the device reports it.
+	Percent float64 `json:"janky_percent"`
+	// P50, P90, P95 and P99 are how long frames took, in milliseconds. They are 0 when Frames is 0.
+	P50 int `json:"p50_ms"`
+	P90 int `json:"p90_ms"`
+	P95 int `json:"p95_ms"`
+	P99 int `json:"p99_ms"`
+}

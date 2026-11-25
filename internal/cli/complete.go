@@ -61,6 +61,7 @@ var positionals = map[string][]argSpec{
 	"uninstall": {deviceArg, appArg}, "launch": {deviceArg, appArg}, "stop": {deviceArg, appArg},
 	"cleardata": {deviceArg, appArg}, "crash": {deviceArg, appArg}, "report": {deviceArg, appArg},
 	"push":       {deviceArg, appArg},
+	"jank":       {deviceArg, appArg},
 	"install":    {deviceArg, fileArg},
 	"appearance": {deviceArg, words("dark", "light")},
 	"permission": {deviceArg, words("grant", "revoke"), {kind: argPermission}, appArg},

@@ -48,6 +48,10 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- `lazymobile jank <device> <app-id>` and `app_jank` for agents: how many frames an Android app
+  drew late and how long frames took (50th to 99th percentile), from `dumpsys gfxinfo`. `--reset`
+  starts the count again, so you can read it, use the app, and read it again. Emulators and
+  phones; iOS is refused and points to Instruments
 - `lazymobile push <device> <app-id>`, "Send a test push notification" in the app menu, and
   `send_push` for agents: a notification with a title and text, or your own payload file, to an
   app on an iOS simulator (#34)

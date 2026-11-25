@@ -59,3 +59,44 @@ func TestAppUsageRefusesWhatIsNotAnAppIDBeforeAskingTheDevice(t *testing.T) {
 		t.Errorf("%v, calls %q", err, fake.Calls())
 	}
 }
+
+func TestParseJank(t *testing.T) {
+	// What `dumpsys gfxinfo com.android.settings` printed on an Android 16 emulator, trimmed.
+	busy := "Applications Graphics Acceleration Info:\n\n** Graphics info for pid 27764 [com.android.settings] **\n\nStats since: 8780728177935ns\nTotal frames rendered: 4\nJanky frames: 3 (75.00%)\nJanky frames (legacy): 4 (100.00%)\n50th percentile: 117ms\n90th percentile: 118ms\n95th percentile: 119ms\n99th percentile: 120ms\nHISTOGRAM: 5ms=0\n50th gpu percentile: 4950ms\n"
+	got, ok := ParseJank(busy)
+	want := device.Jank{Frames: 4, Janky: 3, Percent: 75, P50: 117, P90: 118, P95: 119, P99: 120}
+	if !ok || got != want {
+		t.Errorf("%+v, %v; want %+v", got, ok, want)
+	}
+	// After a reset the percentiles are leftovers.
+	idle := "Total frames rendered: 0\nJanky frames: 0 (0.00%)\nJanky frames (legacy): 0 (0.00%)\n50th percentile: 4950ms\n"
+	if got, ok := ParseJank(idle); !ok || got != (device.Jank{}) {
+		t.Errorf("%+v, %v", got, ok)
+	}
+	for _, out := range []string{"", "Total frames rendered: 4\n", "Janky frames: 3 (75.00%)\n"} {
+		if _, ok := ParseJank(out); ok {
+			t.Errorf("%q was read", out)
+		}
+	}
+}
+
+func TestAppJankResetsOnlyWhenAsked(t *testing.T) {
+	ctx := context.Background()
+	out := "Total frames rendered: 10\nJanky frames: 1 (10.00%)\n50th percentile: 8ms\n"
+	for _, reset := range []bool{false, true} {
+		fake := runtest.Table(map[string]run.Result{"dumpsys gfxinfo com.example.app": runtest.Out(out)})
+		jank, err := New(fake, sdk(t, "adb")).AppJank(ctx, runningEmulator, "com.example.app", reset)
+		calls := fake.Calls()
+		if err != nil || jank.Janky != 1 || len(calls) != 1 || strings.HasSuffix(calls[0], " reset") != reset {
+			t.Errorf("reset %v: %+v, %v, %q", reset, jank, err, calls)
+		}
+	}
+	fake := runtest.Table(map[string]run.Result{"dumpsys gfxinfo com.example.app": runtest.Out("No process found for: com.example.app\n")})
+	if _, err := New(fake, sdk(t, "adb")).AppJank(ctx, runningEmulator, "com.example.app", false); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("not running: %v", err)
+	}
+	fake = runtest.Table(map[string]run.Result{})
+	if _, err := New(fake, sdk(t, "adb")).AppJank(ctx, runningEmulator, "x; reboot", false); apperr.CodeOf(err) != apperr.InvalidState || len(fake.Calls()) != 0 {
+		t.Errorf("bad id: %v, calls %q", err, fake.Calls())
+	}
+}

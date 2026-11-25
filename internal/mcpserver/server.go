@@ -107,6 +107,9 @@ func (s *Server) New() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "send_push", Annotations: notDestructive,
 		Description: "Send a test push notification to an app on a booted iOS simulator, as if it came from Apple. " +
 			"The app must have asked for notifications and been allowed. Android is refused: its pushes come through Firebase."}, s.sendPush)
+	mcp.AddTool(server, &mcp.Tool{Name: "app_jank", Annotations: notDestructive,
+		Description: "How smoothly a running Android app draws: how many frames were janky (missed their deadline) and how long frames took (50th to 99th percentile, in ms), since the app started or since the last reset. " +
+			"Use reset to start the count again after reading, then use the app and read again. iOS is refused."}, s.appJank)
 	return server
 }
 
@@ -474,6 +477,24 @@ type pushArgs struct {
 	Title   string `json:"title,omitempty" jsonschema:"the notification's title"`
 	Body    string `json:"body,omitempty" jsonschema:"the notification's text"`
 	Payload string `json:"payload,omitempty" jsonschema:"a whole payload as JSON, such as {\"aps\": {\"badge\": 3}}, in place of title and body"`
+}
+
+type jankArgs struct {
+	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	App    string `json:"app" jsonschema:"the Android package name, such as com.example.app"`
+	Reset  bool   `json:"reset,omitempty" jsonschema:"start the count again after reading it"`
+}
+
+func (s *Server) appJank(ctx context.Context, _ *mcp.CallToolRequest, in jankArgs) (*mcp.CallToolResult, any, error) {
+	d, err := s.Manager.Find(ctx, in.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	jank, err := s.Manager.AppJank(ctx, d, in.App, in.Reset)
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonText(jank)
 }
 
 func (s *Server) sendPush(ctx context.Context, _ *mcp.CallToolRequest, in pushArgs) (*mcp.CallToolResult, any, error) {

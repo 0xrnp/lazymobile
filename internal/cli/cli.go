@@ -63,6 +63,7 @@ Usage:
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile push <device> <app-id> [--title <text>] [--body <text>] [--payload <file>] [--json]   send a test push notification to an app on an iOS simulator
+  lazymobile jank <device> <app-id> [--reset] [--json]   how many frames an Android app drew late (janky), and how long frames took. --reset starts the count again afterwards
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
   lazymobile run [<device>] [--profile <name>] [--choose] [--here [--no-log] | --split] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). In a terminal it asks which way to run (the actions named "run", "run dev", "run prod" in .lazymobile.json) and which device when it cannot tell, and remembers the answer for the folder; --choose asks again. Its keys, such as r for hot reload, keep working. --here runs it inside the dashboard (--no-log gives the tool the whole width; ctrl+p, then l, shows the log): ctrl+] switches between the run and the full dashboard
@@ -301,6 +302,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.statusBar(ctx, rest)
 	case "push":
 		return a.push(ctx, rest)
+	case "jank":
+		return a.jank(ctx, rest)
 	case "action":
 		return a.action(ctx, rest)
 	case "run":
@@ -775,6 +778,33 @@ func (a *App) push(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.done(*asJSON, result{Action: "push", Device: d, App: app}, fmt.Sprintf("Sent a push notification to %s on %s", app, d.Name))
+}
+
+func (a *App) jank(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("jank", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	reset := fs.Bool("reset", false, "")
+	d, app, err := a.deviceAndApp(ctx, fs, args)
+	if err != nil {
+		return err
+	}
+	jank, err := a.Manager.AppJank(ctx, d, app, *reset)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return a.writeJSON(map[string]any{"device": d, "app": app, "reset": *reset, "jank": jank})
+	}
+	if jank.Frames == 0 {
+		fmt.Fprintf(a.Stdout, "%s has drawn no frames since the count started. Use the app, then run this again\n", app)
+	} else {
+		fmt.Fprintf(a.Stdout, "%s on %s: %d of %d frames janky (%.1f%%)\nFrame time: 50th %d ms, 90th %d ms, 95th %d ms, 99th %d ms\n",
+			app, d.Name, jank.Janky, jank.Frames, jank.Percent, jank.P50, jank.P90, jank.P95, jank.P99)
+	}
+	if *reset {
+		fmt.Fprintln(a.Stdout, "The count starts again from now")
+	}
+	return nil
 }
 
 func (a *App) link(ctx context.Context, args []string) error {

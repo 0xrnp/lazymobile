@@ -484,6 +484,19 @@ func (m *Manager) AppUsage(ctx context.Context, d device.Device, id string, pid 
 	return m.Android.AppUsage(ctx, d, id)
 }
 
+// AppJank reads how many of an Android app's frames missed their deadline. With reset, the counters
+// start again afterwards. iOS is refused: Xcode's Instruments has the Animation Hitches template.
+func (m *Manager) AppJank(ctx context.Context, d device.Device, id string, reset bool) (device.Jank, error) {
+	if !logs.ValidAppID(id) {
+		return device.Jank{}, apperr.New(apperr.InvalidState, "That does not look like an app id: %s", id)
+	}
+	if d.Platform == device.IOS {
+		return device.Jank{}, apperr.New(apperr.Unsupported, "Cannot read an app's frame stats on %s", d.Name).
+			WithHint("Xcode's Instruments has an Animation Hitches template for iOS.")
+	}
+	return m.Android.AppJank(ctx, d, id, reset)
+}
+
 // ScreenshotName is a file name for a screenshot of d taken at now.
 func ScreenshotName(d device.Device, now time.Time) string { return mediaName(d, now, "png") }
 

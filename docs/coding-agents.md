@@ -108,6 +108,7 @@ An editor opened from the Dock does not get the `PATH` of your shell, so it may 
 | `set_location` | Put a simulator or emulator at a latitude and longitude |
 | `set_permission` | Grant or revoke a permission, such as camera or photos |
 | `set_status_bar` | A tidy status bar for screenshots, or the normal one back |
+| `app_jank` | How smoothly a running Android app draws: janky frames and frame times, with an optional reset |
 | `send_push` | A test push notification to an app on an iOS simulator, with a title and text or a whole payload |
 
 The server also tells the agent how to start: list the devices, pass an id, prefer a simulator or
