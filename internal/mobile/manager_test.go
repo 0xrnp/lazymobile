@@ -557,7 +557,7 @@ func TestLocationAndStatusBarLeaveAndroidPhonesAloneAndCheckBeforeAnyTool(t *tes
 		t.Errorf("a tool ran: %v", fake.Calls())
 	}
 	// An iPhone is reached through devicectl, and a link to it needs an app unless it is a web address.
-	if err := m.SetLocation(ctx, iphone, 1, 2); err != nil || !fake.Called("devicectl device simulate location coordinate --device UDID --latitude 1 --longitude 2") {
+	if err := m.SetLocation(ctx, iphone, 1, 2); err != nil || !fake.Called("devicectl device simulate location coordinate --device UDID --latitude=1 --longitude=2") {
 		t.Errorf("an iPhone: %v, calls %v", err, fake.Calls())
 	}
 	if err := m.SetStatusBar(ctx, iphone, false); err != nil || !fake.Called("devicectl device simulate statusBar clear --device UDID") {

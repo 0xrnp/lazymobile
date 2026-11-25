@@ -1031,7 +1031,7 @@ func TestAnIPhoneTakesAppearanceLocationStatusBarAndLinksThroughDevicectl(t *tes
 		want string
 	}{
 		{func() error { return c.SetAppearance(ctx, iphone, "light") }, "xcrun devicectl device settings appearance --device P1 --mode light --quiet"},
-		{func() error { return c.SetLocation(ctx, iphone, 37.7749, -122.4194) }, "xcrun devicectl device simulate location coordinate --device P1 --latitude 37.7749 --longitude -122.4194 --quiet"},
+		{func() error { return c.SetLocation(ctx, iphone, 37.7749, -122.4194) }, "xcrun devicectl device simulate location coordinate --device P1 --latitude=37.7749 --longitude=-122.4194 --quiet"},
 		{func() error { return c.ClearLocation(ctx, iphone) }, "xcrun devicectl device simulate location clear --device P1 --quiet"},
 		{func() error { return c.CleanStatusBar(ctx, iphone) }, "xcrun devicectl device simulate statusBar preset screenshot --device P1 --quiet"},
 		{func() error { return c.ResetStatusBar(ctx, iphone) }, "xcrun devicectl device simulate statusBar clear --device P1 --quiet"},

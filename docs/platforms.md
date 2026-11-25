@@ -16,7 +16,7 @@ the ones marked "run" were run on a real simulator or emulator (see [tested.md](
 | Screen recording | yes | built, needs an iOS that offers it ([4](#4-the-iphone)) | yes | yes |
 | Open a link | yes ([1](#1-deep-links-on-a-simulator)) | yes, in a named app ([4](#4-the-iphone)) | yes | yes |
 | Dark and light mode | yes | yes | yes | yes |
-| Location, status bar | yes | yes ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
+| Location, status bar | yes | location yes, status bar built but refused by iOS 27.0 ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Grant or revoke a permission | yes | no ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Clear an app's data | yes ([2](#2-clearing-data-on-a-simulator)) | no ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Test push notification | yes | no | no ([3](#3-push-on-android)) | no |
@@ -63,7 +63,7 @@ command that undoes it. Dark and light mode (`settings appearance`), a simulated
 (`process launch --payload-url`) are built. A phone has no command to ask which app handles a link, so
 a web address goes to Safari and anything else needs `--app <bundle id>`; the app is launched. The
 agent tools refuse a real phone unless they are called with `physical` true, for when the user named
-it. Face ID, which `devicectl` can simulate too, is left out on purpose: a simulated sign-in on a
+it. Run on an iPhone 17 Pro with iOS 27.0: dark and light mode, a location (and clearing it) and a link in Safari worked, and the status bar answered "The capability Simulate Status Bar is not supported by this device", which lazymobile reports with that reason; a newer iOS may offer it. Face ID, which `devicectl` can simulate too, is left out on purpose: a simulated sign-in on a
 personal phone is not worth the risk. An iPhone's CPU and
 memory, and its app permissions and data, have no `devicectl` command that was found (Instruments
 measures CPU and memory).

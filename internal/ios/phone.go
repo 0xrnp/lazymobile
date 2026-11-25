@@ -55,7 +55,8 @@ func (c *Client) phoneSetAppearance(ctx context.Context, d device.Device, mode s
 
 func (c *Client) phoneSetLocation(ctx context.Context, d device.Device, lat, lon float64) error {
 	return c.devicectlDo(ctx, phoneLocationAction, "device", "simulate", "location", "coordinate", "--device", d.ID,
-		"--latitude", formatCoordinate(lat), "--longitude", formatCoordinate(lon))
+		// The = form, since a negative number after a flag is read as another flag.
+		"--latitude="+formatCoordinate(lat), "--longitude="+formatCoordinate(lon))
 }
 
 func (c *Client) phoneClearLocation(ctx context.Context, d device.Device) error {

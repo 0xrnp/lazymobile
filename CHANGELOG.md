@@ -50,9 +50,11 @@ them, and the dashboard shows what is new once after an upgrade.
   an emulator or an Android phone (#40)
 - An iPhone takes dark and light mode, a simulated location, a tidy status bar and a link through
   Xcode's `devicectl`, as `appearance`, `location`, `statusbar` and `link` already do on a simulator.
-  Each change prints the command that undoes it. A link on an iPhone goes to Safari when it is a web
+  Each change prints the command that undoes it. Run on an iPhone 17 Pro with iOS 27.0, everything worked except the status bar, which that iOS refuses, and lazymobile says so. A link on an iPhone goes to Safari when it is a web
   address, and to the app named with `link --app` otherwise. Agents refuse a real phone unless the call
   says `physical` true. Face ID is not offered
+- A location that starts with a minus sign, such as `-33.8688,151.2093`, was read as a flag. It is a
+  place now
 - Logs can be exported in the layout you need. `S` in the dashboard asks which lines (what is shown,
   everything received, errors and crashes only, or from the selected line) and picks the layout from the
   file name: `.log`, `.json`, `.jsonl`, `.csv` or `.md` for pasting into an issue. `lazymobile logs <device>

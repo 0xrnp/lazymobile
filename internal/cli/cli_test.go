@@ -1292,3 +1292,16 @@ func TestLogsOutSavesTheMatchingLinesToANewFile(t *testing.T) {
 		t.Errorf("code %d, stderr %q", code, e2.errs.String())
 	}
 }
+
+func TestAPlaceThatStartsWithAMinusIsNotAFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"location", "Pixel 9a", "-33.8688,151.2093"},
+		{"location", "-33.8688,151.2093", "Pixel 9a"},
+		{"location", "Pixel 9a", "-33.8688,-70.5"},
+	} {
+		e := newEnv(t)
+		if code := e.run(args...); code == ExitUsage {
+			t.Errorf("%v: %s", args, e.errs.String())
+		}
+	}
+}

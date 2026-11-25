@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,16 +158,36 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	fs.SetOutput(io.Discard)
 	var positional []string
 	for {
-		if err := fs.Parse(args); err != nil {
+		// A place such as -33.8688,151.2093 starts with a minus sign but is not a flag.
+		head, place := args, -1
+		for i, arg := range args {
+			if coordinatePair.MatchString(arg) {
+				head, place = args[:i], i
+				break
+			}
+		}
+		if err := fs.Parse(head); err != nil {
 			return nil, usageError{err.Error()}
 		}
 		if fs.NArg() == 0 {
-			return positional, nil
+			if place < 0 {
+				return positional, nil
+			}
+			positional = append(positional, args[place])
+			args = args[place+1:]
+			continue
 		}
 		positional = append(positional, fs.Arg(0))
-		args = fs.Args()[1:]
+		rest := fs.Args()[1:]
+		if place >= 0 {
+			// What is left of head, then the place and everything after it.
+			rest = append(append([]string{}, rest...), args[place:]...)
+		}
+		args = rest
 	}
 }
+
+var coordinatePair = regexp.MustCompile(`^-\d+(\.\d+)?,-?\d+(\.\d+)?$`)
 
 // reportedError is a failure whose details were already printed, such as a doctor report with
 // problems in it. With --json it is not printed a second time.
