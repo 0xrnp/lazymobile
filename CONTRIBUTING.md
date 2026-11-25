@@ -54,8 +54,9 @@ For the maintainer. Versions follow [semantic versioning](https://semver.org). B
 version may change behaviour.
 
 1. `main` is green in CI, and `CHANGELOG.md` has the version: rename "Unreleased" to
-   `## 0.5.0 - 2026-12-01` (the version and the day), add a new empty "Unreleased" above it, and
-   commit. The tag and the file must agree, since the dashboard shows the notes of the version it
+   `## 0.5.0 - 2026-12-01` (the version and the day), and commit. Do not add an empty "Unreleased"
+   section: a test rejects a version with no notes, so the next change brings it back with its
+   line. The tag and the file must agree, since the dashboard shows the notes of the version it
    was started with.
 2. Tag it and push the tag:
 

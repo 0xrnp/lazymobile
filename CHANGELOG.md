@@ -3,7 +3,7 @@
 What changed in each version. The program has these notes built in: `lazymobile changelog` prints
 them, and the dashboard shows what is new once after an upgrade.
 
-## Unreleased
+## 0.5.0 - 2026-11-25
 
 ### Run and report
 - `lazymobile run`: pick a device, start it if it is off, and run this folder's app on it with the
@@ -42,6 +42,20 @@ them, and the dashboard shows what is new once after an upgrade.
 - `docs/coding-agents.md`: setting up Claude Code, Cursor, Codex and VS Code, what to ask an
   agent, and a skill file (`skills/lazymobile/SKILL.md`) for agents that use the commands with
   `--json`
+- Agents can work in an Android emulator's app: `ui_tree` reads the screen as text, with where to tap
+  each label, text and id, and the screen size. `tap` takes one of those names (or x and y) and refuses,
+  naming the candidates, when it matches nothing or several. `type_text`, `swipe` and `press_key` fill
+  a field, scroll and press back, home or enter. A password field is never read out. An iOS simulator
+  has no such Apple command, and a phone is left alone. Also new for agents: `app_usage` (CPU and
+  memory) and `record_screen`. A `screenshot` now says the screen's size, since the picture may be
+  scaled down
+- Agents can run the project: `run_start`, `run_status`, `run_reload` and `run_stop` (in `lazymobile mcp`)
+  start the tool the project already uses (`flutter run`, `expo run`, a package.json script, or the
+  `run` action in `.lazymobile.json`) on a device, which is started first when it is off. The tool
+  runs on a terminal of its own, so `run_reload` sends it `r` (or `R`) like a keypress, and each
+  answer carries the last lines of its output and, once it ends, its exit code. At most three runs
+  go at once, they end with the server, and a command from `.lazymobile.json` needs `yes`, as `--yes`
+  does. Run on a real Flutter app: started, hot reloaded and stopped on an emulator
 
 ### Other
 - `lazymobile install <device> <folder> --launch` installs the newest build in a folder, such as
@@ -61,20 +75,6 @@ them, and the dashboard shows what is new once after an upgrade.
   --out <file>` does the same from the command line, with `--format` and `--filter`, and records until
   ctrl+c when no `--tail` or `--since` is given. Agents have `export_logs`. A saved file is never replaced,
   which the dashboard's old save did silently, and only you can read it
-- Agents can work in an Android emulator's app: `ui_tree` reads the screen as text, with where to tap
-  each label, text and id, and the screen size. `tap` takes one of those names (or x and y) and refuses,
-  naming the candidates, when it matches nothing or several. `type_text`, `swipe` and `press_key` fill
-  a field, scroll and press back, home or enter. A password field is never read out. An iOS simulator
-  has no such Apple command, and a phone is left alone. Also new for agents: `app_usage` (CPU and
-  memory) and `record_screen`. A `screenshot` now says the screen's size, since the picture may be
-  scaled down
-- Agents can run the project: `run_start`, `run_status`, `run_reload` and `run_stop` (in `lazymobile mcp`)
-  start the tool the project already uses (`flutter run`, `expo run`, a package.json script, or the
-  `run` action in `.lazymobile.json`) on a device, which is started first when it is off. The tool
-  runs on a terminal of its own, so `run_reload` sends it `r` (or `R`) like a keypress, and each
-  answer carries the last lines of its output and, once it ends, its exit code. At most three runs
-  go at once, they end with the server, and a command from `.lazymobile.json` needs `yes`, as `--yes`
-  does. Run on a real Flutter app: started, hot reloaded and stopped on an emulator
 - On Android, the app picker and `lazymobile apps` no longer call Android's own apps (Settings, Clock)
   "not in the installed list" when you have used them before. An app that is on neither list still is
 - `lazymobile media <device> <file>...` and `add_media` for agents (`A` in the dashboard) put photos and
