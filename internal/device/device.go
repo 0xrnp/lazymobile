@@ -233,3 +233,31 @@ type Jank struct {
 	P95 int `json:"p95_ms"`
 	P99 int `json:"p99_ms"`
 }
+
+// Element is one thing on a device's screen that a person or an agent could read or touch.
+type Element struct {
+	Text     string `json:"text,omitempty"`
+	Desc     string `json:"desc,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Class    string `json:"class,omitempty"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Tappable bool   `json:"tappable,omitempty"`
+	Scrolls  bool   `json:"scrolls,omitempty"`
+	Focused  bool   `json:"focused,omitempty"`
+	Checked  bool   `json:"checked,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
+}
+
+// Screen is what is on a device's screen: its size in pixels, the app in front, and its elements,
+// from the top left. X and Y of an element are its centre, in the pixels a tap uses.
+type Screen struct {
+	Width    int       `json:"width"`
+	Height   int       `json:"height"`
+	App      string    `json:"app,omitempty"`
+	Elements []Element `json:"elements"`
+	// Truncated is whether there were more elements than are listed.
+	Truncated bool `json:"truncated,omitempty"`
+}

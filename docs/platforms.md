@@ -26,6 +26,7 @@ the ones marked "run" were run on a real simulator or emulator (see [tested.md](
 | Metro and developer menu helpers | no ([7](#7-metro-helpers)) | no | yes | yes |
 | Add photos and videos | yes | no | yes | no ([8](#8-android-phones)) |
 | Set the clipboard | yes | no | no ([9](#9-the-android-clipboard)) | no |
+| Read the screen, tap, type, swipe | no ([10](#10-touching-an-ios-simulator)) | no | yes | no ([8](#8-android-phones)) |
 | `create` | yes | no | yes | no |
 
 ## Notes
@@ -91,3 +92,11 @@ Android has no shell command to set the clipboard: `cmd clipboard` answers "No s
 implementation" (tried on an Android 16 emulator). Only an app on the device can write it, and
 lazymobile does not install one. `adb shell input text` types into the focused field, which is a
 different thing.
+
+### 10. Touching an iOS simulator
+
+`xcrun simctl` has no command to tap, type, swipe or read the screen's elements (its `io` and `ui`
+commands cover screenshots, recordings and the appearance only). An iOS simulator is driven with
+XCUITest, or with a tool built on it such as Maestro. lazymobile does not wrap those: `ui_tree`,
+`tap`, `swipe`, `type_text` and `press_key` say so on a simulator. An Android emulator uses
+`adb shell input` and `uiautomator`. A phone's screen is the person's own, so it is not touched.

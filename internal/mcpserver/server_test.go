@@ -169,7 +169,8 @@ func TestLaunchRemembersTheApp(t *testing.T) {
 func screenshotOf(t *testing.T, session *mcp.ClientSession, args map[string]any) *mcp.ImageContent {
 	t.Helper()
 	res := call(t, session, "screenshot", args)
-	if res.IsError || len(res.Content) != 1 {
+	// The picture, and a line with the screen's size, which a tap is given in.
+	if res.IsError || len(res.Content) != 2 || !strings.Contains(textOf(res), "The screen is 600x1700 pixels.") {
 		t.Fatalf("got %q", textOf(res))
 	}
 	img, ok := res.Content[0].(*mcp.ImageContent)
@@ -348,5 +349,31 @@ func TestAddMediaAndSetClipboard(t *testing.T) {
 	}
 	if res := call(t, session, "set_clipboard", map[string]any{"device": "iPhone 16 Pro", "text": "hi"}); res.IsError || !fake.Called("simctl pbcopy 00000000-0000-4000-8000-0000000000A2") {
 		t.Errorf("set_clipboard: %q, calls %v", textOf(res), fake.Calls())
+	}
+}
+
+func TestTheScreenToolsRefuseASimulatorAndBadArguments(t *testing.T) {
+	session, fake, _ := connect(t)
+	ten := 10
+	for name, c := range map[string]struct {
+		tool string
+		args map[string]any
+		want string
+	}{
+		"ui_tree on a simulator": {"ui_tree", map[string]any{"device": "iPhone 16 Pro"}, "simctl"},
+		"tap on a simulator":     {"tap", map[string]any{"device": "iPhone 16 Pro", "x": ten, "y": ten}, "simctl"},
+		"tap with nothing":       {"tap", map[string]any{"device": "iPhone 16 Pro"}, "target, or x and y"},
+		"tap with both":          {"tap", map[string]any{"device": "iPhone 16 Pro", "target": "OK", "x": ten, "y": ten}, "not both"},
+		"type on a simulator":    {"type_text", map[string]any{"device": "iPhone 16 Pro", "text": "hi"}, "simctl"},
+		"an unknown key":         {"press_key", map[string]any{"device": "iPhone 16 Pro", "key": "power"}, "simctl"},
+		"a long recording":       {"record_screen", map[string]any{"device": "iPhone 16 Pro", "seconds": 600}, "1 to 60"},
+	} {
+		res := call(t, session, c.tool, c.args)
+		if !res.IsError || !strings.Contains(textOf(res), c.want) {
+			t.Errorf("%s: error %v, %q", name, res.IsError, textOf(res))
+		}
+	}
+	if fake.Called("input") {
+		t.Errorf("calls %v", fake.Calls())
 	}
 }

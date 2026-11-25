@@ -108,6 +108,11 @@ An editor opened from the Dock does not get the `PATH` of your shell, so it may 
 | `set_location` | Put a simulator or emulator at a latitude and longitude |
 | `set_permission` | Grant or revoke a permission, such as camera or photos |
 | `set_status_bar` | A tidy status bar for screenshots, or the normal one back |
+| `ui_tree` | Read an Android emulator's screen as text: every label, text and id with where to tap it, and the screen size |
+| `tap` | Touch an Android emulator by a text, label or id from `ui_tree`, or by x and y. Fails, naming the candidates, when it matches nothing or several |
+| `swipe`, `type_text`, `press_key` | Scroll, type into the focused field, press back, home or enter |
+| `app_usage` | An app's CPU (over two seconds) and memory now |
+| `record_screen` | Film 1 to 60 seconds of a device's screen and return the video's path |
 | `run_start` | Run the project on a device with its own tool (`flutter run`, `expo run`, a script) and read its first output. The tool keeps going |
 | `run_status` | Whether a run goes or has ended, with its exit code and the last lines of its output |
 | `run_reload` | Hot reload (`r`) or, with `restart`, hot restart (`R`) a running tool |

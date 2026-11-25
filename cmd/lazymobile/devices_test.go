@@ -91,6 +91,7 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 	run := strconv.FormatInt(started.UnixNano(), 36)
 	a.ok("launch", map[string]any{"device": id, "app": e2eApp}, "Launched")
 	time.Sleep(3 * time.Second)
+	a.ok("app_usage", map[string]any{"device": id, "app": e2eApp}, "memory_mb")
 
 	full := a.screenshot(map[string]any{"device": id, "full_size": true})
 	scaled := a.screenshot(map[string]any{"device": id})
@@ -124,6 +125,14 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 		t.Fatal(err)
 	}
 	a.ok("add_media", map[string]any{"device": id, "files": []string{photo}}, "Added 1 file")
+	if android {
+		a.ok("press_key", map[string]any{"device": id, "key": "home"}, "Pressed")
+		a.ok("ui_tree", map[string]any{"device": id}, `"width"`)
+		a.ok("swipe", map[string]any{"device": id, "x1": 500, "y1": 1500, "x2": 500, "y2": 500}, "Swiped")
+		a.refused("tap", map[string]any{"device": id, "target": "lazymobile-nothing-called-this"}, "Nothing on the screen")
+	} else {
+		a.refused("tap", map[string]any{"device": id, "x": 10, "y": 10}, "simctl")
+	}
 	if android {
 		adb := filepath.Join(androidSDK(t), "platform-tools", "adb")
 		t.Cleanup(func() { exec.Command(adb, "-e", "shell", "rm", "-f", "/sdcard/Pictures/"+filepath.Base(photo)).Run() })
@@ -363,7 +372,8 @@ type picture struct {
 func (a *agent) screenshot(args map[string]any) picture {
 	a.t.Helper()
 	res := a.call("screenshot", args)
-	if res.IsError || len(res.Content) != 1 {
+	// The picture, then a line with the screen's size.
+	if res.IsError || len(res.Content) != 2 || !strings.Contains(textOf(res), "The screen is ") {
 		a.t.Fatalf("screenshot %v: %s", args, textOf(res))
 	}
 	img, ok := res.Content[0].(*mcp.ImageContent)

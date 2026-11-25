@@ -48,6 +48,13 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- Agents can work in an Android emulator's app: `ui_tree` reads the screen as text, with where to tap
+  each label, text and id, and the screen size. `tap` takes one of those names (or x and y) and refuses,
+  naming the candidates, when it matches nothing or several. `type_text`, `swipe` and `press_key` fill
+  a field, scroll and press back, home or enter. A password field is never read out. An iOS simulator
+  has no such Apple command, and a phone is left alone. Also new for agents: `app_usage` (CPU and
+  memory) and `record_screen`. A `screenshot` now says the screen's size, since the picture may be
+  scaled down
 - Agents can run the project: `run_start`, `run_status`, `run_reload` and `run_stop` (in `lazymobile mcp`)
   start the tool the project already uses (`flutter run`, `expo run`, a package.json script, or the
   `run` action in `.lazymobile.json`) on a device, which is started first when it is off. The tool
