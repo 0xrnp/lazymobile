@@ -399,9 +399,11 @@ func withJava(answers map[string]run.Result) map[string]run.Result {
 	return answers
 }
 
-func TestCreateAnswersThePromptAndPassesJava(t *testing.T) {
+func TestCreateAnswersThePromptAndPassesJavaAndTheAVDFolder(t *testing.T) {
 	opts := sdk(t, "avdmanager")
 	opts.JavaHome = "/fake/jdk"
+	// With XDG_CONFIG_HOME set avdmanager would use its own folder, which the emulator ignores.
+	opts.AVDHome = "/fake/avd"
 	var seen run.Options
 	fake := &runtest.Fake{Answer: func(command string, _ []string, o run.Options) run.Result {
 		if strings.Contains(command, "java -version") {
@@ -416,7 +418,7 @@ func TestCreateAnswersThePromptAndPassesJava(t *testing.T) {
 	if !fake.Called("create avd -n Mine -k system-images;android-36;google_apis;arm64-v8a -d pixel_9") {
 		t.Errorf("ran %v", fake.Calls())
 	}
-	if seen.Stdin != "no\n" || !reflect.DeepEqual(seen.Env, []string{"JAVA_HOME=/fake/jdk"}) {
+	if seen.Stdin != "no\n" || !reflect.DeepEqual(seen.Env, []string{"JAVA_HOME=/fake/jdk", "ANDROID_AVD_HOME=/fake/avd"}) {
 		t.Errorf("options = %+v", seen)
 	}
 }

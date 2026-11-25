@@ -364,7 +364,9 @@ func (c *Client) SystemImages() []SystemImage {
 }
 
 // avdmanager finds the tool and the environment it needs. It needs Java, so it is pointed at the
-// JDK that was found, which makes it work without JAVA_HOME set.
+// JDK that was found, which makes it work without JAVA_HOME set. It is also told where AVDs live:
+// with XDG_CONFIG_HOME set it would use $XDG_CONFIG_HOME/.android/avd, where the emulator does not
+// look, and the new emulator would never show up.
 func (c *Client) avdmanager(ctx context.Context) (path string, env []string, err error) {
 	path, err = c.Opts.tool("avdmanager")
 	if err != nil {
@@ -378,6 +380,7 @@ func (c *Client) avdmanager(ctx context.Context) (path string, env []string, err
 	if java.Home != "" {
 		env = []string{"JAVA_HOME=" + java.Home}
 	}
+	env = append(env, "ANDROID_AVD_HOME="+c.Opts.AVDDir())
 	return path, env, nil
 }
 

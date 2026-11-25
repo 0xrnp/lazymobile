@@ -78,6 +78,7 @@ lazymobile appearance <id> dark --json              # or light
 lazymobile permission <id> grant camera <app-id> --json
 lazymobile location <id> 37.5665,126.978 --json     # or clear
 lazymobile statusbar <id> clean --json              # reset afterwards
+lazymobile create ios <name> --type "iPhone 17" --json   # or create android <name>; create --list --json shows the choices
 lazymobile jank <id> <app-id> [--reset] --json   # janky frames and frame times, Android only
 lazymobile push <id> <app-id> --body 'Order ready' --json   # iOS simulator only
 ```

@@ -62,6 +62,7 @@ var positionals = map[string][]argSpec{
 	"cleardata": {deviceArg, appArg}, "crash": {deviceArg, appArg}, "report": {deviceArg, appArg},
 	"push":       {deviceArg, appArg},
 	"jank":       {deviceArg, appArg},
+	"create":     {words("ios", "android")},
 	"install":    {deviceArg, fileArg},
 	"appearance": {deviceArg, words("dark", "light")},
 	"permission": {deviceArg, words("grant", "revoke"), {kind: argPermission}, appArg},
@@ -76,7 +77,7 @@ var positionals = map[string][]argSpec{
 // none, so the word after it is the next positional argument.
 var flagValues = map[string]argSpec{
 	"--app": appArg, "--out": fileArg, "--save": fileArg, "--payload": fileArg, "--set": {kind: argSet},
-	"--title": {}, "--body": {},
+	"--title": {}, "--body": {}, "--type": {}, "--runtime": {}, "--image": {},
 	"--mode":  words("logcat", "system", "console"),
 	"--level": words("verbose", "debug", "info", "warning", "error", "fatal"),
 	"--since": {}, "--tail": {}, "--duration": {}, "--lines": {}, "--limit": {}, "--port": {}, "--profile": {},

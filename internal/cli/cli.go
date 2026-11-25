@@ -46,6 +46,9 @@ const usage = `lazymobile: simulators, emulators, phones and their logs, from th
 Usage:
   lazymobile                       open the dashboard
   lazymobile list [--json]         list every device
+  lazymobile create --list [--json]   the iOS runtimes and device types, and the Android system images and hardware profiles you can use
+  lazymobile create ios <name> --type <device type> [--runtime <version>] [--json]   make a simulator. The runtime is the newest installed unless you name one
+  lazymobile create android <name> [--image <system image>] [--profile <hardware>] [--json]   make an emulator. The image is the newest installed unless you name one
   lazymobile boot <device> [--cold] [--wipe --yes] [--wait] [--no-window] [--json]
   lazymobile boot --all <name or pattern>... | --set <name> [--cold] [--wait] [--no-window] [--json]   several at once, such as "iPhone*"
   lazymobile shutdown <device> [--keep-simulator-app] [--json]
@@ -300,6 +303,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.location(ctx, rest)
 	case "statusbar":
 		return a.statusBar(ctx, rest)
+	case "create":
+		return a.create(ctx, rest)
 	case "push":
 		return a.push(ctx, rest)
 	case "jank":

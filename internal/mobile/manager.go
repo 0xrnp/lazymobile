@@ -625,8 +625,13 @@ func (m *Manager) Runtimes(ctx context.Context) ([]ios.Runtime, error) {
 
 // CreateSimulator makes an iOS simulator.
 func (m *Manager) CreateSimulator(ctx context.Context, name, deviceType, runtime string) error {
-	_, err := m.IOS.Create(ctx, name, deviceType, runtime)
+	_, err := m.NewSimulator(ctx, name, deviceType, runtime)
 	return err
+}
+
+// NewSimulator makes an iOS simulator and returns its id.
+func (m *Manager) NewSimulator(ctx context.Context, name, deviceType, runtime string) (string, error) {
+	return m.IOS.Create(ctx, name, deviceType, runtime)
 }
 
 // SystemImages lists the installed Android system images that run on this machine.

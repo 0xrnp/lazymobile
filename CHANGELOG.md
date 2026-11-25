@@ -48,6 +48,13 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- `lazymobile create ios <name> --type "iPhone 17"` and `lazymobile create android <name>` make a
+  simulator or an emulator from the command line, like `n` in the dashboard. The newest runtime or
+  system image is used unless you name one (`--runtime 18`, `--image android-35`, `--profile
+  pixel_9`), a name that fits more than one choice lists them, and `create --list` shows what is
+  installed
+- An emulator made from lazymobile no longer goes missing when `XDG_CONFIG_HOME` is set: Android's
+  `avdmanager` then wrote it where the emulator does not look. This also affected `n`
 - `lazymobile jank <device> <app-id>` and `app_jank` for agents: how many frames an Android app
   drew late and how long frames took (50th to 99th percentile), from `dumpsys gfxinfo`. `--reset`
   starts the count again, so you can read it, use the app, and read it again. Emulators and

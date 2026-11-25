@@ -48,6 +48,16 @@ func newEnv(t *testing.T) *env {
 				t.Error(err)
 			}
 			return run.Result{}
+		case strings.Contains(command, "simctl list runtimes"):
+			return runtest.Out(`{"runtimes": [
+				{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-0", "name": "iOS 18.0", "version": "18.0", "platform": "iOS", "isAvailable": true,
+				 "supportedDeviceTypes": [{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16", "name": "iPhone 16", "productFamily": "iPhone"}]},
+				{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-2", "name": "iOS 27.2", "version": "27.2", "platform": "iOS", "isAvailable": true,
+				 "supportedDeviceTypes": [
+					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17", "name": "iPhone 17", "productFamily": "iPhone"},
+					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "name": "iPhone 17 Pro", "productFamily": "iPhone"}]}]}`)
+		case strings.Contains(command, "simctl create"):
+			return runtest.Out("0A0A0A0A-0000-4000-8000-0000000000C1\n")
 		case strings.Contains(command, "simctl listapps"):
 			return runtest.Out("{}")
 		case strings.HasPrefix(command, "plutil -convert json"):
@@ -1124,5 +1134,62 @@ func TestJankIsRefusedOnIOSAndNeedsADeviceAndApp(t *testing.T) {
 	}
 	if code := e.run("jank", "iPhone 16 Pro"); code != ExitUsage {
 		t.Errorf("no app: code %d", code)
+	}
+}
+
+func TestCreateASimulatorUsesTheNewestRuntimeUnlessOneIsNamed(t *testing.T) {
+	e := newEnv(t)
+	const (
+		newest = "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+		older  = "com.apple.CoreSimulator.SimRuntime.iOS-18-0"
+	)
+	// "iPhone 17" is exact, so it is not "iPhone 17 Pro" too.
+	if code := e.run("create", "ios", "Shop test", "--type", "iPhone 17"); code != ExitOK ||
+		!e.fake.Called("simctl create Shop test com.apple.CoreSimulator.SimDeviceType.iPhone-17 "+newest) ||
+		!strings.Contains(e.out.String(), "Created the simulator Shop test") {
+		t.Errorf("code %d, out %q, errs %q, calls %v", code, e.out.String(), e.errs.String(), e.fake.Calls())
+	}
+	if code := e.run("create", "ios", "Old", "--type", "16", "--runtime", "18", "--json"); code != ExitOK ||
+		!e.fake.Called("simctl create Old com.apple.CoreSimulator.SimDeviceType.iPhone-16 "+older) {
+		t.Errorf("--runtime: code %d, out %q, errs %q", code, e.out.String(), e.errs.String())
+	}
+	if got := e.object(t); got["id"] != "0A0A0A0A-0000-4000-8000-0000000000C1" || got["runtime"] != "iOS 18.0" || got["ok"] != true {
+		t.Errorf("json: %v", got)
+	}
+}
+
+func TestCreateRefusesWhatItCannotChooseBeforeAskingSimctl(t *testing.T) {
+	e := newEnv(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"create", "ios", "X"}, "needs --type"},
+		{[]string{"create", "ios", "X", "--type", "Galaxy"}, "No device type for iOS 27.2 matches"},
+		{[]string{"create", "ios", "X", "--type", "iPhone"}, "More than one device type"},
+		{[]string{"create", "ios", "X", "--type", "iPhone 17", "--runtime", "9"}, "No runtime matches"},
+		{[]string{"create", "ios", "X", "--type", "iPhone 17", "--image", "y"}, "are for android"},
+		{[]string{"create", "android", "X", "--runtime", "18"}, "are for ios"},
+		{[]string{"create", "tv", "X"}, "ios or android"},
+		{[]string{"create", "ios"}, "needs ios or android, and a name"},
+	} {
+		if code := e.run(tc.args...); code != ExitUsage || !strings.Contains(e.errs.String(), tc.want) || e.fake.Called("simctl create") {
+			t.Errorf("%q: code %d, errs %q", tc.args, code, e.errs.String())
+		}
+	}
+	// No system image is installed in this environment.
+	if code := e.run("create", "android", "Pixel"); code != ExitFailure || !strings.Contains(e.errs.String(), "No Android system image") {
+		t.Errorf("android: code %d, errs %q", code, e.errs.String())
+	}
+}
+
+func TestCreateListShowsWhatCanBeCreated(t *testing.T) {
+	e := newEnv(t)
+	if code := e.run("create", "--list"); code != ExitOK || !strings.Contains(e.out.String(), "iOS runtime iOS 27.2 (iOS-27-2)  (the newest, used by default)") ||
+		!strings.Contains(e.out.String(), "type  iPhone 17 Pro") {
+		t.Errorf("code %d, out %q", code, e.out.String())
+	}
+	if code := e.run("create", "--list", "--json"); code != ExitOK || len(e.object(t)["ios_runtimes"].([]any)) != 2 {
+		t.Errorf("json: code %d, out %q", code, e.out.String())
 	}
 }
