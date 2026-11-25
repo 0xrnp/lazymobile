@@ -102,7 +102,7 @@ func (s *Server) New() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "stop", Annotations: notDestructive,
 		Description: "Stop a running app. Its data is kept."}, s.stop)
 	mcp.AddTool(server, &mcp.Tool{Name: "open_link", Annotations: notDestructive,
-		Description: "Open a web address or a deep link, such as myapp://home, on a running device."}, s.openLink)
+		Description: "Open a web address or a deep link, such as myapp://home, on a running device. A real iPhone needs app, the bundle id that opens it (a web address goes to Safari)."}, s.openLink)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "screenshot", Annotations: readOnly,
 		Description: "Take a picture of a running device's screen and return it as an image, " +
@@ -115,14 +115,14 @@ func (s *Server) New() *mcp.Server {
 			"An Android device must be running, and an iPhone connected: its reports are copied from it, which takes a few seconds."}, s.crashReport)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "set_appearance", Annotations: notDestructive,
-		Description: "Switch a device to dark or light mode."}, s.setAppearance)
+		Description: "Switch a device to dark or light mode. A real phone is changed only with physical true, which is for when the user asked for it by name; the answer says how to undo."}, s.setAppearance)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_location", Annotations: notDestructive,
 		Description: "Put a simulator or emulator at a latitude and longitude, or clear a simulator's location. " +
-			"An emulator cannot forget its location: set another place instead."}, s.setLocation)
+			"An emulator cannot forget its location: set another place instead. A real iPhone is changed only with physical true, for when the user asked for it by name; clear undoes it."}, s.setLocation)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_permission", Annotations: notDestructive,
 		Description: "Grant or revoke a permission, such as camera, location or photos, for an app."}, s.setPermission)
 	mcp.AddTool(server, &mcp.Tool{Name: "set_status_bar", Annotations: notDestructive,
-		Description: "Make a simulator's or emulator's status bar tidy for screenshots (a fixed time, full battery), or put it back."}, s.setStatusBar)
+		Description: "Make a simulator's, emulator's or iPhone's status bar tidy for screenshots (a fixed time, full battery), or put it back. An iPhone needs physical true, for when the user asked for it by name."}, s.setStatusBar)
 	mcp.AddTool(server, &mcp.Tool{Name: "send_push", Annotations: notDestructive,
 		Description: "Send a test push notification to an app on a booted iOS simulator, as if it came from Apple. " +
 			"The app must have asked for notifications and been allowed. Android is refused: its pushes come through Firebase."}, s.sendPush)
@@ -300,8 +300,10 @@ func (s *Server) stop(ctx context.Context, _ *mcp.CallToolRequest, in appArgs) (
 }
 
 type linkArgs struct {
-	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
-	URL    string `json:"url" jsonschema:"a web address or a deep link, such as myapp://home"`
+	Device   string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	URL      string `json:"url" jsonschema:"a web address or a deep link, such as myapp://home"`
+	App      string `json:"app,omitempty" jsonschema:"only for a real iPhone: the bundle id of the app that opens the link. A web address goes to Safari when empty"`
+	Physical bool   `json:"physical,omitempty" jsonschema:"set only when the user asked for a real phone by name: it is theirs"`
 }
 
 func (s *Server) openLink(ctx context.Context, _ *mcp.CallToolRequest, in linkArgs) (*mcp.CallToolResult, any, error) {
@@ -309,7 +311,10 @@ func (s *Server) openLink(ctx context.Context, _ *mcp.CallToolRequest, in linkAr
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.Manager.OpenLink(ctx, d, in.URL); err != nil {
+	if err := allowPhone(d, in.Physical); err != nil {
+		return nil, nil, err
+	}
+	if err := s.Manager.OpenLinkIn(ctx, d, in.URL, in.App); err != nil {
 		return nil, nil, err
 	}
 	sentence := fmt.Sprintf("Opened %s on %s", in.URL, d.Name)
@@ -529,8 +534,9 @@ func (s *Server) exportLogs(ctx context.Context, _ *mcp.CallToolRequest, in expo
 }
 
 type appearanceArgs struct {
-	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
-	Mode   string `json:"mode" jsonschema:"dark or light"`
+	Device   string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	Mode     string `json:"mode" jsonschema:"dark or light"`
+	Physical bool   `json:"physical,omitempty" jsonschema:"set only when the user asked for a real phone by name: it is theirs"`
 }
 
 func (s *Server) setAppearance(ctx context.Context, _ *mcp.CallToolRequest, in appearanceArgs) (*mcp.CallToolResult, any, error) {
@@ -538,20 +544,41 @@ func (s *Server) setAppearance(ctx context.Context, _ *mcp.CallToolRequest, in a
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := allowPhone(d, in.Physical); err != nil {
+		return nil, nil, err
+	}
+	before := s.Manager.PreviousAppearance(ctx, d)
 	if err := s.Manager.SetAppearance(ctx, d, in.Mode); err != nil {
 		return nil, nil, err
 	}
-	return text(fmt.Sprintf("%s is now in %s mode", d.Name, in.Mode))
+	if before == "" || before == in.Mode {
+		before = map[string]string{"dark": "light", "light": "dark"}[in.Mode]
+	}
+	return text(fmt.Sprintf("%s is now in %s mode", d.Name, in.Mode) + mobile.PhoneNote(d, "set_appearance with "+before))
 }
 
 type locationArgs struct {
 	Device   string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
 	Location string `json:"location" jsonschema:"latitude,longitude such as 37.5665,126.978, or clear"`
+	Physical bool   `json:"physical,omitempty" jsonschema:"set only when the user asked for a real phone by name: it is theirs"`
+}
+
+// allowPhone refuses a real phone unless the caller says the user asked for it: a phone is the
+// person's own, and an agent must not change it on a guess.
+func allowPhone(d device.Device, physical bool) error {
+	if d.Kind != device.Physical || physical {
+		return nil
+	}
+	return apperr.New(apperr.InvalidState, "%s is a real phone, and this changes it", d.Name).
+		WithHint("Only if the user asked for this phone by name, call again with physical true.")
 }
 
 func (s *Server) setLocation(ctx context.Context, _ *mcp.CallToolRequest, in locationArgs) (*mcp.CallToolResult, any, error) {
 	d, err := s.Manager.Find(ctx, in.Device)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := allowPhone(d, in.Physical); err != nil {
 		return nil, nil, err
 	}
 	if in.Location == "clear" {
@@ -567,7 +594,7 @@ func (s *Server) setLocation(ctx context.Context, _ *mcp.CallToolRequest, in loc
 	if err := s.Manager.SetLocation(ctx, d, lat, lon); err != nil {
 		return nil, nil, err
 	}
-	return text(fmt.Sprintf("%s is now at %g,%g", d.Name, lat, lon))
+	return text(fmt.Sprintf("%s is now at %g,%g", d.Name, lat, lon) + mobile.PhoneNote(d, "set_location with clear"))
 }
 
 type permissionArgs struct {
@@ -592,8 +619,9 @@ func (s *Server) setPermission(ctx context.Context, _ *mcp.CallToolRequest, in p
 }
 
 type statusBarArgs struct {
-	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
-	Mode   string `json:"mode" jsonschema:"clean or reset"`
+	Device   string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	Mode     string `json:"mode" jsonschema:"clean or reset"`
+	Physical bool   `json:"physical,omitempty" jsonschema:"set only when the user asked for a real phone by name: it is theirs"`
 }
 
 func (s *Server) setStatusBar(ctx context.Context, _ *mcp.CallToolRequest, in statusBarArgs) (*mcp.CallToolResult, any, error) {
@@ -604,11 +632,14 @@ func (s *Server) setStatusBar(ctx context.Context, _ *mcp.CallToolRequest, in st
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := allowPhone(d, in.Physical); err != nil {
+		return nil, nil, err
+	}
 	if err := s.Manager.SetStatusBar(ctx, d, in.Mode == "clean"); err != nil {
 		return nil, nil, err
 	}
 	if in.Mode == "clean" {
-		return text("The status bar of " + d.Name + " is tidy for a screenshot")
+		return text("The status bar of " + d.Name + " is tidy for a screenshot" + mobile.PhoneNote(d, "set_status_bar with reset"))
 	}
 	return text("The status bar of " + d.Name + " is back to normal")
 }

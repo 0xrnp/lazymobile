@@ -2147,16 +2147,12 @@ func TestScreenshotsAndLinksNeedARunningDevice(t *testing.T) {
 	h.press("t")
 	h.wantScreen("iPad Air is not running")
 
-	// An iPhone can be filmed and captured with devicectl, but links are left to simulators and Android.
+	// An iPhone can be captured, and opens a link, through devicectl.
 	h.selectDevice(usbPhone)
 	h.press("p")
 	h.wantCalls("screenshot", 1)
 	h.press("t")
-	h.wantScreen("Test iPhone is an iPhone")
-	h.wantCalls("link", 0)
-	if h.m.modal != nil {
-		t.Error("a window opened for an iPhone")
-	}
+	h.wantScreen("Open a link on Test iPhone")
 }
 
 func TestMSwitchesBetweenDarkAndLightMode(t *testing.T) {
@@ -2180,14 +2176,13 @@ func TestMSwitchesBetweenDarkAndLightMode(t *testing.T) {
 	h.wantScreen("Could not finish: switching dark and light mode on iPhone 17", "Android 10")
 }
 
-func TestMNeedsARunningDeviceThatIsNotAnIPhone(t *testing.T) {
+func TestMNeedsARunningDeviceAndSwitchesAnIPhoneToo(t *testing.T) {
 	h := start(t, ipad, usbPhone)
 	h.press("m")
 	h.wantScreen("iPad Air is not running")
 	h.selectDevice(usbPhone)
 	h.press("m")
-	h.wantScreen("Test iPhone is an iPhone")
-	h.wantCalls("appearance", 0)
+	h.wantCalls("set-appearance UDID-1 dark", 1)
 }
 
 func TestFAsksWhereAndPutsTheDeviceThere(t *testing.T) {
@@ -2231,22 +2226,23 @@ func TestCAndShiftCTidyAndRestoreTheStatusBar(t *testing.T) {
 	h.wantScreen("Restored the status bar of iPhone 17")
 }
 
-func TestLocationAndStatusBarKeysLeaveRealPhonesAloneAndNeedARunningDevice(t *testing.T) {
+func TestLocationAndStatusBarKeysTakeAnIPhoneButLeaveAnAndroidPhoneAlone(t *testing.T) {
 	h := start(t, ipad, usbPhone, wifiPhon)
 	h.press("f")
 	h.wantScreen("iPad Air is not running")
-	for _, d := range []device.Device{usbPhone, wifiPhon} {
-		h.selectDevice(d)
-		h.press("f")
-		h.wantScreen(d.Name + " is a real device: its location and status bar are left alone")
-		h.press("c")
-		h.wantScreen(d.Name + " is a real device")
-	}
+	h.selectDevice(wifiPhon)
+	h.press("f")
+	h.wantScreen(wifiPhon.Name + " is a real device: its location and status bar are left alone")
+	h.press("c")
+	h.wantScreen(wifiPhon.Name + " is a real device")
 	h.wantCalls("location", 0)
 	h.wantCalls("statusbar", 0)
 	if h.m.modal != nil {
-		t.Error("a window opened for a real device")
+		t.Error("a window opened for an Android phone")
 	}
+	h.selectDevice(usbPhone)
+	h.press("c")
+	h.wantCalls("statusbar UDID-1 clean=true", 1)
 }
 
 func TestAnAppsPermissionsAreGrantedAndRevokedFromTheAppMenu(t *testing.T) {

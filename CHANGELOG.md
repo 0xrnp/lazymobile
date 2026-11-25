@@ -48,6 +48,11 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- An iPhone takes dark and light mode, a simulated location, a tidy status bar and a link through
+  Xcode's `devicectl`, as `appearance`, `location`, `statusbar` and `link` already do on a simulator.
+  Each change prints the command that undoes it. A link on an iPhone goes to Safari when it is a web
+  address, and to the app named with `link --app` otherwise. Agents refuse a real phone unless the call
+  says `physical` true. Face ID is not offered
 - Logs can be exported in the layout you need. `S` in the dashboard asks which lines (what is shown,
   everything received, errors and crashes only, or from the selected line) and picks the layout from the
   file name: `.log`, `.json`, `.jsonl`, `.csv` or `.md` for pasting into an issue. `lazymobile logs <device>

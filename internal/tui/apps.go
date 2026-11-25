@@ -179,7 +179,7 @@ func (m *Model) screenshot(d device.Device) tea.Cmd {
 // toggleAppearance switches the selected device between dark and light mode. A device that
 // follows the time of day (auto) is put in dark mode.
 func (m *Model) toggleAppearance(d device.Device) tea.Cmd {
-	if problem := screenFeature(d); problem != "" {
+	if problem := settingsFeature(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}
@@ -314,7 +314,7 @@ func (m *Model) installPath(d device.Device, path string) tea.Cmd {
 
 // askLocation asks where to put the selected simulator or emulator.
 func (m *Model) askLocation(d device.Device) tea.Cmd {
-	if problem := virtualOnlyRunning(d); problem != "" {
+	if problem := placeableRunning(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}
@@ -352,7 +352,7 @@ func (m *Model) askLocation(d device.Device) tea.Cmd {
 // statusBar tidies the selected simulator's or emulator's status bar for a screenshot, or puts it
 // back.
 func (m *Model) statusBar(d device.Device, clean bool) tea.Cmd {
-	if problem := virtualOnlyRunning(d); problem != "" {
+	if problem := placeableRunning(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}
@@ -368,7 +368,7 @@ func (m *Model) statusBar(d device.Device, clean bool) tea.Cmd {
 
 // openLink asks for a web address or deep link, and opens it on the selected device.
 func (m *Model) openLink(d device.Device) tea.Cmd {
-	if problem := screenFeature(d); problem != "" {
+	if problem := settingsFeature(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}

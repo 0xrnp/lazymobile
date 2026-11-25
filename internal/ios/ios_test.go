@@ -691,10 +691,10 @@ func TestAppearanceOfASimulatorIsReadAndSet(t *testing.T) {
 	}
 }
 
-func TestAppearanceRefusesAnIPhoneAndNoticesAnAnswerItDoesNotKnow(t *testing.T) {
+func TestAppearanceRefusesAnAndroidDeviceAndNoticesAnAnswerItDoesNotKnow(t *testing.T) {
 	none := runtest.Table(map[string]run.Result{})
-	if _, err := client(none).Appearance(context.Background(), iphone); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
-		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	if _, err := client(none).Appearance(context.Background(), device.Device{Platform: device.Android, Kind: device.Emulator}); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an Android device: %v, calls %v", err, none.Calls())
 	}
 	odd := runtest.Table(map[string]run.Result{"simctl ui": runtest.Out("unsupported\n")})
 	if _, err := client(odd).Appearance(context.Background(), bootedSim); apperr.CodeOf(err) != apperr.ParseFailed {
@@ -712,8 +712,8 @@ func TestLocationOfASimulatorIsSetAndCleared(t *testing.T) {
 		t.Errorf("clear: %v, calls %v", err, fake.Calls())
 	}
 	none := runtest.Table(map[string]run.Result{})
-	if err := client(none).SetLocation(context.Background(), iphone, 1, 2); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
-		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	if err := client(none).SetLocation(context.Background(), device.Device{Platform: device.Android, Kind: device.Emulator}, 1, 2); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an Android device: %v, calls %v", err, none.Calls())
 	}
 }
 
@@ -1010,4 +1010,45 @@ func TestDeleteUnavailableReportsWhatWentBeforeSimctlFailed(t *testing.T) {
 func hasHint(err error, text string) bool {
 	var e *apperr.Error
 	return errors.As(err, &e) && strings.Contains(e.Hint, text)
+}
+
+func TestAnIPhoneTakesAppearanceLocationStatusBarAndLinksThroughDevicectl(t *testing.T) {
+	ctx := context.Background()
+	fake := &runtest.Fake{Answer: func(command string, argv []string, _ run.Options) run.Result {
+		if strings.Contains(command, "info appearance") {
+			if err := os.WriteFile(argv[len(argv)-1], []byte(`{"result": {"userInterfaceStyle": "dark", "textSize": "Large"}}`), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		return run.Result{}
+	}}
+	c := client(fake)
+	if mode, err := c.Appearance(ctx, iphone); err != nil || mode != "dark" {
+		t.Errorf("appearance %q, %v", mode, err)
+	}
+	steps := []struct {
+		do   func() error
+		want string
+	}{
+		{func() error { return c.SetAppearance(ctx, iphone, "light") }, "xcrun devicectl device settings appearance --device P1 --mode light --quiet"},
+		{func() error { return c.SetLocation(ctx, iphone, 37.7749, -122.4194) }, "xcrun devicectl device simulate location coordinate --device P1 --latitude 37.7749 --longitude -122.4194 --quiet"},
+		{func() error { return c.ClearLocation(ctx, iphone) }, "xcrun devicectl device simulate location clear --device P1 --quiet"},
+		{func() error { return c.CleanStatusBar(ctx, iphone) }, "xcrun devicectl device simulate statusBar preset screenshot --device P1 --quiet"},
+		{func() error { return c.ResetStatusBar(ctx, iphone) }, "xcrun devicectl device simulate statusBar clear --device P1 --quiet"},
+		{func() error { return c.PhoneOpenURL(ctx, iphone, "https://example.com", Safari) }, "xcrun devicectl device process launch --device P1 --payload-url https://example.com com.apple.mobilesafari --quiet"},
+	}
+	for _, step := range steps {
+		if err := step.do(); err != nil || !fake.Called(step.want) {
+			t.Errorf("%s: %v, calls %v", step.want, err, fake.Calls())
+		}
+	}
+	// A locked phone says what to do, and an iOS that does not offer it says so.
+	locked := runtest.Table(map[string]run.Result{"devicectl device settings appearance": runtest.Fail(1, "The device is locked.")})
+	if err := client(locked).SetAppearance(ctx, iphone, "dark"); err == nil || !hasHint(err, "Unlock it") {
+		t.Errorf("a locked iPhone: %v", err)
+	}
+	none := runtest.Table(map[string]run.Result{"devicectl device simulate statusBar": runtest.Fail(1, "The capability “Status Bar” is not supported by this device.")})
+	if err := client(none).CleanStatusBar(ctx, iphone); apperr.CodeOf(err) != apperr.Unsupported {
+		t.Errorf("an unsupported capability: %v", err)
+	}
 }

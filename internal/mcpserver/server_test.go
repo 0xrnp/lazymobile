@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/0xrnp/lazymobile/internal/android"
+	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 	"github.com/0xrnp/lazymobile/internal/run"
@@ -411,5 +412,18 @@ func TestExportLogsSavesANewFileInTheFormatAsked(t *testing.T) {
 	res = call(t, session, "export_logs", map[string]any{"device": "iPhone 16 Pro", "since": "1m", "format": "md"})
 	if res.IsError || !strings.Contains(textOf(res), "log.md") {
 		t.Errorf("got %q", textOf(res))
+	}
+}
+
+func TestARealPhoneIsOnlyChangedWhenTheCallerSaysTheUserAskedForIt(t *testing.T) {
+	phone := device.Device{Name: "0xrnp", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
+	if err := allowPhone(phone, false); err == nil || !strings.Contains(err.Error(), "real phone") {
+		t.Errorf("a phone without physical: %v", err)
+	}
+	if err := allowPhone(phone, true); err != nil {
+		t.Errorf("a phone with physical: %v", err)
+	}
+	if err := allowPhone(device.Device{Kind: device.Simulator}, false); err != nil {
+		t.Errorf("a simulator: %v", err)
 	}
 }

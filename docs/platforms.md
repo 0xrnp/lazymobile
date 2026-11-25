@@ -14,9 +14,9 @@ the ones marked "run" were run on a real simulator or emulator (see [tested.md](
 | Crash report | yes | yes | yes | yes |
 | Screenshot | yes | yes ([4](#4-the-iphone)) | yes | yes |
 | Screen recording | yes | built, needs an iOS that offers it ([4](#4-the-iphone)) | yes | yes |
-| Open a link | yes ([1](#1-deep-links-on-a-simulator)) | not yet ([4](#4-the-iphone)) | yes | yes |
-| Dark and light mode | yes | not yet ([4](#4-the-iphone)) | yes | yes |
-| Location, status bar | yes | not yet ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
+| Open a link | yes ([1](#1-deep-links-on-a-simulator)) | yes, in a named app ([4](#4-the-iphone)) | yes | yes |
+| Dark and light mode | yes | yes | yes | yes |
+| Location, status bar | yes | yes ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Grant or revoke a permission | yes | no ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Clear an app's data | yes ([2](#2-clearing-data-on-a-simulator)) | no ([4](#4-the-iphone)) | yes | no ([8](#8-android-phones)) |
 | Test push notification | yes | no | no ([3](#3-push-on-android)) | no |
@@ -57,9 +57,14 @@ Xcode 27's `devicectl` can do more on a real iPhone than lazymobile uses. A scre
 was run on an iPhone 17 Pro (a valid PNG, saved so only you can read it). Screen recording is built
 too, and on that phone, which runs iOS 27.0, `devicectl` answered "The capability Screen Recording is
 not supported by this device", so lazymobile says so and points to QuickTime Player; a newer iOS may
-offer it. The other things `devicectl` has, which change a personal phone (dark or light mode,
-a simulated location and status bar, Face ID, opening a URL in an app), are marked "not yet": they
-are built only with the owner's say-so, and the README promises that they are left alone today. An iPhone's CPU and
+offer it. A phone is a person's own, so what changes it is kept to what can be undone, and each change prints the
+command that undoes it. Dark and light mode (`settings appearance`), a simulated location
+(`simulate location`), a tidy status bar (`simulate statusBar preset screenshot`) and a link
+(`process launch --payload-url`) are built. A phone has no command to ask which app handles a link, so
+a web address goes to Safari and anything else needs `--app <bundle id>`; the app is launched. The
+agent tools refuse a real phone unless they are called with `physical` true, for when the user named
+it. Face ID, which `devicectl` can simulate too, is left out on purpose: a simulated sign-in on a
+personal phone is not worth the risk. An iPhone's CPU and
 memory, and its app permissions and data, have no `devicectl` command that was found (Instruments
 measures CPU and memory).
 

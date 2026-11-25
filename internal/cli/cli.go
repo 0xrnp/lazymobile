@@ -74,7 +74,7 @@ Usage:
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
   lazymobile action <device> <name> [--app <app-id>] --yes [--json]   run one on a device. Without --yes it only shows the command
   lazymobile run [<device>] [--profile <name>] [--choose] [--here [--no-log] | --split] [--yes] [-- <tool flags>]   start the device if it is off and run this folder's app on it with the tool you already use (flutter run, or the action named "run" in .lazymobile.json, which needs --yes). In a terminal it asks which way to run (the actions named "run", "run dev", "run prod" in .lazymobile.json) and which device when it cannot tell, and remembers the answer for the folder; --choose asks again. Its keys, such as r for hot reload, keep working. --here runs it inside the dashboard (--no-log gives the tool the whole width; ctrl+p, then l, shows the log): ctrl+] switches between the run and the full dashboard
-  lazymobile link <device> <url> [--json]       open a web address or deep link, such as myapp://home
+  lazymobile link <device> <url> [--app <id>] [--json]   open a web address or deep link, such as myapp://home. A real iPhone needs the app that opens it (a web address goes to Safari)
   lazymobile dev <device> reverse|menu|reload [--port 8081] [--json]   help an app in development on an Android device: forward a port to this computer (Metro), open its developer menu, reload it
   lazymobile record <device> [--out <file>] [--duration 30s] [--json]   film the screen until Ctrl-C or the duration. Never replaces a file
   lazymobile screenshot <device> [--out <file>] [--json]   save a PNG of the screen. Never replaces a file
@@ -666,11 +666,15 @@ func (a *App) appearance(ctx context.Context, args []string) error {
 		fmt.Fprintln(a.Stdout, mode)
 		return nil
 	}
+	before := a.Manager.PreviousAppearance(ctx, d)
 	if err := a.Manager.SetAppearance(ctx, d, positional[1]); err != nil {
 		return err
 	}
+	if before == "" || before == positional[1] {
+		before = map[string]string{"dark": "light", "light": "dark"}[positional[1]]
+	}
 	return a.done(*asJSON, result{Action: "appearance", Device: d, Appearance: positional[1]},
-		fmt.Sprintf("%s is now in %s mode", d.Name, positional[1]))
+		fmt.Sprintf("%s is now in %s mode", d.Name, positional[1])+mobile.PhoneNote(d, fmt.Sprintf("lazymobile appearance %q %s", d.Name, before)))
 }
 
 func (a *App) permission(ctx context.Context, args []string) error {
@@ -743,7 +747,7 @@ func (a *App) location(ctx context.Context, args []string) error {
 		return err
 	}
 	place := strconv.FormatFloat(lat, 'f', -1, 64) + "," + strconv.FormatFloat(lon, 'f', -1, 64)
-	return a.done(*asJSON, result{Action: "location", Device: d, Location: place}, fmt.Sprintf("%s is now at %s", d.Name, place))
+	return a.done(*asJSON, result{Action: "location", Device: d, Location: place}, fmt.Sprintf("%s is now at %s", d.Name, place)+mobile.PhoneNote(d, fmt.Sprintf("lazymobile location %q clear", d.Name)))
 }
 
 func (a *App) statusBar(ctx context.Context, args []string) error {
@@ -765,7 +769,7 @@ func (a *App) statusBar(ctx context.Context, args []string) error {
 		return err
 	}
 	if clean {
-		return a.done(*asJSON, result{Action: "statusbar_clean", Device: d}, "The status bar of "+d.Name+" is tidy for a screenshot")
+		return a.done(*asJSON, result{Action: "statusbar_clean", Device: d}, "The status bar of "+d.Name+" is tidy for a screenshot"+mobile.PhoneNote(d, fmt.Sprintf("lazymobile statusbar %q reset", d.Name)))
 	}
 	return a.done(*asJSON, result{Action: "statusbar_reset", Device: d}, "The status bar of "+d.Name+" is back to normal")
 }
@@ -858,6 +862,7 @@ func (a *App) jank(ctx context.Context, args []string) error {
 func (a *App) link(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("link", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
+	app := fs.String("app", "", "")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -869,7 +874,10 @@ func (a *App) link(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.Manager.OpenLink(ctx, d, positional[1]); err != nil {
+	if *app != "" && !logs.ValidAppID(*app) {
+		return usageError{*app + " does not look like an app id"}
+	}
+	if err := a.Manager.OpenLinkIn(ctx, d, positional[1], *app); err != nil {
 		return err
 	}
 	r := result{Action: "link", Device: d, URL: positional[1]}

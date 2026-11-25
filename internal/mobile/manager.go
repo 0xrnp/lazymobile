@@ -285,7 +285,7 @@ func ValidLink(link string) bool {
 // that neither a person at the terminal nor a coding agent can give from here. A web address
 // opens at once.
 func LinkNote(d device.Device, link string) string {
-	if d.Platform != device.IOS || strings.HasPrefix(strings.ToLower(link), "http://") || strings.HasPrefix(strings.ToLower(link), "https://") {
+	if d.Platform != device.IOS || d.Kind == device.Physical || strings.HasPrefix(strings.ToLower(link), "http://") || strings.HasPrefix(strings.ToLower(link), "https://") {
 		return ""
 	}
 	return "A simulator may now be asking \"Open in …?\" before it opens a deep link: tap Open in the Simulator window. Nothing here can answer it"
@@ -294,12 +294,28 @@ func LinkNote(d device.Device, link string) string {
 // OpenLink opens a web address or deep link on a running simulator, emulator or Android phone, in
 // the app that handles it. No app for it is a not_found error.
 func (m *Manager) OpenLink(ctx context.Context, d device.Device, link string) error {
+	return m.OpenLinkIn(ctx, d, link, "")
+}
+
+// OpenLinkIn is OpenLink for an iPhone, which has no way to ask which app handles a link: the app
+// is named, and a web address goes to Safari when none is. app is ignored elsewhere.
+func (m *Manager) OpenLinkIn(ctx context.Context, d device.Device, link, app string) error {
 	if !d.Ready() {
 		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot or connect it first.")
 	}
 	if !ValidLink(link) {
 		return apperr.New(apperr.InvalidState, "That does not look like a link: %s", link).
 			WithHint("Use a whole link such as myapp://home?id=1 or https://example.com. Write a space as %%20.")
+	}
+	if d.Platform == device.IOS && d.Kind == device.Physical {
+		if app == "" && (strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "http://")) {
+			app = ios.Safari
+		}
+		if !logs.ValidAppID(app) {
+			return apperr.New(apperr.InvalidState, "An iPhone needs the app that opens %s", link).
+				WithHint("Name it: lazymobile link %q %q --app <bundle id>", d.Name, link)
+		}
+		return m.IOS.PhoneOpenURL(ctx, d, link, app)
 	}
 	if d.Platform == device.IOS {
 		return m.IOS.OpenURL(ctx, d, link)
@@ -417,10 +433,38 @@ func virtualDevice(d device.Device, what string) error {
 	return nil
 }
 
-// SetLocation puts a running simulator or emulator at a place. Use ParseLocation for the text a
+// placeable checks that d can be told where it is, or given a demo status bar: a running simulator,
+// emulator or iPhone. An Android phone has no console for it.
+func placeable(d device.Device, what string) error {
+	if d.Platform == device.IOS && d.Kind == device.Physical && d.Ready() {
+		return nil
+	}
+	return virtualDevice(d, what)
+}
+
+// PreviousAppearance is the mode a real phone was in, to undo a change to it: "" for anything else
+// or when it cannot be read.
+func (m *Manager) PreviousAppearance(ctx context.Context, d device.Device) string {
+	if d.Kind != device.Physical {
+		return ""
+	}
+	mode, _ := m.Appearance(ctx, d)
+	return mode
+}
+
+// PhoneNote is a sentence to add after a change to a real phone, saying how to undo it, since the
+// phone is the person's own. It is empty for a simulator or an emulator. undo is the command.
+func PhoneNote(d device.Device, undo string) string {
+	if d.Kind != device.Physical {
+		return ""
+	}
+	return " (a real phone: undo with `" + undo + "`)"
+}
+
+// SetLocation puts a running simulator, emulator or iPhone at a place. Use ParseLocation for the text a
 // person types.
 func (m *Manager) SetLocation(ctx context.Context, d device.Device, lat, lon float64) error {
-	if err := virtualDevice(d, "its location"); err != nil {
+	if err := placeable(d, "its location"); err != nil {
 		return err
 	}
 	if !validPlace(lat, lon) {
@@ -435,7 +479,7 @@ func (m *Manager) SetLocation(ctx context.Context, d device.Device, lat, lon flo
 // ClearLocation takes the fake location off a running simulator. An emulator has no way to forget
 // one, short of being restarted.
 func (m *Manager) ClearLocation(ctx context.Context, d device.Device) error {
-	if err := virtualDevice(d, "its location"); err != nil {
+	if err := placeable(d, "its location"); err != nil {
 		return err
 	}
 	if d.Platform == device.Android {
@@ -448,7 +492,7 @@ func (m *Manager) ClearLocation(ctx context.Context, d device.Device) error {
 // SetStatusBar gives a running simulator or emulator the tidy status bar of a screenshot (clean),
 // or takes it off again.
 func (m *Manager) SetStatusBar(ctx context.Context, d device.Device, clean bool) error {
-	if err := virtualDevice(d, "its status bar"); err != nil {
+	if err := placeable(d, "its status bar"); err != nil {
 		return err
 	}
 	switch {

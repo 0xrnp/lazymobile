@@ -95,6 +95,24 @@ func screenFeature(d device.Device) string {
 	return ""
 }
 
+// settingsFeature is why d cannot take a setting, a link or a demo status bar, or "" when it can.
+// An iPhone does, through Xcode; an Android phone has no console for a location or status bar.
+func settingsFeature(d device.Device) string {
+	if !d.Ready() {
+		return d.Name + " is not running"
+	}
+	return ""
+}
+
+// placeableRunning is why d cannot be moved or have its status bar tidied, or "" when it can: a
+// running simulator, emulator or iPhone.
+func placeableRunning(d device.Device) string {
+	if d.Platform == device.IOS && d.Kind == device.Physical && d.Ready() {
+		return ""
+	}
+	return virtualOnlyRunning(d)
+}
+
 // virtualOnlyRunning is why d cannot be moved or have its status bar tidied, or "" when it can:
 // only a running simulator or emulator can.
 func virtualOnlyRunning(d device.Device) string {
@@ -158,11 +176,11 @@ var keyTable = []keyAction{
 	{id: "app", ctx: ctxDevices, keys: []string{"o"}, show: "o", desc: "Launch, restart or stop an app",
 		when: selectedDevice(running)},
 	{id: "appearance", ctx: ctxDevices, keys: []string{"m"}, show: "m", desc: "Switch between dark and light mode",
-		when: selectedDevice(screenFeature)},
-	{id: "location", ctx: ctxDevices, keys: []string{"f"}, show: "f", desc: "Put a simulator or emulator at a place",
-		when: selectedDevice(virtualOnlyRunning)},
+		when: selectedDevice(settingsFeature)},
+	{id: "location", ctx: ctxDevices, keys: []string{"f"}, show: "f", desc: "Put a simulator, emulator or iPhone at a place",
+		when: selectedDevice(placeableRunning)},
 	{id: "statusbar", ctx: ctxDevices, keys: []string{"c", "C"}, show: "c C", desc: "Tidy the status bar for a screenshot, or restore it",
-		when: selectedDevice(virtualOnlyRunning)},
+		when: selectedDevice(placeableRunning)},
 	{id: "media", ctx: ctxDevices, keys: []string{"A"}, show: "A", desc: "Add a photo or video to a simulator or emulator",
 		when: selectedDevice(virtualOnlyRunning)},
 	{id: "clipboard", ctx: ctxDevices, keys: []string{"V"}, show: "V", desc: "Copy text to a simulator's clipboard",
@@ -176,7 +194,7 @@ var keyTable = []keyAction{
 	{id: "project_action", ctx: ctxDevices, keys: []string{"R"}, show: "R", desc: "Run a project command from .lazymobile.json (asks first)",
 		when: selectedDevice(running)},
 	{id: "link", ctx: ctxDevices, keys: []string{"t"}, show: "t", desc: "Open a web address or deep link",
-		when: selectedDevice(screenFeature)},
+		when: selectedDevice(settingsFeature)},
 	{id: "dev", ctx: ctxDevices, keys: []string{"D"}, show: "D", desc: "Reach Metro, open the dev menu or reload (Android)",
 		when: selectedDevice(devFeature)},
 	{id: "logs", ctx: ctxDevices, keys: []string{"l", "enter"}, show: "l enter", desc: "Open a log in a new pane",

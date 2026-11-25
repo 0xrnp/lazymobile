@@ -15,6 +15,9 @@ import (
 
 // Appearance is "light" or "dark", the mode of a booted simulator.
 func (c *Client) Appearance(ctx context.Context, d device.Device) (string, error) {
+	if isPhone(d) {
+		return c.phoneAppearance(ctx, d)
+	}
 	if err := onlySimulator(d, "read the appearance"); err != nil {
 		return "", err
 	}
@@ -31,6 +34,9 @@ func (c *Client) Appearance(ctx context.Context, d device.Device) (string, error
 
 // SetAppearance switches a booted simulator to "light" or "dark".
 func (c *Client) SetAppearance(ctx context.Context, d device.Device, mode string) error {
+	if isPhone(d) {
+		return c.phoneSetAppearance(ctx, d, mode)
+	}
 	if err := onlySimulator(d, "change the appearance"); err != nil {
 		return err
 	}
@@ -87,6 +93,9 @@ func formatCoordinate(v float64) string { return strconv.FormatFloat(v, 'f', -1,
 
 // SetLocation puts a booted simulator at a place, which its apps see until ClearLocation.
 func (c *Client) SetLocation(ctx context.Context, d device.Device, lat, lon float64) error {
+	if isPhone(d) {
+		return c.phoneSetLocation(ctx, d, lat, lon)
+	}
 	if err := onlySimulator(d, "set the location"); err != nil {
 		return err
 	}
@@ -96,6 +105,9 @@ func (c *Client) SetLocation(ctx context.Context, d device.Device, lat, lon floa
 
 // ClearLocation takes the fake location off a booted simulator.
 func (c *Client) ClearLocation(ctx context.Context, d device.Device) error {
+	if isPhone(d) {
+		return c.phoneClearLocation(ctx, d)
+	}
 	if err := onlySimulator(d, "clear the location"); err != nil {
 		return err
 	}
@@ -106,6 +118,9 @@ func (c *Client) ClearLocation(ctx context.Context, d device.Device) error {
 // CleanStatusBar gives a booted simulator the tidy status bar of a screenshot: 9:41, a full
 // battery, full signal, and no carrier name.
 func (c *Client) CleanStatusBar(ctx context.Context, d device.Device) error {
+	if isPhone(d) {
+		return c.phoneCleanStatusBar(ctx, d)
+	}
 	if err := onlySimulator(d, "change the status bar"); err != nil {
 		return err
 	}
@@ -117,6 +132,9 @@ func (c *Client) CleanStatusBar(ctx context.Context, d device.Device) error {
 
 // ResetStatusBar takes the overrides off a booted simulator's status bar.
 func (c *Client) ResetStatusBar(ctx context.Context, d device.Device) error {
+	if isPhone(d) {
+		return c.phoneResetStatusBar(ctx, d)
+	}
 	if err := onlySimulator(d, "change the status bar"); err != nil {
 		return err
 	}

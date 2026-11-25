@@ -309,8 +309,11 @@ If you map `<Esc>` in terminal mode, lazymobile does not receive it. Its windows
 
 - Erase, delete, wipe and uninstall always ask first. Real phones are never booted, shut down,
   erased or deleted. On them lazymobile only uninstalls an app (only one you installed: the apps
-  that come with the system are refused), installs a build you name, launches, restarts or stops an app, copies an iPhone's crash reports (never removing them), and, on an Android
-  phone, opens a link, takes a screenshot or switches dark mode. A location, a status bar, an app's permissions and its data are only changed on simulators and emulators.
+  that come with the system are refused), installs a build you name, launches, restarts or stops an app, copies an iPhone's crash reports (never removing them), takes a screenshot, and
+  switches dark mode and opens a link. On an iPhone it can also set a simulated location and a tidy
+  status bar (Xcode's `devicectl`), and every such change prints the command that undoes it. On an
+  Android phone a location and a status bar are left alone. An app's permissions and data are only
+  changed on simulators and emulators. Agents must say `physical` to change a real phone at all.
 - A screenshot or a recording never replaces a file, and is readable only by you, since a screen can show
   personal data. A link is checked before it reaches an Android phone's shell.
 - The builds pane does not run `eas` until you press `enter` in it. `eas` runs your project's

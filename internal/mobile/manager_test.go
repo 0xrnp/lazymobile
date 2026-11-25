@@ -528,7 +528,7 @@ func TestParseLocationAcceptsOnlyPlacesOnTheGlobe(t *testing.T) {
 	}
 }
 
-func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testing.T) {
+func TestLocationAndStatusBarLeaveAndroidPhonesAloneAndCheckBeforeAnyTool(t *testing.T) {
 	m, fake := uninstallManager(t)
 	ctx := context.Background()
 	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
@@ -539,10 +539,8 @@ func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testin
 	stopped.State = device.Shutdown
 
 	for name, err := range map[string]error{
-		"location of an iPhone":     m.SetLocation(ctx, iphone, 1, 2),
 		"location of a phone":       m.SetLocation(ctx, phone, 1, 2),
 		"clear of a phone":          m.ClearLocation(ctx, phone),
-		"status bar of an iPhone":   m.SetStatusBar(ctx, iphone, true),
 		"status bar of a phone":     m.SetStatusBar(ctx, phone, false),
 		"location of a stopped sim": m.SetLocation(ctx, stopped, 1, 2),
 		"a latitude off the globe":  m.SetLocation(ctx, simulator, 999, 2),
@@ -557,6 +555,22 @@ func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testin
 	}
 	if len(fake.Calls()) != 0 {
 		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+	// An iPhone is reached through devicectl, and a link to it needs an app unless it is a web address.
+	if err := m.SetLocation(ctx, iphone, 1, 2); err != nil || !fake.Called("devicectl device simulate location coordinate --device UDID --latitude 1 --longitude 2") {
+		t.Errorf("an iPhone: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.SetStatusBar(ctx, iphone, false); err != nil || !fake.Called("devicectl device simulate statusBar clear --device UDID") {
+		t.Errorf("an iPhone's status bar: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.OpenLinkIn(ctx, iphone, "myapp://home", ""); apperr.CodeOf(err) != apperr.InvalidState {
+		t.Errorf("a deep link with no app: %v", err)
+	}
+	if err := m.OpenLinkIn(ctx, iphone, "https://example.com", ""); err != nil || !fake.Called("devicectl device process launch --device UDID --payload-url https://example.com com.apple.mobilesafari") {
+		t.Errorf("a web address: %v, calls %v", err, fake.Calls())
+	}
+	if err := m.OpenLinkIn(ctx, iphone, "myapp://home", "com.example.app"); err != nil || !fake.Called("--payload-url myapp://home com.example.app") {
+		t.Errorf("a deep link in an app: %v, calls %v", err, fake.Calls())
 	}
 	if err := m.SetLocation(ctx, simulator, 37.7, -122.4); err != nil || !fake.Called("simctl location SIM set 37.7,-122.4") {
 		t.Errorf("a simulator: %v, calls %v", err, fake.Calls())
