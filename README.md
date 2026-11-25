@@ -17,6 +17,13 @@ their logs, and Expo builds, in one screen. `lazymobile run` starts your app on 
 the tool you already use, and `lazymobile mcp` gives a coding agent the same devices. It works in
 any terminal, and inside Neovim or another editor's terminal.
 
+![A coding agent's calls on the left and an Android emulator on the right: it runs a Flutter app, taps Pay now, reads the exception, fixes it, hot reloads and sees the order placed](docs/agent-demo.gif)
+
+A coding agent's way through a bug with `lazymobile mcp`: real calls on a real emulator, in a scripted
+order.
+
+The dashboard, for doing it yourself:
+
 ![Following an emulator's log through a crash, filtering it, forwarding Metro's port, and the key list](docs/demo.gif)
 
 <details>
