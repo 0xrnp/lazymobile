@@ -767,8 +767,15 @@ func TestLinkOpensAWebAddressOrADeepLink(t *testing.T) {
 	if code := e.run("link", "iPhone 16 Pro", "https://example.com", "--json"); code != ExitOK {
 		t.Fatalf("code %d", code)
 	}
-	if out := e.object(t); out["action"] != "link" || out["url"] != "https://example.com" || out["ok"] != true {
+	if out := e.object(t); out["action"] != "link" || out["url"] != "https://example.com" || out["ok"] != true || out["warnings"] != nil {
 		t.Errorf("printed %v", out)
+	}
+	// A deep link on a simulator may stop at "Open in ...?" when the app is not running.
+	if code := e.run("link", "iPhone 16 Pro", "myapp://home", "--json"); code != ExitOK {
+		t.Fatalf("code %d", code)
+	}
+	if warnings, _ := e.object(t)["warnings"].([]any); len(warnings) != 1 || !strings.Contains(warnings[0].(string), "Open in") {
+		t.Errorf("a deep link on a simulator: %s", e.out.String())
 	}
 }
 
@@ -946,11 +953,13 @@ func TestClearDataNeedsYesAndAnEmulator(t *testing.T) {
 	if code := e.run("cleardata", "iPhone 16 Pro", "com.example.installed"); code != ExitUsage || !strings.Contains(e.errs.String(), "--yes") {
 		t.Errorf("without --yes: code %d, stderr %q", code, e.errs.String())
 	}
-	// An iOS simulator has no way to do it, and says what to do instead.
-	if code := e.run("cleardata", "iPhone 16 Pro", "com.example.installed", "--yes"); code != ExitFailure || !strings.Contains(e.errs.String(), "Uninstall the app") {
-		t.Errorf("on a simulator: code %d, stderr %q", code, e.errs.String())
+	// A simulator's app is stopped, and its data folder is asked for. What the fake names is the
+	// app itself, not a data container, so nothing is deleted.
+	if code := e.run("cleardata", "iPhone 16 Pro", "com.example.installed", "--yes"); code != ExitFailure || !strings.Contains(e.errs.String(), "not an app's data") ||
+		!e.fake.Called("simctl terminate") || !e.fake.Called("get_app_container 00000000-0000-4000-8000-0000000000A2 com.example.installed data") {
+		t.Errorf("on a simulator: code %d, stderr %q, calls %v", code, e.errs.String(), e.fake.Calls())
 	}
-	if e.fake.Called("rm ") || e.fake.Called("get_app_container") {
+	if e.fake.Called("rm ") {
 		t.Errorf("a tool ran: %v", e.fake.Calls())
 	}
 }

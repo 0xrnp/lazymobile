@@ -257,7 +257,11 @@ func (s *Server) openLink(ctx context.Context, _ *mcp.CallToolRequest, in linkAr
 	if err := s.Manager.OpenLink(ctx, d, in.URL); err != nil {
 		return nil, nil, err
 	}
-	return text(fmt.Sprintf("Opened %s on %s", in.URL, d.Name))
+	sentence := fmt.Sprintf("Opened %s on %s", in.URL, d.Name)
+	if note := mobile.LinkNote(d, in.URL); note != "" {
+		sentence += ". " + note
+	}
+	return text(sentence)
 }
 
 type screenshotArgs struct {

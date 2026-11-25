@@ -74,7 +74,17 @@ func running(d device.Device) string {
 	return ""
 }
 
-// screenFeature is why d cannot show a screenshot or open a link, or "" when it can.
+// captureFeature is why d cannot be captured as a screenshot or a recording, or "" when it can. An
+// iPhone can: devicectl captures its screen.
+func captureFeature(d device.Device) string {
+	if !d.Ready() {
+		return d.Name + " is not running"
+	}
+	return ""
+}
+
+// screenFeature is why d cannot open a link or take what an iPhone has no command for, or "" when it
+// can.
 func screenFeature(d device.Device) string {
 	switch {
 	case !d.Ready():
@@ -153,8 +163,10 @@ var keyTable = []keyAction{
 		when: selectedDevice(virtualOnlyRunning)},
 	{id: "statusbar", ctx: ctxDevices, keys: []string{"c", "C"}, show: "c C", desc: "Tidy the status bar for a screenshot, or restore it",
 		when: selectedDevice(virtualOnlyRunning)},
+	{id: "network", ctx: ctxDevices, keys: []string{"N"}, show: "N", desc: "Slow down or cut off an emulator's network",
+		when: selectedDevice(networkFeature)},
 	{id: "screenshot", ctx: ctxDevices, keys: []string{"p"}, show: "p", desc: "Save a screenshot in this folder",
-		when: selectedDevice(screenFeature)},
+		when: selectedDevice(captureFeature)},
 	{id: "install", ctx: ctxDevices, keys: []string{"i"}, show: "i", desc: "Install an .apk or .app on a running device",
 		when: selectedDevice(screenFeature)},
 	{id: "project_action", ctx: ctxDevices, keys: []string{"R"}, show: "R", desc: "Run a project command from .lazymobile.json (asks first)",

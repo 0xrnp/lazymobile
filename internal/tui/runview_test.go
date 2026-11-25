@@ -196,8 +196,14 @@ func TestCtrlBracketSwitchesToTheDashboardAndBackWhileTheToolRuns(t *testing.T) 
 	if r.m.modal == nil || r.m.modal.kind != modalKeys {
 		t.Fatal("? did not open the keys menu")
 	}
-	r.wantScreen("Run")
-	r.press("esc")
+	// The list is long: its filter finds the run's keys.
+	r.press("/")
+	r.typeText("pick the app")
+	r.wantScreen("From the log: pick the app")
+	r.press("esc", "esc")
+	if r.m.modal != nil {
+		t.Fatal("esc did not close the keys menu")
+	}
 	if len(tool.sent()) != 0 {
 		t.Errorf("the tool got %v while the dashboard showed", tool.sent())
 	}

@@ -280,6 +280,17 @@ func ValidLink(link string) bool {
 	return len(link) <= 2048 && linkPattern.MatchString(link)
 }
 
+// LinkNote is something to tell the person after OpenLink opened link on d, or "". Xcode 27's iOS
+// simulator asks "Open in ...?" before it opens a deep link, running app or not, and waits for a tap
+// that neither a person at the terminal nor a coding agent can give from here. A web address
+// opens at once.
+func LinkNote(d device.Device, link string) string {
+	if d.Platform != device.IOS || strings.HasPrefix(strings.ToLower(link), "http://") || strings.HasPrefix(strings.ToLower(link), "https://") {
+		return ""
+	}
+	return "A simulator may now be asking \"Open in …?\" before it opens a deep link: tap Open in the Simulator window. Nothing here can answer it"
+}
+
 // OpenLink opens a web address or deep link on a running simulator, emulator or Android phone, in
 // the app that handles it. No app for it is a not_found error.
 func (m *Manager) OpenLink(ctx context.Context, d device.Device, link string) error {
@@ -349,8 +360,9 @@ func (m *Manager) SetPermission(ctx context.Context, d device.Device, id, name s
 	return m.Android.SetPermission(ctx, d, id, name, grant)
 }
 
-// ClearData erases all the data of an app on a running emulator, as if it had just been
-// installed. An iOS simulator has no such command: uninstalling the app does it.
+// ClearData erases all the data of an app on a running emulator or simulator, as if it had just
+// been installed. On a simulator that is its data container: group containers and the keychain
+// stay. A real phone is left alone.
 func (m *Manager) ClearData(ctx context.Context, d device.Device, id string) error {
 	if err := virtualDevice(d, "its apps' data"); err != nil {
 		return err
@@ -360,8 +372,7 @@ func (m *Manager) ClearData(ctx context.Context, d device.Device, id string) err
 			WithHint("Use a package name or bundle id, such as com.example.app.")
 	}
 	if d.Platform == device.IOS {
-		return apperr.New(apperr.Unsupported, "Apple's tools cannot clear an app's data").
-			WithHint("Uninstall the app and install it again.")
+		return m.IOS.ClearData(ctx, d, id)
 	}
 	return m.Android.ClearData(ctx, d, id)
 }
@@ -516,7 +527,8 @@ func ScreenshotName(d device.Device, now time.Time) string { return mediaName(d,
 
 // RecordingName is a file name for a screen recording of d started at now.
 func RecordingName(d device.Device, now time.Time) string {
-	if d.Platform == device.IOS {
+	// simctl films into a .mov. Everything else, an iPhone included, makes an .mp4.
+	if d.Platform == device.IOS && d.Kind != device.Physical {
 		return mediaName(d, now, "mov")
 	}
 	return mediaName(d, now, "mp4")
@@ -565,6 +577,10 @@ func (m *Manager) Record(ctx context.Context, d device.Device, path string, limi
 	path, err := checkNewFile(path)
 	if err != nil {
 		return "", err
+	}
+	// Checked here as well, so that nothing says "Recording" first. devicectl writes only .mp4.
+	if d.Platform == device.IOS && d.Kind == device.Physical && !strings.HasSuffix(strings.ToLower(path), ".mp4") {
+		return "", apperr.New(apperr.InvalidState, "A recording of an iPhone must be an .mp4 file").WithHint("Got: %s", path)
 	}
 	if started != nil {
 		started()

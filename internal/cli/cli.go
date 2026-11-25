@@ -63,7 +63,7 @@ Usage:
   lazymobile stop <device> <app-id> [--json]    stop a running app. Its data is kept
   lazymobile appearance <device> [dark|light] [--json]   show the mode, or switch to dark or light
   lazymobile permission <device> grant|revoke <permission> <app-id> [--json]   such as camera, location, photos
-  lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator
+  lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator or a simulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
   lazymobile network <device> offline|online|gsm|edge|3g|lte|full [--json]   an Android emulator with no connection, or a slow one
@@ -863,7 +863,13 @@ func (a *App) link(ctx context.Context, args []string) error {
 	if err := a.Manager.OpenLink(ctx, d, positional[1]); err != nil {
 		return err
 	}
-	return a.done(*asJSON, result{Action: "link", Device: d, URL: positional[1]}, fmt.Sprintf("Opened %s on %s", positional[1], d.Name))
+	r := result{Action: "link", Device: d, URL: positional[1]}
+	sentence := fmt.Sprintf("Opened %s on %s", positional[1], d.Name)
+	if note := mobile.LinkNote(d, positional[1]); note != "" {
+		r.Warnings = []string{note}
+		sentence += "\n" + note
+	}
+	return a.done(*asJSON, r, sentence)
 }
 
 func (a *App) dev(ctx context.Context, args []string) error {

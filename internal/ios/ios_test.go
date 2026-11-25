@@ -633,9 +633,50 @@ func TestScreenshotOfASimulatorAsksForAPNG(t *testing.T) {
 	if !fake.Called("xcrun simctl io " + udidBooted + " screenshot --type=png /tmp/x.png") {
 		t.Errorf("ran %v", fake.Calls())
 	}
+	// An iPad that is not a simulator or a phone is still refused.
 	none := runtest.Table(map[string]run.Result{})
-	if err := client(none).Screenshot(context.Background(), iphone, "/tmp/x.png"); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
-		t.Errorf("an iPhone: %v, calls %v", err, none.Calls())
+	android := device.Device{ID: "X", Name: "X", Platform: device.Android, Kind: device.Emulator}
+	if err := client(none).Screenshot(context.Background(), android, "/tmp/x.png"); apperr.CodeOf(err) != apperr.Unsupported || len(none.Calls()) != 0 {
+		t.Errorf("an Android device: %v, calls %v", err, none.Calls())
+	}
+}
+
+func TestScreenshotAndRecordingOfAnIPhoneUseDevicectlAndNeedTheRightFileType(t *testing.T) {
+	ctx := context.Background()
+	shot := runtest.Table(map[string]run.Result{"devicectl device capture screenshot": {}})
+	if err := client(shot).Screenshot(ctx, iphone, "/tmp/x.png"); err != nil ||
+		!shot.Called("xcrun devicectl device capture screenshot --device P1 --destination /tmp/x.png --quiet") {
+		t.Errorf("screenshot: %v, calls %v", err, shot.Calls())
+	}
+	// devicectl only writes .png and .mp4, so anything else is refused before the phone is asked.
+	none := runtest.Table(map[string]run.Result{})
+	if err := client(none).Screenshot(ctx, iphone, "/tmp/x.jpg"); apperr.CodeOf(err) != apperr.InvalidState || len(none.Calls()) != 0 {
+		t.Errorf("a .jpg: %v, calls %v", err, none.Calls())
+	}
+	if err := client(none).Record(ctx, iphone, "/tmp/x.mov", 0); apperr.CodeOf(err) != apperr.InvalidState || len(none.Calls()) != 0 {
+		t.Errorf("a .mov: %v, calls %v", err, none.Calls())
+	}
+	// A locked phone says what to do.
+	locked := runtest.Table(map[string]run.Result{"devicectl device capture screenshot": runtest.Fail(1, "The device is locked.")})
+	if err := client(locked).Screenshot(ctx, iphone, "/tmp/x.png"); err == nil || !hasHint(err, "Unlock it") {
+		t.Errorf("a locked iPhone: %v", err)
+	}
+	// An iPhone whose iOS lacks the capability, as the real iPhone 17 Pro on iOS 27.0 answered for
+	// screen recording, is unsupported, with the way around it.
+	unsupported := runtest.Table(map[string]run.Result{"devicectl device capture screen-record": runtest.Fail(1, "ERROR: The capability “Screen Recording” is not supported by this device. (com.apple.dt.CoreDeviceError error 1001 (0x3E9))")})
+	if err := client(unsupported).Record(ctx, iphone, filepath.Join(t.TempDir(), "x.mp4"), 0); apperr.CodeOf(err) != apperr.Unsupported || !hasHint(err, "QuickTime") {
+		t.Errorf("an iPhone without screen recording: %v", err)
+	}
+	video := filepath.Join(t.TempDir(), "x.mp4")
+	film := &runtest.Fake{Answer: func(command string, _ []string, _ run.Options) run.Result {
+		if err := os.WriteFile(video, []byte("mp4"), 0o600); err != nil {
+			t.Error(err)
+		}
+		return run.Result{}
+	}}
+	if err := client(film).Record(ctx, iphone, video, 0); err != nil ||
+		!film.Called("xcrun devicectl device capture screen-record --device P1 --destination "+video+" --quiet") {
+		t.Errorf("record: %v, calls %v", err, film.Calls())
 	}
 }
 
@@ -963,4 +1004,10 @@ func TestDeleteUnavailableReportsWhatWentBeforeSimctlFailed(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "disk error") || len(deleted) != 1 || deleted[0].ID != "A" {
 		t.Errorf("deleted %+v, err %v", deleted, err)
 	}
+}
+
+// hasHint reports whether err carries a hint that contains text.
+func hasHint(err error, text string) bool {
+	var e *apperr.Error
+	return errors.As(err, &e) && strings.Contains(e.Hint, text)
 }

@@ -203,6 +203,9 @@ func (f *fakeBackend) AppUsage(_ context.Context, d device.Device, id string, pi
 	f.usageSamples++
 	return device.Usage{PID: 41, CPU: time.Duration(f.usageSamples) * time.Second, Memory: 180 << 20}, nil
 }
+func (f *fakeBackend) SetNetwork(_ context.Context, d device.Device, mode string) error {
+	return f.record("network %s %s", d.ID, mode)
+}
 func (f *fakeBackend) AppJank(_ context.Context, d device.Device, id string, reset bool) (device.Jank, error) {
 	if err := f.record("jank %s %s reset=%v", d.ID, id, reset); err != nil {
 		return device.Jank{}, err
@@ -2010,8 +2013,8 @@ func TestAnIPhoneOffersNoStop(t *testing.T) {
 func TestTheLatestCrashOfAnAppIsShownFromTheAppMenu(t *testing.T) {
 	h := start(t, iphone)
 	h.backend.installed = []device.App{{ID: "com.example.app"}}
-	// Launch, Restart, Stop, Grant, Revoke, then the crash report.
-	h.press("o", "enter", "down", "down", "down", "down", "down")
+	// Launch, Restart, Stop, Grant, Revoke, Clear data, then the crash report.
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down")
 	h.wantScreen("Show its latest crash report")
 	h.press("enter")
 	h.wantCalls("crash SIM-1 com.example.app", 1)
@@ -2019,7 +2022,7 @@ func TestTheLatestCrashOfAnAppIsShownFromTheAppMenu(t *testing.T) {
 
 	h.press("esc")
 	h.backend.fail = map[string]error{"crash": apperr.New(apperr.NotFound, "No crash of com.example.app found for iPhone 17")}
-	h.press("o", "enter", "down", "down", "down", "down", "down", "enter")
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "enter")
 	h.wantScreen("No crash of com.example.app found for iPhone 17")
 }
 
@@ -2131,19 +2134,19 @@ func TestTOpensALinkAfterAskingForIt(t *testing.T) {
 	h.wantScreen("Opened a link on iPhone 17")
 }
 
-func TestScreenshotsAndLinksNeedARunningDeviceThatIsNotAnIPhone(t *testing.T) {
+func TestScreenshotsAndLinksNeedARunningDevice(t *testing.T) {
 	h := start(t, ipad, usbPhone)
 	h.press("p")
 	h.wantScreen("iPad Air is not running")
 	h.press("t")
 	h.wantScreen("iPad Air is not running")
 
+	// An iPhone can be filmed and captured with devicectl, but links are left to simulators and Android.
 	h.selectDevice(usbPhone)
 	h.press("p")
-	h.wantScreen("Test iPhone is an iPhone: Apple's tools cannot do this from here")
+	h.wantCalls("screenshot", 1)
 	h.press("t")
 	h.wantScreen("Test iPhone is an iPhone")
-	h.wantCalls("screenshot", 0)
 	h.wantCalls("link", 0)
 	if h.m.modal != nil {
 		t.Error("a window opened for an iPhone")
@@ -2244,8 +2247,7 @@ func TestAnAppsPermissionsAreGrantedAndRevokedFromTheAppMenu(t *testing.T) {
 	h := start(t, iphone)
 	h.backend.installed = []device.App{{ID: "com.example.app"}}
 	h.press("o", "enter")
-	h.wantScreen("com.example.app on iPhone 17", "Grant a permission…", "Revoke a permission…")
-	h.wantNoScreen("Clear its data")
+	h.wantScreen("com.example.app on iPhone 17", "Grant a permission…", "Revoke a permission…", "Clear its data…")
 
 	h.press("down", "down", "down", "enter")
 	h.wantScreen("Grant which permission of com.example.app?", "photos", "microphone")
@@ -2394,7 +2396,7 @@ func TestABugReportIsSavedFromTheAppMenu(t *testing.T) {
 	h.backend.reported = mobile.Report{Included: []string{"screenshot.png", "log.txt", "summary.txt"}}
 	name := mobile.ReportName(iphone, h.clock)
 	// Launch, Restart, Stop, Grant, Revoke, the crash report, then the bug report.
-	h.press("o", "enter", "down", "down", "down", "down", "down", "down")
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "down")
 	h.wantScreen("Save a bug report in this folder")
 	h.press("enter")
 	h.wantCalls("report SIM-1 com.example.app "+name+" v9.9.9", 1)
@@ -2409,11 +2411,11 @@ func TestABugReportSaysWhatItLeftOut(t *testing.T) {
 		Included: []string{"log.txt", "summary.txt"},
 		Skipped:  []string{"screenshot: could not take it", "crash report: No crash found"},
 	}
-	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "enter")
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "down", "enter")
 	h.wantScreen("without the screenshot, the crash report")
 
 	h.backend.fail = map[string]error{"report": apperr.New(apperr.InvalidState, "the folder exists")}
-	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "enter")
+	h.press("o", "enter", "down", "down", "down", "down", "down", "down", "down", "enter")
 	h.wantScreen("Could not save a bug report of com.example.app")
 }
 
@@ -2427,7 +2429,7 @@ func TestAnIPhoneOffersNoBugReport(t *testing.T) {
 func TestASimulatorsAppIsSentATestPushFromTheAppMenu(t *testing.T) {
 	h := start(t, iphone)
 	h.backend.installed = []device.App{{ID: "com.example.app"}}
-	toPush := []string{"o", "enter", "down", "down", "down", "down", "down", "down", "down", "enter"}
+	toPush := []string{"o", "enter", "down", "down", "down", "down", "down", "down", "down", "down", "enter"}
 	h.press(toPush...)
 	h.wantScreen("Send a test push notification to com.example.app")
 	h.typeText("Order ready")
@@ -2536,4 +2538,23 @@ func TestASampleFromBeforeMWasPressedAgainIsDropped(t *testing.T) {
 	h.run(second)
 	h.wantCalls("usage", 2)
 	h.wantScreen("CPU … · 180 MB")
+}
+
+func TestTheNetworkOfAnEmulatorIsChosenFromAWindow(t *testing.T) {
+	h := start(t, pixel)
+	h.press("N")
+	h.wantScreen("Network of Pixel 9a", "No connection", "EDGE", "Back to normal")
+	h.press("enter")
+	h.wantCalls("network Pixel_9a offline", 1)
+	h.press("N", "down", "down", "enter")
+	h.wantCalls("network Pixel_9a edge", 1)
+
+	// A simulator and an iPhone have no console to ask.
+	h = start(t, iphone)
+	h.press("N")
+	h.wantScreen("Only an Android emulator")
+	h.wantCalls("network", 0)
+	if h.m.modal != nil {
+		t.Error("a window opened for a simulator")
+	}
 }

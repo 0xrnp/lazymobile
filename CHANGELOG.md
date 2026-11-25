@@ -48,11 +48,22 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- Screenshots of a real iPhone: `lazymobile screenshot`, `p` in the dashboard and the `screenshot` agent tool now
+  work on an iPhone through Xcode's `devicectl`, while it is unlocked. Screen recording is built the same way, but
+  an iPhone whose iOS does not offer it to Xcode (an iPhone 17 Pro on iOS 27.0 did not) gets a clear
+  message and the QuickTime Player way instead
+- `lazymobile cleardata` and "Clear its data…" in the app menu now work on an iOS simulator, not only
+  on an emulator: the app is stopped and its data folder emptied (Documents, preferences, caches),
+  so it starts as if just installed. Its app group folders and keychain are kept, and a real
+  iPhone is left alone
+- `lazymobile link` and `open_link` tell you when an iOS simulator may be waiting for a tap: Xcode
+  27's simulator asks "Open in …?" before it opens a deep link, and only a tap in the Simulator
+  window answers it. Web addresses open at once
 - `NO_COLOR=1` turns the dashboard's colours off (bold, dim and reverse stay). It already did; it is
   now written down in `docs/dashboard.md`
 - `lazymobile network <device> offline|online|gsm|edge|3g|lte|full` and `set_network` for agents:
   an Android emulator with no connection (airplane mode), or held to a slow speed and delay, to
-  see how an app copes. `online` puts it back. Emulators only: a phone is left alone, and a
+  see how an app copes (`N` in the dashboard). `online` puts it back. Emulators only: a phone is left alone, and a
   simulator uses the Mac's network
 - `lazymobile create ios <name> --type "iPhone 17"` and `lazymobile create android <name>` make a
   simulator or an emulator from the command line, like `n` in the dashboard. The newest runtime or

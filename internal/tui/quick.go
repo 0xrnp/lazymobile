@@ -149,7 +149,7 @@ func (m *Model) quickMenu() tea.Cmd {
 
 // screenshotAndCopy saves a screenshot in the folder and copies the picture, to paste into a chat.
 func (m *Model) screenshotAndCopy(d device.Device) tea.Cmd {
-	if problem := screenFeature(d); problem != "" {
+	if problem := captureFeature(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}
@@ -174,7 +174,7 @@ func (m *Model) toggleRecording(d device.Device) tea.Cmd {
 		m.setNote("Saving the recording of "+rec.device.Name+"…", false)
 		return nil
 	}
-	if problem := screenFeature(d); problem != "" {
+	if problem := captureFeature(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}

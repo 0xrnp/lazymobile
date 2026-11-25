@@ -164,7 +164,7 @@ func (m *Model) offerAppActions(d device.Device, choices []state.AppChoice, know
 
 // screenshot saves a PNG of the selected device's screen in the folder lazymobile was started in.
 func (m *Model) screenshot(d device.Device) tea.Cmd {
-	if problem := screenFeature(d); problem != "" {
+	if problem := captureFeature(d); problem != "" {
 		m.setNote(problem, true)
 		return nil
 	}
@@ -442,7 +442,7 @@ var (
 
 // appActionsFor is what can be done to an app on d. An iPhone's app cannot be stopped on its own,
 // its permissions are left alone with the rest of the phone, and it has no screenshot for a bug
-// report. An iOS simulator has no way to clear an app's data, and only it can be sent a test push.
+// report. Only an iOS simulator can be sent a test push.
 func appActionsFor(d device.Device) []appAction {
 	actions := []appAction{launchApp, restartApp, stopApp}
 	switch {
@@ -452,10 +452,11 @@ func appActionsFor(d device.Device) []appAction {
 		return append(actions, showCrash, saveReport)
 	}
 	actions = append(actions, grantPermission, revokePermission)
-	if d.Platform == device.Android {
-		return append(actions, clearData, showCrash, saveReport)
+	actions = append(actions, clearData, showCrash, saveReport)
+	if d.Platform == device.IOS {
+		return append(actions, sendPush)
 	}
-	return append(actions, showCrash, saveReport, sendPush)
+	return actions
 }
 
 // pushModal asks for the text of a test notification, and sends it to the app.

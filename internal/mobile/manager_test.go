@@ -455,7 +455,6 @@ func TestScreenshotNeverReplacesAFileOrWritesAnywhereUnexpected(t *testing.T) {
 	m, fake := screenshotManager(t)
 	dir := t.TempDir()
 	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
-	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
 	stopped := emulator
 	stopped.State = device.Shutdown
 	existing := filepath.Join(dir, "mine.png")
@@ -467,7 +466,6 @@ func TestScreenshotNeverReplacesAFileOrWritesAnywhereUnexpected(t *testing.T) {
 		"a file that exists": second(m.Screenshot(context.Background(), emulator, existing)),
 		"a missing folder":   second(m.Screenshot(context.Background(), emulator, filepath.Join(dir, "no", "x.png"))),
 		"a stopped device":   second(m.Screenshot(context.Background(), stopped, filepath.Join(dir, "a.png"))),
-		"an iPhone":          second(m.Screenshot(context.Background(), iphone, filepath.Join(dir, "b.png"))),
 	} {
 		code := apperr.CodeOf(err)
 		if code != apperr.InvalidState && code != apperr.Unsupported {
@@ -574,7 +572,6 @@ func TestLocationAndStatusBarLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testin
 func TestPermissionsAndClearDataLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *testing.T) {
 	m, fake := uninstallManager(t)
 	ctx := context.Background()
-	simulator := device.Device{ID: "SIM", Name: "iPhone 17", Platform: device.IOS, Kind: device.Simulator, State: device.Booted}
 	emulator := device.Device{ID: "Pixel_9a", Name: "Pixel 9a", Platform: device.Android, Kind: device.Emulator, State: device.Booted, Serial: "emulator-5554"}
 	iphone := device.Device{ID: "UDID", Name: "My iPhone", Platform: device.IOS, Kind: device.Physical, State: device.Connected}
 	phone := device.Device{ID: "R58M", Name: "My Galaxy", Platform: device.Android, Kind: device.Physical, State: device.Connected, Serial: "R58M"}
@@ -589,7 +586,6 @@ func TestPermissionsAndClearDataLeaveRealPhonesAloneAndCheckBeforeAnyTool(t *tes
 		"data on a stopped one":           m.ClearData(ctx, stopped, "com.example.app"),
 		"an injected app id":              m.SetPermission(ctx, emulator, "a; reboot", "camera", true),
 		"an option as an app id for data": m.ClearData(ctx, emulator, "-a"),
-		"data of an iOS app":              m.ClearData(ctx, simulator, "com.example.app"),
 	} {
 		if code := apperr.CodeOf(err); code != apperr.Unsupported && code != apperr.InvalidState {
 			t.Errorf("%s: %v", name, err)
@@ -765,5 +761,24 @@ func TestAppUsageRefusesAnIPhoneAndABadIDBeforeAnyTool(t *testing.T) {
 	}
 	if len(fake.Calls()) != 0 {
 		t.Errorf("a tool ran: %v", fake.Calls())
+	}
+}
+
+func TestLinkNoteWarnsOnlyAboutADeepLinkOnASimulator(t *testing.T) {
+	simulator := device.Device{Platform: device.IOS, Kind: device.Simulator}
+	emulator := device.Device{Platform: device.Android, Kind: device.Emulator}
+	for _, tc := range []struct {
+		d    device.Device
+		link string
+		note bool
+	}{
+		{simulator, "myapp://home", true},
+		{simulator, "https://example.com", false},
+		{simulator, "HTTP://example.com", false},
+		{emulator, "myapp://home", false},
+	} {
+		if got := LinkNote(tc.d, tc.link) != ""; got != tc.note {
+			t.Errorf("%s on %s: note %v, want %v", tc.link, tc.d.Platform, got, tc.note)
+		}
 	}
 }

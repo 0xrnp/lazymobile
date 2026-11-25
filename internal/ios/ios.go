@@ -4,6 +4,7 @@ package ios
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -219,6 +220,8 @@ type action struct {
 	verb    string
 	already map[string]bool
 	hint    string
+	// unsupported is the hint for an iPhone that says its iOS cannot do it.
+	unsupported string
 }
 
 var (
@@ -258,6 +261,25 @@ func actionError(res run.Result, argv []string, a action) error {
 				Hint:    a.hint, Argv: argv, ExitCode: res.Code, Stderr: res.Stderr,
 			}
 		}
+	}
+	return err
+}
+
+// phoneActionError is actionError for an iPhone, which devicectl fails with its own words: they are
+// kept, and the hint says what usually helps.
+func phoneActionError(res run.Result, argv []string, a action) error {
+	err := apperr.FromResult(res, argv, notInstalled)
+	var failed *apperr.Error
+	if !errors.As(err, &failed) || failed.Code != apperr.CommandFailed {
+		return err
+	}
+	// An iPhone whose iOS does not offer the capability to Xcode, which a retry cannot change.
+	if strings.Contains(res.Stderr+res.Stdout, "is not supported by this device") {
+		failed.Code, failed.Hint = apperr.Unsupported, a.unsupported
+		return failed
+	}
+	if failed.Hint == "" {
+		failed.Hint = a.hint
 	}
 	return err
 }
@@ -485,6 +507,9 @@ func (c *Client) Create(ctx context.Context, name, deviceType, runtime string) (
 var (
 	openURLAction    = action{verb: "open a link", hint: "Boot it first."}
 	screenshotAction = action{verb: "take a screenshot", hint: "Boot it first."}
+	// An iPhone cannot be captured while it is locked.
+	phoneScreenshotAction = action{verb: "take a screenshot", hint: "Unlock it and keep it connected.",
+		unsupported: "Xcode cannot capture this iPhone. Take it on the phone with the side button and volume up."}
 	appearanceAction = action{verb: "change the appearance", hint: "Boot it first."}
 )
 

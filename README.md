@@ -291,7 +291,7 @@ lazymobile launch "Pixel 9a" com.example.app [--restart]
 lazymobile stop "Pixel 9a" com.example.app   # keeps the app's data
 lazymobile appearance "Pixel 9a" [dark|light]   # no mode shows the current one (Android 10 or newer)
 lazymobile permission "Pixel 9a" grant camera com.example.app   # camera, location, photos, notifications...
-lazymobile cleardata "Pixel 9a" com.example.app --yes   # emulators; on iOS, uninstall instead
+lazymobile cleardata "Pixel 9a" com.example.app --yes   # emulators and simulators (a simulator keeps app group data and the keychain)
 lazymobile location "Pixel 9a" 37.7749,-122.4194   # or: clear (simulators only)
 lazymobile statusbar "iPhone 17" clean   # or: reset
 lazymobile boot --all "iPhone*" "Pixel 9a" [--wait]         # several at once; a real phone is skipped
@@ -299,7 +299,7 @@ lazymobile install --all build/app.apk [--phones]           # on every running d
 lazymobile boot --set matrix                                # a named set from .lazymobile.json
 lazymobile action --list                                    # the commands in .lazymobile.json
 lazymobile action "Pixel 9a" "Flutter run" --yes            # without --yes it only shows the command
-lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"
+lazymobile link "iPhone 17" "myapp://home?id=1&tab=2"   # a simulator may ask "Open in …?" for a deep link: tap Open in the Simulator window
 lazymobile dev "Pixel 9a" reverse|menu|reload [--port 8081]   # Android only: reach Metro, open the dev menu, reload
 lazymobile screenshot "Pixel 9a" [--out shot.png]   # never replaces a file
 lazymobile crash "Pixel 9a" com.example.app [--save crash.txt]   # the app's latest crash report, on an iPhone too

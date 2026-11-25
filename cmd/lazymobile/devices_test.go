@@ -117,25 +117,60 @@ func runAgentFlow(t *testing.T, id, appPath, permission string) {
 	a.ok("set_status_bar", map[string]any{"device": id, "mode": "clean"}, "tidy")
 	a.ok("set_status_bar", map[string]any{"device": id, "mode": "reset"}, "back to normal")
 
-	hello := e2eScheme + "://hello?run=" + run
-	a.ok("open_link", map[string]any{"device": id, "url": hello}, "Opened")
-	a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "opened"},
-		30*time.Second, has(hello))
-
+	// An iOS simulator asks "Open in ...?" before it opens a deep link, and waits for a tap that
+	// nobody gives here. So on iOS the test app is told what to do by launch arguments, and open_link
+	// is tried with a web address. Android takes the deep links.
+	drive := func(host, value string) {
+		if android {
+			a.ok("open_link", map[string]any{"device": id, "url": e2eScheme + "://" + host + "?value=" + value}, "Opened")
+			return
+		}
+		simctl(t, "terminate", id, e2eApp)
+		simctl(t, "launch", id, e2eApp, "--"+host, value)
+		time.Sleep(3 * time.Second)
+	}
 	if android {
+		a.ok("launch", map[string]any{"device": id, "app": e2eApp}, "Launched")
+		time.Sleep(3 * time.Second)
+		hello := e2eScheme + "://hello?run=" + run
+		a.ok("open_link", map[string]any{"device": id, "url": hello}, "Opened")
+		a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "opened"},
+			30*time.Second, has(hello))
 		a.refused("send_push", map[string]any{"device": id, "app": e2eApp}, "Firebase")
 	} else {
+		a.ok("open_link", map[string]any{"device": id, "url": "https://example.com"}, "Opened")
+		// A deep link says that the simulator may be waiting for a tap.
+		a.ok("launch", map[string]any{"device": id, "app": e2eApp}, "Launched")
+		time.Sleep(3 * time.Second)
 		pushed := "LAZYMOBILE push " + run
 		a.ok("send_push", map[string]any{"device": id, "app": e2eApp, "body": pushed}, "Sent")
 		a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "push"},
 			30*time.Second, has(pushed))
 	}
 
+	// Clearing an app's data: save something, see it, clear it, see that it is gone. cleardata is
+	// not an agent tool, since nothing that erases is, so the command line does it.
+	drive("write", run)
+	a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "wrote"},
+		30*time.Second, has("wrote "+run))
+	drive("read", "before")
+	a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "saved"},
+		30*time.Second, has("saved preference="+run+" file="+run))
+	runLazymobile(t, "cleardata", id, e2eApp, "--yes")
+	drive("read", "after")
+	a.eventually("read_logs", map[string]any{"device": id, "app": e2eApp, "since": sinceLaunch(), "text": "saved"},
+		30*time.Second, has("saved preference=none file=none"))
+
 	crash := e2eScheme + "://crash?run=" + run
 	crashArgs := map[string]any{"device": id, "app": e2eApp}
 	// An earlier run can leave a report behind, on Android in particular, so wait for a new one.
 	before := a.text("crash_report", crashArgs)
-	a.ok("open_link", map[string]any{"device": id, "url": crash}, "Opened")
+	if android {
+		a.ok("open_link", map[string]any{"device": id, "url": crash}, "Opened")
+	} else {
+		simctl(t, "terminate", id, e2eApp)
+		simctl(t, "launch", id, e2eApp, "--crash", crash)
+	}
 	a.eventually("crash_report", crashArgs, 90*time.Second, func(out string) bool {
 		if out == before {
 			return false
@@ -327,6 +362,14 @@ func runLazymobile(t *testing.T, args ...string) []byte {
 		t.Errorf("lazymobile %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return out
+}
+
+// simctl runs xcrun simctl <verb> <simulator> ... for a step of the test.
+func simctl(t *testing.T, verb string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("xcrun", append([]string{"simctl", verb}, args...)...).CombinedOutput(); err != nil && verb != "terminate" {
+		t.Fatalf("simctl %s %v: %v\n%s", verb, args, err, out)
+	}
 }
 
 // buildStep runs a build tool and stops the test with its output if it fails.

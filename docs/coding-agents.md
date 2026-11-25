@@ -100,7 +100,7 @@ An editor opened from the Dock does not get the `PATH` of your shell, so it may 
 | `boot`, `shutdown` | Start a simulator or emulator and wait until it is ready, or stop it |
 | `install` | Install an `.apk`, or an `.app` folder, on a running device |
 | `launch`, `stop` | Open an app (optionally restarting it), or stop it. Its data is kept |
-| `open_link` | Open a web address or a deep link, such as `myapp://settings` |
+| `open_link` | Open a web address or a deep link, such as `myapp://settings`. On an iOS simulator a deep link may stop at an "Open in …?" question that only a tap answers, and nothing here can tap, so an agent should expect that or use a web address |
 | `screenshot` | The screen as an image, scaled to at most 1568 pixels on its longest side (`full_size` for the PNG as taken) |
 | `read_logs` | The last lines already logged, filtered by app, level, text, time or crashes. It returns and does not follow the log |
 | `crash_report` | The latest crash report of an app |

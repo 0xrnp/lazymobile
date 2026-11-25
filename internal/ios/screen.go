@@ -38,27 +38,45 @@ func (c *Client) SetAppearance(ctx context.Context, d device.Device, mode string
 	return actionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, appearanceAction)
 }
 
-var recordAction = action{verb: "record the screen", hint: "Boot it first."}
+var (
+	recordAction      = action{verb: "record the screen", hint: "Boot it first."}
+	phoneRecordAction = action{verb: "record the screen", hint: "Unlock it and keep it connected.",
+		unsupported: "Xcode cannot film this iPhone. QuickTime Player on this Mac can: File, New Movie Recording, then pick the iPhone."}
+)
 
 // Record films a booted simulator's screen into path until ctx ends or limit passes (no limit when
 // it is zero). Both end it with an interrupt, which is how simctl finishes the video, so neither
 // is an error as long as a video was saved.
 func (c *Client) Record(ctx context.Context, d device.Device, path string, limit time.Duration) error {
-	if err := onlySimulator(d, "record the screen"); err != nil {
+	argv := []string{"xcrun", "simctl", "io", d.ID, "recordVideo", path}
+	tool, act := "simctl", recordAction
+	if isPhone(d) {
+		if !strings.HasSuffix(strings.ToLower(path), ".mp4") {
+			return apperr.New(apperr.InvalidState, "A recording of an iPhone must be an .mp4 file").WithHint("Got: %s", path)
+		}
+		argv = []string{"xcrun", "devicectl", "device", "capture", "screen-record", "--device", d.ID, "--destination", path, "--quiet"}
+		tool, act = "devicectl", phoneRecordAction
+	} else if err := onlySimulator(d, "record the screen"); err != nil {
 		return err
 	}
-	argv := []string{"xcrun", "simctl", "io", d.ID, "recordVideo", path}
 	res := c.Runner.Run(ctx, argv, run.Options{Timeout: limit, Interrupt: true})
 	if !res.TimedOut && !errors.Is(res.Err, context.Canceled) {
-		if err := actionError(res, argv, recordAction); err != nil {
-			return err
+		failed := actionError(res, argv, act)
+		if isPhone(d) {
+			failed = phoneActionError(res, argv, act)
+		}
+		if failed != nil {
+			return failed
 		}
 	}
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
-		return &apperr.Error{Code: apperr.CommandFailed, Message: "simctl did not save a video", Argv: argv, Stderr: res.Stderr}
+		return &apperr.Error{Code: apperr.CommandFailed, Message: tool + " did not save a video", Argv: argv, Stderr: res.Stderr}
 	}
 	return nil
 }
+
+// isPhone reports whether d is a real iPhone or iPad, which Xcode's devicectl reaches.
+func isPhone(d device.Device) bool { return d.Platform == device.IOS && d.Kind == device.Physical }
 
 var (
 	locationAction  = action{verb: "set the location", hint: "Boot it first."}
@@ -108,6 +126,13 @@ func (c *Client) ResetStatusBar(ctx context.Context, d device.Device) error {
 
 // Screenshot saves a PNG of a booted simulator's screen to path.
 func (c *Client) Screenshot(ctx context.Context, d device.Device, path string) error {
+	if isPhone(d) {
+		if !strings.HasSuffix(strings.ToLower(path), ".png") {
+			return apperr.New(apperr.InvalidState, "A screenshot of an iPhone must be a .png file").WithHint("Got: %s", path)
+		}
+		argv := []string{"xcrun", "devicectl", "device", "capture", "screenshot", "--device", d.ID, "--destination", path, "--quiet"}
+		return phoneActionError(c.Runner.Run(ctx, argv, run.Options{Timeout: actionTimeout}), argv, phoneScreenshotAction)
+	}
 	if err := onlySimulator(d, "take a screenshot"); err != nil {
 		return err
 	}

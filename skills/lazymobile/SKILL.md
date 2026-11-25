@@ -73,7 +73,7 @@ and an iPhone connected: its reports are copied from the phone, which takes a fe
 ## Set up a screen
 
 ```sh
-lazymobile link <id> 'myapp://settings' --json      # deep link or web address
+lazymobile link <id> 'myapp://settings' --json      # deep link or web address. iOS simulator: a deep link may wait for a tap on "Open in …?" that you cannot give
 lazymobile appearance <id> dark --json              # or light
 lazymobile permission <id> grant camera <app-id> --json
 lazymobile location <id> 37.5665,126.978 --json     # or clear
