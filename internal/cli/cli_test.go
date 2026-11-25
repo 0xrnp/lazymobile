@@ -1193,3 +1193,15 @@ func TestCreateListShowsWhatCanBeCreated(t *testing.T) {
 		t.Errorf("json: code %d, out %q", code, e.out.String())
 	}
 }
+
+func TestNetworkNeedsAnEmulatorAndAKnownMode(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{{"network", "iPhone 16 Pro"}, {"network", "iPhone 16 Pro", "dial-up"}} {
+		if code := e.run(args...); code != ExitUsage {
+			t.Errorf("%q: code %d, want %d", args, code, ExitUsage)
+		}
+	}
+	if code := e.run("network", "iPhone 16 Pro", "offline"); code != ExitFailure || !strings.Contains(e.errs.String(), "Network Link Conditioner") {
+		t.Errorf("simulator: code %d, errs %q", code, e.errs.String())
+	}
+}

@@ -451,6 +451,20 @@ func (m *Manager) SetStatusBar(ctx context.Context, d device.Device, clean bool)
 	return m.Android.ResetStatusBar(ctx, d)
 }
 
+// SetNetwork makes the network of a running Android emulator offline, online, or slow: see
+// android.NetworkModes. A simulator uses the Mac's own network, and Apple's Network Link
+// Conditioner is what slows that down.
+func (m *Manager) SetNetwork(ctx context.Context, d device.Device, mode string) error {
+	if !d.Ready() {
+		return apperr.New(apperr.InvalidState, "%s is not running", d.Name).WithHint("Boot it first.")
+	}
+	if d.Platform == device.IOS {
+		return apperr.New(apperr.Unsupported, "Cannot change the network of %s", d.Name).
+			WithHint("A simulator uses this Mac's network. Apple's Network Link Conditioner slows that down.")
+	}
+	return m.Android.SetNetwork(ctx, d, mode)
+}
+
 // SendPush delivers a test push notification to an app on a booted iOS simulator. payload is the
 // JSON Apple's push service would send: see ios.AlertPayload and ios.CheckPushPayload.
 func (m *Manager) SendPush(ctx context.Context, d device.Device, id string, payload []byte) error {

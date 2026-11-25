@@ -100,3 +100,49 @@ func TestAppJankResetsOnlyWhenAsked(t *testing.T) {
 		t.Errorf("bad id: %v, calls %q", err, fake.Calls())
 	}
 }
+
+func TestSetNetworkSendsTheConsoleAndAirplaneCommands(t *testing.T) {
+	ctx := context.Background()
+	for mode, want := range map[string][]string{
+		"offline": {"shell cmd connectivity airplane-mode enable"},
+		"online":  {"emu network speed full", "emu network delay none", "shell cmd connectivity airplane-mode disable"},
+		"3g":      {"emu network speed umts", "emu network delay umts", "shell cmd connectivity airplane-mode disable"},
+		"lte":     {"emu network speed lte", "emu network delay none", "shell cmd connectivity airplane-mode disable"},
+	} {
+		fake := runtest.Table(map[string]run.Result{"emulator-5554": runtest.Out("OK\n")})
+		if err := New(fake, sdk(t, "adb")).SetNetwork(ctx, runningEmulator, mode); err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		calls := fake.Calls()
+		if len(calls) != len(want) {
+			t.Fatalf("%s: calls %q", mode, calls)
+		}
+		for i, w := range want {
+			if !strings.Contains(calls[i], "-s emulator-5554 "+w) {
+				t.Errorf("%s: call %d is %q, want it to contain %q", mode, i, calls[i], w)
+			}
+		}
+	}
+}
+
+func TestSetNetworkRefusesBeforeAskingTheDeviceAndReportsAConsoleKO(t *testing.T) {
+	ctx := context.Background()
+	phone := device.Device{ID: "R5", Name: "Pixel", Platform: device.Android, Kind: device.Physical, State: device.Booted, Serial: "R5"}
+	for name, tc := range map[string]struct {
+		d    device.Device
+		mode string
+		code apperr.Code
+	}{
+		"a phone":      {phone, "offline", apperr.Unsupported},
+		"unknown mode": {runningEmulator, "dial-up", apperr.InvalidState},
+	} {
+		fake := runtest.Table(map[string]run.Result{})
+		if err := New(fake, sdk(t, "adb")).SetNetwork(ctx, tc.d, tc.mode); apperr.CodeOf(err) != tc.code || len(fake.Calls()) != 0 {
+			t.Errorf("%s: %v, calls %q", name, err, fake.Calls())
+		}
+	}
+	fake := runtest.Table(map[string]run.Result{"emu network speed": runtest.Out("KO: bad speed\n")})
+	if err := New(fake, sdk(t, "adb")).SetNetwork(ctx, runningEmulator, "edge"); apperr.CodeOf(err) != apperr.CommandFailed {
+		t.Errorf("KO: %v", err)
+	}
+}

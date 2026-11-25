@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/0xrnp/lazymobile/internal/actions"
+	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/devicesets"
@@ -65,6 +66,7 @@ Usage:
   lazymobile cleardata <device> <app-id> --yes [--json]   erase an app's data on an emulator
   lazymobile location <device> <lat,lon>|clear [--json]   put a simulator or emulator somewhere
   lazymobile statusbar <device> clean|reset [--json]   a tidy status bar for screenshots
+  lazymobile network <device> offline|online|gsm|edge|3g|lte|full [--json]   an Android emulator with no connection, or a slow one
   lazymobile push <device> <app-id> [--title <text>] [--body <text>] [--payload <file>] [--json]   send a test push notification to an app on an iOS simulator
   lazymobile jank <device> <app-id> [--reset] [--json]   how many frames an Android app drew late (janky), and how long frames took. --reset starts the count again afterwards
   lazymobile action --list [--json]   the project's own commands from .lazymobile.json
@@ -238,6 +240,8 @@ type result struct {
 	Appearance string `json:"appearance,omitempty"`
 	// Permission is the permission that was granted or revoked.
 	Permission string `json:"permission,omitempty"`
+	// Network is the mode an emulator's network was set to.
+	Network string `json:"network,omitempty"`
 	// Location is "latitude,longitude", or "cleared".
 	Location string `json:"location,omitempty"`
 	// Crash is the report a "crash" found. Path is then the file it was saved to, if any.
@@ -303,6 +307,8 @@ func (a *App) run(ctx context.Context, args []string) error {
 		return a.location(ctx, rest)
 	case "statusbar":
 		return a.statusBar(ctx, rest)
+	case "network":
+		return a.network(ctx, rest)
 	case "create":
 		return a.create(ctx, rest)
 	case "push":
@@ -753,6 +759,34 @@ func (a *App) statusBar(ctx context.Context, args []string) error {
 		return a.done(*asJSON, result{Action: "statusbar_clean", Device: d}, "The status bar of "+d.Name+" is tidy for a screenshot")
 	}
 	return a.done(*asJSON, result{Action: "statusbar_reset", Device: d}, "The status bar of "+d.Name+" is back to normal")
+}
+
+func (a *App) network(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("network", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	positional, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 2 || !android.ValidNetworkMode(positional[1]) {
+		return usageError{"network needs a device, and one of " + strings.Join(android.NetworkModes(), ", ")}
+	}
+	d, err := a.Manager.Find(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	mode := positional[1]
+	if err := a.Manager.SetNetwork(ctx, d, mode); err != nil {
+		return err
+	}
+	sentence := d.Name + " has no connection. Use `lazymobile network " + strconv.Quote(d.Name) + " online` to bring it back"
+	switch mode {
+	case "online", "full":
+		sentence = "The network of " + d.Name + " is back to normal"
+	case "gsm", "edge", "3g", "lte":
+		sentence = "The network of " + d.Name + " is held to " + mode + " speed and delay"
+	}
+	return a.done(*asJSON, result{Action: "network", Device: d, Network: mode}, sentence)
 }
 
 func (a *App) push(ctx context.Context, args []string) error {

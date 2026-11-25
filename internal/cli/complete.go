@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/mobile"
 )
@@ -63,6 +64,7 @@ var positionals = map[string][]argSpec{
 	"push":       {deviceArg, appArg},
 	"jank":       {deviceArg, appArg},
 	"create":     {words("ios", "android")},
+	"network":    {deviceArg, words(android.NetworkModes()...)},
 	"install":    {deviceArg, fileArg},
 	"appearance": {deviceArg, words("dark", "light")},
 	"permission": {deviceArg, words("grant", "revoke"), {kind: argPermission}, appArg},

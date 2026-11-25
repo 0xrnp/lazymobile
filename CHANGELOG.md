@@ -48,6 +48,10 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- `lazymobile network <device> offline|online|gsm|edge|3g|lte|full` and `set_network` for agents:
+  an Android emulator with no connection (airplane mode), or held to a slow speed and delay, to
+  see how an app copes. `online` puts it back. Emulators only: a phone is left alone, and a
+  simulator uses the Mac's network
 - `lazymobile create ios <name> --type "iPhone 17"` and `lazymobile create android <name>` make a
   simulator or an emulator from the command line, like `n` in the dashboard. The newest runtime or
   system image is used unless you name one (`--runtime 18`, `--image android-35`, `--profile

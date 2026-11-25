@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/0xrnp/lazymobile/internal/android"
 	"github.com/0xrnp/lazymobile/internal/apperr"
 	"github.com/0xrnp/lazymobile/internal/device"
 	"github.com/0xrnp/lazymobile/internal/doctor"
@@ -107,6 +108,9 @@ func (s *Server) New() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "send_push", Annotations: notDestructive,
 		Description: "Send a test push notification to an app on a booted iOS simulator, as if it came from Apple. " +
 			"The app must have asked for notifications and been allowed. Android is refused: its pushes come through Firebase."}, s.sendPush)
+	mcp.AddTool(server, &mcp.Tool{Name: "set_network", Annotations: notDestructive,
+		Description: "Make an Android emulator's network offline, online, or slow (gsm, edge, 3g, lte, full), to test an app with no connection or a bad one. " +
+			"Always finish with online. Only emulators: a phone and an iOS simulator are refused."}, s.setNetwork)
 	mcp.AddTool(server, &mcp.Tool{Name: "app_jank", Annotations: notDestructive,
 		Description: "How smoothly a running Android app draws: how many frames were janky (missed their deadline) and how long frames took (50th to 99th percentile, in ms), since the app started or since the last reset. " +
 			"Use reset to start the count again after reading, then use the app and read again. iOS is refused."}, s.appJank)
@@ -477,6 +481,25 @@ type pushArgs struct {
 	Title   string `json:"title,omitempty" jsonschema:"the notification's title"`
 	Body    string `json:"body,omitempty" jsonschema:"the notification's text"`
 	Payload string `json:"payload,omitempty" jsonschema:"a whole payload as JSON, such as {\"aps\": {\"badge\": 3}}, in place of title and body"`
+}
+
+type networkArgs struct {
+	Device string `json:"device" jsonschema:"an id, an adb serial, a name, or a unique part of a name"`
+	Mode   string `json:"mode" jsonschema:"offline, online, gsm, edge, 3g, lte or full"`
+}
+
+func (s *Server) setNetwork(ctx context.Context, _ *mcp.CallToolRequest, in networkArgs) (*mcp.CallToolResult, any, error) {
+	if !android.ValidNetworkMode(in.Mode) {
+		return nil, nil, apperr.New(apperr.Usage, "mode must be one of %s, not %q", strings.Join(android.NetworkModes(), ", "), in.Mode)
+	}
+	d, err := s.Manager.Find(ctx, in.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.Manager.SetNetwork(ctx, d, in.Mode); err != nil {
+		return nil, nil, err
+	}
+	return text("The network of " + d.Name + " is now " + in.Mode)
 }
 
 type jankArgs struct {
