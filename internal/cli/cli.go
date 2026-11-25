@@ -81,7 +81,8 @@ Usage:
   lazymobile crash <device> <app-id> [--save <file>] [--json]   the app's latest crash report, on a simulator, an Android device or a connected iPhone. --save never replaces a file
   lazymobile report <device> <app-id> [--out <folder>] [--since 5m] [--lines 200] [--json]   save a bug report in a new folder: a screenshot, the app's last log lines, its latest crash report, and the device and app version. Never replaces a folder
   lazymobile changelog [<version>] [--all] [--json]   what changed: this version's notes, one version's, or all of them
-  lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--tail N] [--since 5m] [--json]
+  lazymobile logs <device> [--app <id> | --last-app] [--mode logcat|system|console] [--level <level>] [--filter <text>] [--tail N] [--since 5m] [--json]
+  lazymobile logs <device> --out <file> [--format text|json|jsonl|csv|md] [--tail N | --since 5m]   save the log to a new file, in the layout the name's extension asks for. Without --tail or --since it records until ctrl+c. Never replaces a file
   lazymobile apps <device> [--json]    app ids used before, and the apps installed on the device
   lazymobile id <device> [--json]    the id for adb -s, flutter -d and xcrun
   lazymobile builds [--json] [--limit n] [--yes]   Expo (EAS) builds of the project in this folder. --yes is needed when .lazymobile.json sets the eas command
@@ -1030,12 +1031,36 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	tail := fs.Int("tail", 0, "")
 	since := fs.Duration("since", 0, "")
 	asJSON := fs.Bool("json", false, "")
+	filter := fs.String("filter", "", "")
+	out := fs.String("out", "", "")
+	format := fs.String("format", "", "")
 	d, err := a.one(ctx, fs, args, "logs")
 	if err != nil {
 		return err
 	}
 	if *tail < 0 || *since < 0 {
 		return usageError{"--tail and --since cannot be negative"}
+	}
+	query := logs.PlainQuery("")
+	if *filter != "" {
+		if query, err = logs.ParseQuery(*filter); err != nil {
+			return usageError{"--filter: " + err.Error()}
+		}
+	}
+	var exportFormat logs.Format
+	if *out != "" {
+		if *asJSON {
+			return usageError{"--out writes a file: choose its layout with --format, not --json"}
+		}
+		exportFormat = logs.FormatOf(*out)
+		if *format != "" {
+			var known bool
+			if exportFormat, known = logs.ParseFormat(*format); !known {
+				return usageError{"unknown format: " + *format + " (text, json, jsonl, csv, md)"}
+			}
+		}
+	} else if *format != "" {
+		return usageError{"--format is for --out"}
 	}
 	// With either, the log is read and the command ends, instead of following it.
 	dump := *tail > 0 || *since > 0
@@ -1083,7 +1108,16 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	encoder := json.NewEncoder(a.Stdout)
 	var remember sync.Once
 	var last []logs.Line
+	// With --out the lines are collected and written once the log ends: when --tail or --since has
+	// read it, or at ctrl+c.
+	var saved []logs.Line
 	emit := func(line logs.Line) {
+		if *out != "" {
+			if len(saved) < maxSavedLines {
+				saved = append(saved, line)
+			}
+			return
+		}
 		if *asJSON {
 			_ = encoder.Encode(line)
 		} else {
@@ -1100,6 +1134,9 @@ func (a *App) logs(ctx context.Context, args []string) error {
 			for _, line := range lines {
 				// A line without a level belongs to the one before it, so it is kept.
 				if line.Level != logs.NoLevel && line.Level < minimum {
+					continue
+				}
+				if *filter != "" && !query.Match(line.Text) {
 					continue
 				}
 				if *tail > 0 {
@@ -1120,8 +1157,20 @@ func (a *App) logs(ctx context.Context, args []string) error {
 	for _, line := range last {
 		emit(line)
 	}
+	if *out != "" {
+		path, err := logs.WriteFile(*out, exportFormat, saved, logs.Meta{Device: d.Name, App: *app})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.Stderr, "Saved %d lines to %s\n", len(saved), path)
+		return nil
+	}
 	return ctx.Err()
 }
+
+// maxSavedLines is the most lines logs --out keeps, so that a log left running does not fill the
+// memory.
+const maxSavedLines = 500000
 
 func platformName(p device.Platform) string {
 	if p == device.IOS {

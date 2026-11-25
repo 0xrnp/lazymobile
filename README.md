@@ -314,6 +314,7 @@ lazymobile changelog [0.4.0] [--all] [--json]   # what changed in this version, 
 lazymobile record "Pixel 9a" [--out clip.mp4] [--duration 30s]   # Ctrl-C stops it and keeps the video
 lazymobile logs "Pixel 9a" --app com.example.app --level warning
 lazymobile logs "iPhone 17" --app com.example.app --mode console --json
+lazymobile logs "Pixel 9a" --app com.example.app --since 5m --out errors.csv --filter crash   # .log .json .jsonl .csv .md
 lazymobile logs "iPhone 17" --last-app   # the app id used most recently on iOS
 lazymobile logs "Pixel 9a" --since 5m --tail 200   # read what was logged, print the last 200 lines, and end
 lazymobile apps "iPhone 17" [--json]     # app ids used before, and the apps installed on it

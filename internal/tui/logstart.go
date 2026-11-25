@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,7 +113,50 @@ func entryText(lines []logs.Line) string {
 	return strings.Join(texts, "\n")
 }
 
+// saveScope is a set of a log's lines that can be saved.
+type saveScope struct {
+	label string
+	lines []logs.Line
+}
+
+// saveScopes are the sets worth offering for v: what is shown, and the others when they differ.
+func saveScopes(v *logView) []saveScope {
+	scopes := []saveScope{{fmt.Sprintf("What is shown (%d lines)", len(v.shown)), v.shown}}
+	if len(v.all) != len(v.shown) {
+		scopes = append(scopes, saveScope{fmt.Sprintf("Everything received, filters off (%d lines)", len(v.all)), v.all})
+	}
+	var bad []logs.Line
+	for _, line := range v.all {
+		if line.Crash || (line.Level != logs.NoLevel && line.Level >= logs.Error) {
+			bad = append(bad, line)
+		}
+	}
+	if len(bad) > 0 && len(bad) != len(v.shown) {
+		scopes = append(scopes, saveScope{fmt.Sprintf("Errors and crashes only (%d lines)", len(bad)), bad})
+	}
+	if at := v.at(); !v.follow && at > 0 && at < len(v.shown)-1 {
+		scopes = append(scopes, saveScope{fmt.Sprintf("From the selected line to the newest (%d lines)", len(v.shown)-at), v.shown[at:]})
+	}
+	return scopes
+}
+
 func (m *Model) saveLog(v *logView) tea.Cmd {
+	scopes := saveScopes(v)
+	if len(scopes) == 1 {
+		return m.askSaveName(v, scopes[0].lines)
+	}
+	labels := make([]string, len(scopes))
+	for i, s := range scopes {
+		labels[i] = s.label
+	}
+	m.modal = &modal{
+		kind: modalChoice, title: "Save which lines?", items: labels,
+		onChoose: func(m *Model, index int) tea.Cmd { return m.askSaveName(v, scopes[index].lines) },
+	}
+	return nil
+}
+
+func (m *Model) askSaveName(v *logView, lines []logs.Line) tea.Cmd {
 	name := strings.Map(func(r rune) rune {
 		if r == ' ' || r == '/' {
 			return '-'
@@ -123,8 +165,9 @@ func (m *Model) saveLog(v *logView) tea.Cmd {
 	}, v.spec.Device.Name)
 	suggested := fmt.Sprintf("lazymobile-%s-%s.log", name, m.now().Format("20060102-150405"))
 	m.modal = &modal{
-		kind: modalPrompt, title: "Save the log", value: suggested,
-		body: "Saves the lines that are shown now. A name without a folder goes in the current folder.\nA name ending in .json saves them as JSON, with the same fields as logs --json.",
+		kind: modalPrompt, title: fmt.Sprintf("Save %d lines", len(lines)), value: suggested,
+		body: "A name without a folder goes in the current folder, and a file is never replaced.\n" +
+			"The ending picks the layout: .log text, .json, .jsonl (a line each), .csv for a spreadsheet,\n.md to paste into an issue.",
 		validate: func(value string) string {
 			if value == "" {
 				return "A file name is needed."
@@ -135,36 +178,15 @@ func (m *Model) saveLog(v *logView) tea.Cmd {
 			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(value, "~/") {
 				value = filepath.Join(home, value[2:])
 			}
-			content, err := logFile(value, v.shown)
+			// Logs can hold tokens and personal data, so only the user may read the file.
+			path, err := logs.WriteFile(value, logs.FormatOf(value), lines, logs.Meta{Device: v.spec.Device.Name, App: v.spec.App})
 			if err != nil {
 				m.fail("Could not save the log", err)
 				return nil
 			}
-			// Logs can hold tokens and personal data, so only the user may read the file.
-			if err := os.WriteFile(value, content, 0o600); err != nil {
-				m.fail("Could not save the log", err)
-				return nil
-			}
-			m.setNote(fmt.Sprintf("Saved %d lines to %s", len(v.shown), value), false)
+			m.setNote(fmt.Sprintf("Saved %d lines to %s", len(lines), path), false)
 			return nil
 		},
 	}
 	return nil
-}
-
-// logFile is what to write for the lines: a JSON list when the name ends in .json, and the text of
-// each line otherwise.
-func logFile(name string, lines []logs.Line) ([]byte, error) {
-	if strings.EqualFold(filepath.Ext(name), ".json") {
-		if lines == nil {
-			lines = []logs.Line{}
-		}
-		return json.MarshalIndent(lines, "", "  ")
-	}
-	var b strings.Builder
-	for _, line := range lines {
-		b.WriteString(line.Text)
-		b.WriteByte('\n')
-	}
-	return []byte(b.String()), nil
 }

@@ -1235,7 +1235,7 @@ func TestSaveLog(t *testing.T) {
 		h.press("L")
 	}
 	path := filepath.Join(t.TempDir(), "saved.log")
-	h.press("S")
+	h.press("S", "enter")
 	h.wantScreen("lazymobile-Pixel-9a-")
 	h.press("ctrl+u")
 	h.typeText(path)

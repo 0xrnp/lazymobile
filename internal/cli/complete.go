@@ -82,8 +82,9 @@ var positionals = map[string][]argSpec{
 var flagValues = map[string]argSpec{
 	"--app": appArg, "--out": fileArg, "--save": fileArg, "--payload": fileArg, "--set": {kind: argSet},
 	"--title": {}, "--body": {}, "--type": {}, "--runtime": {}, "--image": {},
-	"--mode":  words("logcat", "system", "console"),
-	"--level": words("verbose", "debug", "info", "warning", "error", "fatal"),
+	"--mode":   words("logcat", "system", "console"),
+	"--level":  words("verbose", "debug", "info", "warning", "error", "fatal"),
+	"--format": words("text", "json", "jsonl", "csv", "md"), "--filter": {},
 	"--since": {}, "--tail": {}, "--duration": {}, "--lines": {}, "--limit": {}, "--port": {}, "--profile": {},
 }
 

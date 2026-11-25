@@ -48,6 +48,12 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- Logs can be exported in the layout you need. `S` in the dashboard asks which lines (what is shown,
+  everything received, errors and crashes only, or from the selected line) and picks the layout from the
+  file name: `.log`, `.json`, `.jsonl`, `.csv` or `.md` for pasting into an issue. `lazymobile logs <device>
+  --out <file>` does the same from the command line, with `--format` and `--filter`, and records until
+  ctrl+c when no `--tail` or `--since` is given. Agents have `export_logs`. A saved file is never replaced,
+  which the dashboard's old save did silently, and only you can read it
 - Agents can work in an Android emulator's app: `ui_tree` reads the screen as text, with where to tap
   each label, text and id, and the screen size. `tap` takes one of those names (or x and y) and refuses,
   naming the candidates, when it matches nothing or several. `type_text`, `swipe` and `press_key` fill

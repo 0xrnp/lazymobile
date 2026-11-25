@@ -55,7 +55,7 @@ Logs:
 | `P` | Filters saved for this app (up to 10 per app and platform). Enter applies one, `x` forgets it, and the last row saves the filter and level the log has now |
 | `p` | Pause or resume (nothing is lost) |
 | `c` | Clear |
-| `S` | Save what is shown to a file. A name ending in `.json` saves a JSON list with the fields of `logs --json` |
+| `S` | Save lines to a new file. When the filters hide lines, or there are errors, it first asks which: what is shown, everything received, errors and crashes only, or from the selected line to the newest. The name's ending picks the layout: `.log` text, `.json`, `.jsonl` (a line each), `.csv` for a spreadsheet, `.md` to paste into an issue. A file is never replaced, and only you can read it |
 | `x` | Stop the stream |
 | `J` | After `M` on an Android app: start the jank count again, so the heading shows the frames drawn from now on |
 | `M` | Show the app's CPU and memory in the log's heading, sampled every 2 seconds: the share of one core it used since the last sample, and its resident memory. Again to hide them. It waits through a restart of the app. A simulator, an emulator or an Android phone; not an iPhone (use Instruments). On Android it also shows the share of janky frames (`jank 12%`) |

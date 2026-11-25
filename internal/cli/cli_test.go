@@ -138,6 +138,9 @@ func TestUsageMistakesExitWith2(t *testing.T) {
 		"mcp with an argument":     {"mcp", "extra"},
 		"install without a path":   {"install", "iPhone 16"},
 		"unknown log level":        {"logs", "iPhone 16 Pro", "--level", "loud"},
+		"format without out":       {"logs", "iPhone 16 Pro", "--format", "csv"},
+		"unknown export format":    {"logs", "iPhone 16 Pro", "--out", "x.log", "--format", "pdf"},
+		"a filter that is a regex": {"logs", "iPhone 16 Pro", "--filter", "/(/"},
 		"dashboard with a command": {"--no-window", "frobnicate"},
 	}
 	for name, args := range tests {
@@ -1261,5 +1264,31 @@ func TestClipboardSetsReadsAndTakesTextFromStandardInput(t *testing.T) {
 		if code := e.run(args...); code != ExitUsage {
 			t.Errorf("%q: code %d, want %d", args, code, ExitUsage)
 		}
+	}
+}
+
+func TestLogsOutSavesTheMatchingLinesToANewFile(t *testing.T) {
+	dir := t.TempDir()
+	body := "#!/bin/sh\nfor i in 1 2 3 4 5; do echo \"2026-11-13 20:56:3$i.411 Df Runner[30348:6e9c9] line$i\"; done\n"
+	if err := os.WriteFile(filepath.Join(dir, "xcrun"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	e := newEnv(t)
+	path := filepath.Join(t.TempDir(), "saved.jsonl")
+	if code := e.run("logs", "iPhone 16 Pro", "--tail", "3", "--filter", "-line4", "--out", path); code != ExitOK {
+		t.Fatalf("code %d, stderr %q", code, e.errs.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(data), "\n") != 3 || strings.Contains(string(data), "line4") || !strings.Contains(string(data), "line5") {
+		t.Errorf("file %v %q", err, data)
+	}
+	if e.out.Len() != 0 || !strings.Contains(e.errs.String(), "Saved 3 lines to "+path) {
+		t.Errorf("stdout %q, stderr %q", e.out.String(), e.errs.String())
+	}
+	// A second run does not replace it.
+	e2 := newEnv(t)
+	if code := e2.run("logs", "iPhone 16 Pro", "--tail", "3", "--out", path); code != ExitFailure || !strings.Contains(e2.errs.String(), "already exists") {
+		t.Errorf("code %d, stderr %q", code, e2.errs.String())
 	}
 }

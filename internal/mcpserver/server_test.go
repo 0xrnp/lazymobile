@@ -377,3 +377,39 @@ func TestTheScreenToolsRefuseASimulatorAndBadArguments(t *testing.T) {
 		t.Errorf("calls %v", fake.Calls())
 	}
 }
+
+func TestExportLogsSavesANewFileInTheFormatAsked(t *testing.T) {
+	fakeXcrun(t,
+		"2026-11-13 20:56:31.411 Df Runner[30348:6e9c9] starting",
+		"2026-11-13 20:56:32.411 E Runner[30348:6e9c9] network failed",
+		"2026-11-13 20:56:33.411 E Runner[30348:6e9c9] disk full",
+	)
+	session, _, _ := connect(t)
+	path := filepath.Join(t.TempDir(), "errors.csv")
+	res := call(t, session, "export_logs", map[string]any{"device": "iPhone 16 Pro", "since": "1m", "level": "error", "path": path})
+	if res.IsError || !strings.Contains(textOf(res), "Saved 2 lines as csv to "+path) {
+		t.Fatalf("got %q", textOf(res))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), "network failed") || strings.Contains(string(data), "starting") {
+		t.Errorf("file %v %q", err, data)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", info.Mode().Perm())
+	}
+	// A file that is there is kept, and the format must be one that exists.
+	for name, args := range map[string]map[string]any{
+		"an existing file": {"device": "iPhone 16 Pro", "since": "1m", "path": path},
+		"a format":         {"device": "iPhone 16 Pro", "since": "1m", "format": "pdf"},
+		"a relative path":  {"device": "iPhone 16 Pro", "since": "1m", "path": "log.txt"},
+	} {
+		if res := call(t, session, "export_logs", args); !res.IsError {
+			t.Errorf("%s was accepted: %q", name, textOf(res))
+		}
+	}
+	// With no path, a private temporary file is made, in the format named.
+	res = call(t, session, "export_logs", map[string]any{"device": "iPhone 16 Pro", "since": "1m", "format": "md"})
+	if res.IsError || !strings.Contains(textOf(res), "log.md") {
+		t.Errorf("got %q", textOf(res))
+	}
+}

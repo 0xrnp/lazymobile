@@ -45,6 +45,7 @@ Then look at it:
 ```sh
 lazymobile screenshot <id> --out "$(mktemp -d)/screen.png" --json   # read the image at "path"
 lazymobile logs <id> --app <app-id> --since 2m --tail 200 --json
+lazymobile logs <id> --app <app-id> --since 5m --out /full/path/log.csv   # hand the user a file: .log .json .jsonl .csv .md. In MCP, export_logs
 ```
 
 `screenshot` never replaces a file, and without `--out` it saves into the current folder, so give

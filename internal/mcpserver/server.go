@@ -143,6 +143,9 @@ func (s *Server) New() *mcp.Server {
 		mcp.AddTool(server, &mcp.Tool{Name: "run_stop", Annotations: notDestructive,
 			Description: "End a run, as ctrl+c would."}, s.runStop)
 	}
+	mcp.AddTool(server, &mcp.Tool{Name: "export_logs", Annotations: notDestructive,
+		Description: "Save a device's log to a new file for the user, in the layout they ask for: text, json, jsonl, csv, or md to paste into an issue. " +
+			"Takes the same filters as read_logs. Use read_logs to look at lines yourself, and this to hand them over. The file is only readable by the user, and an existing file is never replaced."}, s.exportLogs)
 	mcp.AddTool(server, &mcp.Tool{Name: "ui_tree", Annotations: readOnly,
 		Description: "Read what is on an Android emulator's screen as text: each label, text, id and button with its centre x,y in device pixels, and the screen size. " +
 			"Cheaper and more exact than a screenshot for finding what to tap. A Flutter or game screen may list little: use screenshot then. An iOS simulator has no such command from Apple."}, s.uiTree)
@@ -381,44 +384,37 @@ type logArgs struct {
 	CrashesOnly bool   `json:"crashes_only,omitempty" jsonschema:"only the lines of a crash"`
 }
 
-func (s *Server) readLogs(ctx context.Context, _ *mcp.CallToolRequest, in logArgs) (*mcp.CallToolResult, any, error) {
-	limit := in.MaxLines
-	switch {
-	case limit < 0:
-		return nil, nil, apperr.New(apperr.Usage, "max_lines cannot be negative")
-	case limit == 0:
-		limit = defaultLogLines
-	case limit > maxLogLines:
-		limit = maxLogLines
-	}
+// collectLogs reads the log that in asks for and keeps the last limit matching lines. matched is how
+// many matched in all.
+func (s *Server) collectLogs(ctx context.Context, in logArgs, limit int) (device.Device, []logs.Line, int, error) {
 	var since time.Duration
 	if in.Since != "" {
 		var err error
 		if since, err = time.ParseDuration(in.Since); err != nil || since < 0 {
-			return nil, nil, apperr.New(apperr.Usage, "since must be a duration such as 30s or 5m, not %q", in.Since)
+			return device.Device{}, nil, 0, apperr.New(apperr.Usage, "since must be a duration such as 30s or 5m, not %q", in.Since)
 		}
 	}
 	minimum := logs.NoLevel
 	if in.Level != "" {
 		var known bool
 		if minimum, known = logs.ParseLevel(in.Level); !known {
-			return nil, nil, apperr.New(apperr.Usage, "unknown level %q (verbose, debug, info, warning, error, fatal)", in.Level)
+			return device.Device{}, nil, 0, apperr.New(apperr.Usage, "unknown level %q (verbose, debug, info, warning, error, fatal)", in.Level)
 		}
 	}
 	query, err := logs.ParseQuery(in.Text)
 	if err != nil {
-		return nil, nil, apperr.New(apperr.Usage, "%s", err.Error())
+		return device.Device{}, nil, 0, apperr.New(apperr.Usage, "%s", err.Error())
 	}
 	d, err := s.Manager.Find(ctx, in.Device)
 	if err != nil {
-		return nil, nil, err
+		return device.Device{}, nil, 0, err
 	}
 	mode := logs.System
 	if d.Platform == device.Android {
 		mode = logs.Logcat
 	}
 
-	var last []string
+	var last []logs.Line
 	matched := 0
 	session := logs.Start(ctx, s.Manager.LogDeps(), logs.Spec{Device: d, Mode: mode, App: in.App, Dump: true, Since: since}, logs.Handlers{
 		Lines: func(lines []logs.Line) {
@@ -434,7 +430,7 @@ func (s *Server) readLogs(ctx context.Context, _ *mcp.CallToolRequest, in logArg
 					continue
 				}
 				matched++
-				last = append(last, line.Text)
+				last = append(last, line)
 				if len(last) > limit {
 					last = last[1:]
 				}
@@ -443,16 +439,93 @@ func (s *Server) readLogs(ctx context.Context, _ *mcp.CallToolRequest, in logArg
 		Status: func(string) {},
 	})
 	if err := session.Wait(); err != nil {
+		return device.Device{}, nil, 0, err
+	}
+	return d, last, matched, nil
+}
+
+func (s *Server) readLogs(ctx context.Context, _ *mcp.CallToolRequest, in logArgs) (*mcp.CallToolResult, any, error) {
+	limit := in.MaxLines
+	switch {
+	case limit < 0:
+		return nil, nil, apperr.New(apperr.Usage, "max_lines cannot be negative")
+	case limit == 0:
+		limit = defaultLogLines
+	case limit > maxLogLines:
+		limit = maxLogLines
+	}
+	_, last, matched, err := s.collectLogs(ctx, in, limit)
+	if err != nil {
 		return nil, nil, err
 	}
 	if matched == 0 {
 		return text("No matching lines.")
 	}
-	out := strings.Join(last, "\n")
+	texts := make([]string, len(last))
+	for i, line := range last {
+		texts[i] = line.Text
+	}
+	out := strings.Join(texts, "\n")
 	if matched > len(last) {
 		out = fmt.Sprintf("(the last %d of %d matching lines)\n%s", len(last), matched, out)
 	}
 	return text(out)
+}
+
+// maxExportLines is the most lines export_logs saves.
+const maxExportLines = 100000
+
+type exportLogsArgs struct {
+	logArgs
+	Format string `json:"format,omitempty" jsonschema:"text, json, jsonl, csv or md (markdown, to paste into an issue). Default: the ending of path, else text"`
+	Path   string `json:"path,omitempty" jsonschema:"a full path for a new file, which is never replaced. Default: a new file in a private temporary folder"`
+}
+
+func (s *Server) exportLogs(ctx context.Context, _ *mcp.CallToolRequest, in exportLogsArgs) (*mcp.CallToolResult, any, error) {
+	limit := in.MaxLines
+	switch {
+	case limit < 0:
+		return nil, nil, apperr.New(apperr.Usage, "max_lines cannot be negative")
+	case limit == 0 || limit > maxExportLines:
+		limit = maxExportLines
+	}
+	format := logs.Text
+	if in.Path != "" {
+		format = logs.FormatOf(in.Path)
+	}
+	if in.Format != "" {
+		var known bool
+		if format, known = logs.ParseFormat(in.Format); !known {
+			return nil, nil, apperr.New(apperr.Usage, "unknown format %q (text, json, jsonl, csv, md)", in.Format)
+		}
+	}
+	if in.Path != "" && !filepath.IsAbs(in.Path) {
+		return nil, nil, apperr.New(apperr.Usage, "path must be a full path")
+	}
+	d, lines, matched, err := s.collectLogs(ctx, in.logArgs, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	if matched == 0 {
+		return text("No matching lines, so nothing was saved.")
+	}
+	path := in.Path
+	if path == "" {
+		dir, err := os.MkdirTemp("", "lazymobile-logs-")
+		if err != nil {
+			return nil, nil, err
+		}
+		path = filepath.Join(dir, "log"+format.Extension())
+	}
+	saved, err := logs.WriteFile(path, format, lines, logs.Meta{Device: d.Name, App: in.App})
+	if err != nil {
+		return nil, nil, err
+	}
+	note := ""
+	if matched > len(lines) {
+		note = fmt.Sprintf(" (the last %d of %d matching lines)", len(lines), matched)
+	}
+	return text(fmt.Sprintf("Saved %d lines as %s to %s%s", len(lines), format, saved, note))
 }
 
 type appearanceArgs struct {

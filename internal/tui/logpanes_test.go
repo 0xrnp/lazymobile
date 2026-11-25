@@ -713,7 +713,10 @@ func TestSaveAsJSONWritesTheShownLinesWithTheLogsJSONFields(t *testing.T) {
 	h.press("enter")
 
 	path := filepath.Join(t.TempDir(), "saved.json")
-	h.press("S", "ctrl+u")
+	// The filter hides a line, so which lines to save is asked first: what is shown is the first.
+	h.press("S")
+	h.wantScreen("Save which lines?", "Everything received, filters off (3 lines)")
+	h.press("enter", "ctrl+u")
 	h.typeText(path)
 	h.press("enter")
 	content, err := os.ReadFile(path)
@@ -729,16 +732,6 @@ func TestSaveAsJSONWritesTheShownLinesWithTheLogsJSONFields(t *testing.T) {
 		t.Errorf("saved %+v, want %+v", got, want)
 	}
 	h.wantScreen("Saved 2 lines")
-}
-
-func TestSavingNoLinesAsJSONWritesAnEmptyList(t *testing.T) {
-	content, err := logFile("x.JSON", nil)
-	if err != nil || string(content) != "[]" {
-		t.Errorf("got %q, %v", content, err)
-	}
-	if text, _ := logFile("x.log", []logs.Line{{Text: "a"}, {Text: "b"}}); string(text) != "a\nb\n" {
-		t.Errorf("text file = %q", text)
-	}
 }
 
 func TestFilterPresetsAreSavedAppliedAndForgottenPerApp(t *testing.T) {
@@ -782,4 +775,49 @@ func TestFilterPresetsAreSavedAppliedAndForgottenPerApp(t *testing.T) {
 	if got := h.m.memory.Store.Load().Presets; len(got) != 0 {
 		t.Errorf("presets after forgetting = %v", got)
 	}
+}
+
+func TestSavingOffersTheErrorsAndTheLinesFromTheSelectedOne(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.emit(
+		logs.Line{Text: "I one", Level: logs.Info}, logs.Line{Text: "E two", Level: logs.Error},
+		logs.Line{Text: "I three", Level: logs.Info}, logs.Line{Text: "I four", Level: logs.Info},
+	)
+	dir := t.TempDir()
+	save := func(choice int, name string) string {
+		h.press("S")
+		for range choice {
+			h.press("down")
+		}
+		h.press("enter", "ctrl+u")
+		h.typeText(filepath.Join(dir, name))
+		h.press("enter")
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	// All of it is shown and nothing else is selected, so the first choice is errors and crashes.
+	h.press("S")
+	h.wantScreen("Errors and crashes only (1 lines)")
+	h.wantNoScreen("Everything received")
+	h.press("esc")
+	if got := save(1, "errors.csv"); !strings.Contains(got, "1,error,,false,E two") || strings.Contains(got, "one") {
+		t.Errorf("errors saved %q", got)
+	}
+	// Selecting the second line (leaving follow) offers the lines from there.
+	h.press("g", "j")
+	h.press("S")
+	h.wantScreen("From the selected line to the newest (3 lines)")
+	h.press("esc")
+	if got := save(2, "from.md"); !strings.Contains(got, "E two") || !strings.Contains(got, "I four") || strings.Contains(got, "I one") || !strings.Contains(got, "### Log of com.example.app on Pixel 9a") {
+		t.Errorf("from saved %q", got)
+	}
+	// Saving over a file that is there is refused, and the file is kept.
+	h.press("S", "enter", "ctrl+u")
+	h.typeText(filepath.Join(dir, "from.md"))
+	h.press("enter")
+	h.wantScreen("already exists")
 }
