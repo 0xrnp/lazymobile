@@ -89,7 +89,9 @@ func trim(lines []logs.Line) ([]logs.Line, int) {
 	if extra <= 0 {
 		return lines, 0
 	}
-	return append(lines[:0:0], lines[extra:]...), extra
+	// Reslicing costs nothing. The dropped lines are freed when append next outgrows the array, which
+	// a log that keeps filling does every few thousand lines.
+	return lines[extra:], extra
 }
 
 // add takes new lines. While paused they are kept but not shown, so nothing is lost.

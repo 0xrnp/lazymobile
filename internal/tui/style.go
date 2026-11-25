@@ -87,6 +87,17 @@ func highlightSpans(text string, spans [][2]int, base lipgloss.Style) string {
 // clean makes device output safe to draw. Logs come from apps and devices, so they can hold
 // tabs and terminal escape sequences, which must never reach the user's terminal as commands.
 func clean(text string) string {
+	// Most lines have nothing to take out, and are returned as they are.
+	plain := true
+	for i := 0; i < len(text); i++ {
+		if c := text[i]; c < 0x20 || c == 0x7f || c == 0xc2 {
+			plain = false
+			break
+		}
+	}
+	if plain && utf8.ValidString(text) {
+		return text
+	}
 	text = ansi.Strip(text)
 	var b strings.Builder
 	for _, r := range text {
