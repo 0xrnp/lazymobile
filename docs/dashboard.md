@@ -142,3 +142,8 @@ starting it on its own would launch the app again. The lines themselves are not 
 Everything remembered, including the recent app ids and the saved filters, is in
 `~/.local/state/lazymobile/state.json` (or `$XDG_STATE_HOME/lazymobile/state.json`), readable
 only by you. Delete the file to forget it all.
+
+## Colours
+
+Set `NO_COLOR=1` and the dashboard draws no colours. Bold, dim and reverse video stay, so the
+selection and the marked crash lines are still visible.

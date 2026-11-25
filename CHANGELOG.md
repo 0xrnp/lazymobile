@@ -48,6 +48,8 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- `NO_COLOR=1` turns the dashboard's colours off (bold, dim and reverse stay). It already did; it is
+  now written down in `docs/dashboard.md`
 - `lazymobile network <device> offline|online|gsm|edge|3g|lte|full` and `set_network` for agents:
   an Android emulator with no connection (airplane mode), or held to a slow speed and delay, to
   see how an app copes. `online` puts it back. Emulators only: a phone is left alone, and a
