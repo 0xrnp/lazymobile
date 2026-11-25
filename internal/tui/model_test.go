@@ -203,6 +203,12 @@ func (f *fakeBackend) AppUsage(_ context.Context, d device.Device, id string, pi
 	f.usageSamples++
 	return device.Usage{PID: 41, CPU: time.Duration(f.usageSamples) * time.Second, Memory: 180 << 20}, nil
 }
+func (f *fakeBackend) AppJank(_ context.Context, d device.Device, id string, reset bool) (device.Jank, error) {
+	if err := f.record("jank %s %s reset=%v", d.ID, id, reset); err != nil {
+		return device.Jank{}, err
+	}
+	return device.Jank{Frames: 40, Janky: 10, Percent: 25, P50: 9}, nil
+}
 func (f *fakeBackend) Dev(_ context.Context, d device.Device, action string, port int) error {
 	return f.record("dev %s %s %d", d.ID, action, port)
 }
@@ -2461,6 +2467,28 @@ func TestMShowsTheAppsCPUAndMemoryInTheLogHeading(t *testing.T) {
 	h.wantNoScreen("CPU")
 	h.tick(2 * time.Second)
 	h.wantCalls("usage", 2)
+}
+
+func TestFramesShowWithCPUAndMemoryOnAndroidAndJResetsThem(t *testing.T) {
+	h := start(t, pixel)
+	h.openLogs(pixel, "com.example.app")
+	h.press("J")
+	h.wantScreen("Press M first")
+	h.press("M")
+	h.wantScreen("CPU … · 180 MB · jank 25%")
+	h.press("J")
+	h.wantScreen("The frame count starts again")
+	h.wantScreen("jank –")
+	h.tick(2 * time.Second)
+	h.wantCalls("jank Pixel_9a com.example.app reset=true", 1)
+	h.wantScreen("jank –")
+	h.tick(2 * time.Second)
+	h.wantScreen("jank 25%")
+	// A failed frame read hides the frames and leaves CPU and memory.
+	h.backend.fail = map[string]error{"jank": apperr.New(apperr.CommandFailed, "gfxinfo failed")}
+	h.tick(2 * time.Second)
+	h.wantNoScreen("jank ")
+	h.wantScreen("180 MB")
 }
 
 func TestCPUAndMemoryNeedOneAppAndStopOnAFailure(t *testing.T) {

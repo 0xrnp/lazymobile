@@ -54,7 +54,8 @@ Logs:
 | `c` | Clear |
 | `S` | Save what is shown to a file. A name ending in `.json` saves a JSON list with the fields of `logs --json` |
 | `x` | Stop the stream |
-| `M` | Show the app's CPU and memory in the log's heading, sampled every 2 seconds: the share of one core it used since the last sample, and its resident memory. Again to hide them. It waits through a restart of the app. A simulator, an emulator or an Android phone; not an iPhone (use Instruments) |
+| `J` | After `M` on an Android app: start the jank count again, so the heading shows the frames drawn from now on |
+| `M` | Show the app's CPU and memory in the log's heading, sampled every 2 seconds: the share of one core it used since the last sample, and its resident memory. Again to hide them. It waits through a restart of the app. A simulator, an emulator or an Android phone; not an iPhone (use Instruments). On Android it also shows the share of janky frames (`jank 12%`) |
 | `X` | Close this log. The next one takes its place |
 | `r` | Restart the stream |
 | `v` | How the logs sit: side by side (the default), stacked, or one at a time |

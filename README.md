@@ -135,7 +135,8 @@ runs the one you pick. The keys you will use most:
 | `ctrl+p` | Quick menu: screenshot or recording to the clipboard, the log for an AI, bug report |
 | `/` `L` | Filter a log, minimum level |
 | `e` `E` | Next or previous error in a log |
-| `M` | The app's CPU and memory in the log's heading |
+| `M` | The app's CPU, memory and, on Android, janky frames in the log's heading |
+| `J` | Start the jank count again |
 | `tab` | Next pane |
 | `q` | Quit. Simulators and emulators keep running |
 

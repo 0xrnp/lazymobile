@@ -26,6 +26,11 @@ type appUsage struct {
 	// cpu is the share of one core used between the last two samples, in percent, or -1 before
 	// there are two.
 	cpu float64
+	// jank is the frame stats of an Android app, which are read with each sample. nil until the
+	// first one, and after a failure, which only hides them.
+	jank *device.Jank
+	// resetJank asks the next sample to start the frame count again.
+	resetJank bool
 }
 
 // label is what the heading shows.
@@ -40,7 +45,29 @@ func (u appUsage) label() string {
 	if u.cpu >= 0 {
 		cpu = fmt.Sprintf("CPU %.0f%%", u.cpu)
 	}
-	return fmt.Sprintf("%s · %d MB", cpu, (u.last.Memory+512*1024)/(1024*1024))
+	label := fmt.Sprintf("%s · %d MB", cpu, (u.last.Memory+512*1024)/(1024*1024))
+	switch {
+	case u.jank == nil:
+	case u.jank.Frames == 0:
+		label += " · jank –"
+	default:
+		label += fmt.Sprintf(" · jank %.0f%%", u.jank.Percent)
+	}
+	return label
+}
+
+// resetFrames starts the frame count of log pane v again, while its CPU and memory are shown.
+func (m *Model) resetFrames(v *logView) {
+	switch {
+	case !v.usage.on:
+		m.setNote("Press M first to see the app's CPU, memory and frames", true)
+	case v.spec.Device.Platform != device.Android:
+		m.setNote("Frame stats are only for Android", true)
+	default:
+		v.usage.resetJank = true
+		v.usage.jank = &device.Jank{}
+		m.setNote("The frame count starts again", false)
+	}
 }
 
 // toggleUsage shows or hides the CPU and memory of the app of log pane v.
@@ -72,8 +99,18 @@ func (m *Model) sampleUsages() tea.Cmd {
 func (m *Model) sampleUsage(v *logView) tea.Cmd {
 	v.usage.busy = true
 	ctx, backend, id, d, app, pid, round := m.ctx, m.backend, v.id, v.spec.Device, v.spec.App, v.usage.last.PID, v.usage.round
+	reset := v.usage.resetJank
+	v.usage.resetJank = false
 	return func() tea.Msg {
 		usage, err := backend.AppUsage(ctx, d, app, pid)
+		var jank *device.Jank
+		if err == nil && d.Platform == device.Android {
+			if j, jerr := backend.AppJank(ctx, d, app, reset); jerr == nil && !reset {
+				jank = &j
+			} else if jerr == nil {
+				jank = &device.Jank{}
+			}
+		}
 		return applyMsg(func(m *Model) tea.Cmd {
 			v := m.logByID(id)
 			if v == nil || !v.usage.on || v.usage.round != round {
@@ -95,6 +132,7 @@ func (m *Model) sampleUsage(v *logView) tea.Cmd {
 			if wall := now.Sub(v.usage.at); usage.PID == v.usage.last.PID && !v.usage.at.IsZero() && wall > 0 {
 				v.usage.cpu = max(float64(usage.CPU-v.usage.last.CPU)/float64(wall)*100, 0)
 			}
+			v.usage.jank = jank
 			v.usage.last, v.usage.at = usage, now
 			return nil
 		})

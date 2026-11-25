@@ -204,6 +204,7 @@ var keyTable = []keyAction{
 	{id: "log_stop", ctx: ctxLogs, keys: []string{"x"}, show: "x", desc: "Stop the stream", footer: say("stop"), when: needsLog},
 	{id: "log_restart", ctx: ctxLogs, keys: []string{"r"}, show: "r", desc: "Restart the stream, or launch a waiting one", footer: say("restart"), when: needsLog},
 	{id: "log_usage", ctx: ctxLogs, keys: []string{"M"}, show: "M", desc: "Show the app's CPU and memory in the heading, or hide them", when: needsLog},
+	{id: "log_jank", ctx: ctxLogs, keys: []string{"J"}, show: "J", desc: "Restart the jank count (Android, after M)", when: needsLog},
 	{id: "log_close", ctx: ctxLogs, keys: []string{"X"}, show: "X", desc: "Close this log", footer: say("close"), when: needsLog},
 
 	// Builds.

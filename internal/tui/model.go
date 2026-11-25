@@ -52,6 +52,7 @@ type Backend interface {
 	OpenLink(ctx context.Context, d device.Device, link string) error
 	SendPush(ctx context.Context, d device.Device, id string, payload []byte) error
 	AppUsage(ctx context.Context, d device.Device, id string, pid int) (device.Usage, error)
+	AppJank(ctx context.Context, d device.Device, id string, reset bool) (device.Jank, error)
 	Dev(ctx context.Context, d device.Device, action string, port int) error
 	Crash(ctx context.Context, d device.Device, id string) (device.CrashReport, error)
 	Screenshot(ctx context.Context, d device.Device, path string) (string, error)
@@ -1089,6 +1090,8 @@ func (m *Model) logKey(key string) tea.Cmd {
 		}
 	case "M":
 		return m.toggleUsage(v)
+	case "J":
+		m.resetFrames(v)
 	case "X":
 		m.closeLog(slot)
 	case "r":

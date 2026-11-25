@@ -51,7 +51,8 @@ them, and the dashboard shows what is new once after an upgrade.
 - `lazymobile jank <device> <app-id>` and `app_jank` for agents: how many frames an Android app
   drew late and how long frames took (50th to 99th percentile), from `dumpsys gfxinfo`. `--reset`
   starts the count again, so you can read it, use the app, and read it again. Emulators and
-  phones; iOS is refused and points to Instruments
+  phones; iOS is refused and points to Instruments. In the dashboard, `M` adds `jank 12%` to the
+  heading of an Android app's log, and `J` starts the count again
 - `lazymobile push <device> <app-id>`, "Send a test push notification" in the app menu, and
   `send_push` for agents: a notification with a title and text, or your own payload file, to an
   app on an iOS simulator (#34)
