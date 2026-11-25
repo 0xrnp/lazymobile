@@ -719,12 +719,13 @@ func (m *Manager) OpenURL(ctx context.Context, url string) error {
 }
 
 // InstalledApps lists the apps a user installed on a running simulator, emulator, iPhone or
-// Android phone.
-func (m *Manager) InstalledApps(ctx context.Context, d device.Device) ([]device.App, error) {
+// Android phone. also are app ids asked about by name, such as the ones used before: on Android
+// the ones that are the system's own apps are listed too, so that they are not called missing.
+func (m *Manager) InstalledApps(ctx context.Context, d device.Device, also ...string) ([]device.App, error) {
 	if d.Platform == device.IOS {
 		return m.IOS.InstalledApps(ctx, d)
 	}
-	return m.Android.InstalledApps(ctx, d)
+	return m.Android.InstalledApps(ctx, d, also...)
 }
 
 // AppInfo describes one app installed on a device, with its version and build when the platform

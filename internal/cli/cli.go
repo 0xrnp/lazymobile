@@ -1144,7 +1144,7 @@ func (a *App) apps(ctx context.Context, args []string) error {
 	case !d.Ready():
 		fmt.Fprintf(a.Stderr, "%s is not running, so only app ids used before are listed.\n", d.Name)
 	default:
-		if installed, err = a.Manager.InstalledApps(ctx, d); err != nil {
+		if installed, err = a.Manager.InstalledApps(ctx, d, a.State.Load().Apps[d.Platform]...); err != nil {
 			fmt.Fprintf(a.Stderr, "warning: the installed apps could not be listed: %s\n", firstLine(err.Error()))
 		}
 	}

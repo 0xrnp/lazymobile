@@ -30,7 +30,7 @@ func (m *Model) pickApp(d device.Device, mode logs.ModeInfo, slot int) tea.Cmd {
 		defer cancel()
 		// Without the installed apps, the ones used before are still offered, with no note on
 		// whether each is on the device.
-		installed, err := backend.InstalledApps(ctx, d)
+		installed, err := backend.InstalledApps(ctx, d, recent...)
 		return applyMsg(func(m *Model) tea.Cmd {
 			if m.note == "Looking for the apps on "+d.Name+"…" {
 				m.setNote("", false)
@@ -123,7 +123,7 @@ func (m *Model) pickAppAction(d device.Device) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		installed, err := backend.InstalledApps(ctx, d)
+		installed, err := backend.InstalledApps(ctx, d, recent...)
 		return applyMsg(func(m *Model) tea.Cmd {
 			if m.note == note {
 				m.setNote("", false)

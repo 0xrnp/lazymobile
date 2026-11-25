@@ -48,6 +48,8 @@ them, and the dashboard shows what is new once after an upgrade.
   Gradle's `app/build/outputs/apk`, and starts it
 - `M` in a log shows the app's CPU and memory in the heading, every 2 seconds, on a simulator,
   an emulator or an Android phone (#40)
+- On Android, the app picker and `lazymobile apps` no longer call Android's own apps (Settings, Clock)
+  "not in the installed list" when you have used them before. An app that is on neither list still is
 - `lazymobile media <device> <file>...` and `add_media` for agents (`A` in the dashboard) put photos and
   videos into a simulator's or an emulator's gallery, so an app that picks a photo has one to pick. A
   simulator also takes contacts (`.vcf`). On an emulator the file is copied into Pictures or Movies

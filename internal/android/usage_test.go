@@ -146,3 +146,29 @@ func TestSetNetworkRefusesBeforeAskingTheDeviceAndReportsAConsoleKO(t *testing.T
 		t.Errorf("KO: %v", err)
 	}
 }
+
+func TestInstalledAppsAlsoListsTheSystemAppsItIsAskedAbout(t *testing.T) {
+	fake := runtest.Table(map[string]run.Result{
+		"pm list packages -3": runtest.Out("package:com.example.app\n"),
+		"pm list packages -s": runtest.Out("package:com.android.settings\npackage:com.google.android.deskclock\n"),
+	})
+	c := New(fake, sdk(t, "adb"))
+	apps, err := c.InstalledApps(context.Background(), runningEmulator, "com.android.settings", "com.example.app", "com.nope.app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, a := range apps {
+		ids = append(ids, a.ID)
+	}
+	// Settings is asked about and the system's own, so it is listed; deskclock is not asked about;
+	// an app that is on neither list stays missing; the user's app is listed once.
+	if got := strings.Join(ids, " "); got != "com.android.settings com.example.app" {
+		t.Errorf("listed %q", got)
+	}
+	// With nothing asked about, the system's packages are not even listed.
+	none := runtest.Table(map[string]run.Result{"pm list packages -3": runtest.Out("package:com.example.app\n")})
+	if _, err := New(none, sdk(t, "adb")).InstalledApps(context.Background(), runningEmulator); err != nil || none.Called("packages -s") {
+		t.Errorf("an unasked system list: %v, calls %q", err, none.Calls())
+	}
+}

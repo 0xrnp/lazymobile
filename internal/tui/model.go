@@ -67,7 +67,7 @@ type Backend interface {
 	DeleteUnavailable(ctx context.Context, confirmed []string) ([]ios.Unavailable, error)
 	OpenURL(ctx context.Context, url string) error
 	StartLogs(ctx context.Context, spec logs.Spec, h logs.Handlers) mobile.LogSession
-	InstalledApps(ctx context.Context, d device.Device) ([]device.App, error)
+	InstalledApps(ctx context.Context, d device.Device, also ...string) ([]device.App, error)
 	AppInfo(ctx context.Context, d device.Device, id string) (device.App, error)
 }
 

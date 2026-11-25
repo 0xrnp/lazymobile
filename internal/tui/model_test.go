@@ -266,7 +266,7 @@ func (f *fakeBackend) Report(_ context.Context, d device.Device, id string, opts
 	}
 	return f.reported, nil
 }
-func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device) ([]device.App, error) {
+func (f *fakeBackend) InstalledApps(_ context.Context, d device.Device, _ ...string) ([]device.App, error) {
 	if err := f.record("apps %s", d.ID); err != nil {
 		return nil, err
 	}
